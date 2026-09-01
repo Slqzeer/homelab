@@ -15,6 +15,7 @@
 
 set -euo pipefail
 
+# MUST equal targetRevision in environments/homelab/apps/argocd.yaml
 CHART_VERSION="10.5.0"
 NAMESPACE="argocd"
 RELEASE="argocd"
