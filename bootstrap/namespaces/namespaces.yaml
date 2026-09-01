@@ -1,0 +1,11 @@
+# Namespaces for components arriving in plan phases 15-16.
+# Add a namespace here when the component that needs it is planned, not before.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cert-manager
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vault
