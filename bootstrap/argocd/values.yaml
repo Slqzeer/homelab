@@ -39,6 +39,21 @@ repoServer:
       memory: 128Mi
     limits:
       memory: 512Mi
+  # This node is a workstation, homelab and game host simultaneously, so
+  # health endpoints can be slow to answer under load. The upstream probe
+  # defaults (timeoutSeconds 1, failureThreshold 3) kill repo-server during
+  # ordinary memory pressure even though the process is healthy. These
+  # values tolerate a loaded host without masking a genuinely dead pod.
+  livenessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 30
+    timeoutSeconds: 15
+    failureThreshold: 6
+  readinessProbe:
+    initialDelaySeconds: 15
+    periodSeconds: 20
+    timeoutSeconds: 15
+    failureThreshold: 6
 
 applicationSet:
   resources:
