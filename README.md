@@ -163,13 +163,20 @@ before it is fixed, reinstates the same breakage:
 
 ## First install / rebuild
 
-1. Create the `repo-homelab` deploy-key Secret in the `argocd` namespace.
+1. Run `./bootstrap/argocd/bootstrap.sh`. This creates the `argocd`
+   namespace and installs Argo CD from the pinned chart. It needs no
+   repository credential — it pulls the chart over HTTPS.
+2. Create the `repo-homelab` deploy-key Secret in the `argocd` namespace.
    See `docs/superpowers/plans/2026-09-01-k3s-argocd-bootstrap.md`, Task 5,
    for regenerating the key and the exact commands. This Secret exists only
    in the cluster; it is not reproducible from anything in this repository.
-2. Run `./bootstrap/argocd/bootstrap.sh`.
 3. `kubectl apply -f environments/homelab/root.yaml` — the one and only
    manual apply.
+
+The order matters: step 2 must follow step 1, because the `argocd`
+namespace does not exist until `bootstrap.sh` creates it. The credential
+is needed only before step 3, which is the first thing that clones this
+repository.
 
 ## Documentation
 
