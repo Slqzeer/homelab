@@ -44,6 +44,11 @@ repoServer:
   # defaults (timeoutSeconds 1, failureThreshold 3) kill repo-server during
   # ordinary memory pressure even though the process is healthy. These
   # values tolerate a loaded host without masking a genuinely dead pod.
+  # Invariant: readiness must trip before liveness. failureThreshold and
+  # timeoutSeconds are equal on both probes below, so the only margin comes
+  # from periodSeconds (20 vs 30) -- change both probes together, or a
+  # "faster" liveness periodSeconds can pull liveness ahead of readiness and
+  # the pod gets killed instead of just taken out of rotation.
   livenessProbe:
     initialDelaySeconds: 30
     periodSeconds: 30

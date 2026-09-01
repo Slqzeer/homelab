@@ -1,5 +1,9 @@
-# Namespaces for components arriving in plan phases 15-16.
+# Namespaces for cert-manager and Vault.
 # Add a namespace here when the component that needs it is planned, not before.
+#
+# The `namespaces` Application has prune: true. Removing an entry from this
+# file DELETES the Namespace and cascades to every resource inside it,
+# including PVCs, once Vault lands. Retire the component first.
 apiVersion: v1
 kind: Namespace
 metadata:
