@@ -1,0 +1,42 @@
+# Argo CD manages its own release.
+#
+# Chart version and values file are identical to what
+# bootstrap/argocd/bootstrap.sh installed, so adoption changes no rendered
+# manifest -- it only transfers ownership.
+#
+# Upgrades: edit targetRevision below, and the matching CHART_VERSION in
+# bootstrap/argocd/bootstrap.sh, then commit. The two must never diverge, or
+# re-running the recovery script would downgrade a self-managed upgrade.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  project: default
+  sources:
+    - repoURL: https://argoproj.github.io/argo-helm
+      chart: argo-cd
+      targetRevision: 10.5.0
+      helm:
+        # MUST match the Helm release name from bootstrap.sh, or Argo CD
+        # renders differently-named resources and duplicates the install.
+        releaseName: argocd
+        valueFiles:
+          - $values/bootstrap/argocd/values.yaml
+    - repoURL: git@github.com:Slqzeer/homelab.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # Argo CD's own CRDs exceed the last-applied-configuration annotation
+      # size limit. Without this, sync fails on CRD apply.
+      - ServerSideApply=true
