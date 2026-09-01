@@ -181,5 +181,7 @@ repository.
 ## Documentation
 
 - `docs/workstation-plan.md` — overall roadmap
+- `docs/troubleshooting.md` — faults hit on this cluster and how they were
+  diagnosed. Read entry 1 before debugging any pod that fails to start.
 - `docs/superpowers/specs/` — design documents
 - `docs/superpowers/plans/` — implementation plans
