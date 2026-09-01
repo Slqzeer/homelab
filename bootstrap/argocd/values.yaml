@@ -1,0 +1,57 @@
+# Single source of truth for Argo CD configuration.
+# Read by bootstrap/argocd/bootstrap.sh AND by
+# environments/homelab/apps/argocd.yaml (self-management).
+# Chart: argo-cd 10.5.0 (Argo CD v3.5.2)
+
+configs:
+  params:
+    # Nothing terminates TLS in front of Argo CD during the port-forward
+    # phase. Revisit when ingress + cert-manager land (plan phases 13-15).
+    server.insecure: true
+
+# No SSO in scope; local admin only.
+dex:
+  enabled: false
+
+notifications:
+  enabled: false
+
+controller:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+server:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+repoServer:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+applicationSet:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+redis:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
