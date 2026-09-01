@@ -37,17 +37,35 @@ Services, Secrets, PVCs — are **not** cascade-deleted and are silently
 orphaned in the cluster. Removing the file is not the same as cleaning up the
 cluster.
 
-To fully retire a component, delete its Application with cascade before or
-instead of merely removing the file:
+Argo CD only cascades a deletion when the Application carries the
+`resources-finalizer.argocd.argoproj.io` finalizer. This repository's
+Applications deliberately do not carry it (see above for why `root` never
+should), so a plain `kubectl -n argocd delete application <name>` deletes
+only the Application object and leaves its managed resources orphaned —
+the same outcome as pruning via a file removal, just triggered by hand
+instead of by root.
+
+To genuinely retire a component, add the finalizer to that child
+Application, delete it, and only then remove its file:
 
 ```bash
+kubectl -n argocd patch application <name> --type merge \
+  -p '{"metadata":{"finalizers":["resources-finalizer.argocd.argoproj.io"]}}'
 kubectl -n argocd delete application <name>
 ```
 
-`kubectl delete` on an Application cascades to its managed resources by
-default. Do this first (or alongside removing the file), not after — once the
-file is gone and root has pruned the Application object, there is nothing
-left in git to tell Argo CD what to clean up.
+Then remove the Application's file from `environments/homelab/apps/` and
+push. Order matters: patch and delete the child first, then remove the file.
+If the file is removed first, root prunes the Application object before the
+cascade can happen, and there is nothing left to delete by hand.
+
+The Argo CD CLI's `argocd app delete <name> --cascade` achieves the same
+thing in one step by injecting that finalizer for you, but the `argocd` CLI
+is not installed on this host, so the `kubectl patch` + `kubectl delete`
+sequence above is the primary route here.
+
+Never add this finalizer to `root` itself — that would reintroduce the
+exact cascade `root` is designed to avoid.
 
 ## Application repositories
 
