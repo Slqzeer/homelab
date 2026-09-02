@@ -31,6 +31,31 @@ path and is not watched by anything: an Application placed there is never
 applied, and there is no error. It stays out of Argo CD entirely, so nothing
 reports it as missing or out of sync — the component simply never appears.
 
+### A new component can also "never appear" for a different reason: `ingress-config` at wave 3
+
+`environments/homelab/apps/ingress-config.yaml` sits at sync-wave 3 and, by
+Argo CD's wave semantics, gates every later wave — nothing at wave 10
+(platform) or wave 20 (apps) starts syncing until every earlier wave is
+`Healthy`. If ingress breaks for any reason (the `operator-oauth` Secret
+lost, the OAuth client revoked, Let's Encrypt failing) `ingress-config`
+never goes `Healthy`, and a component you just added at a later wave will
+silently never sync — with nothing in its own Application object naming
+ingress as the cause. This is a structural coupling, not a bug in the new
+component's manifest.
+
+If a newly committed component never appears, the first thing to check is
+not that component — it is the overall wave picture:
+
+```bash
+sg k3s-admin -c 'kubectl -n argocd get applications'
+```
+
+Anything at or before your component's wave that is not `Synced`/`Healthy`
+is blocking it. `ingress-config` is the most likely culprit because it sits
+early (wave 3) and depends on cluster-only state (see `docs/troubleshooting.md`
+entry 8). A structural fix (decoupling later waves from ingress health) is
+deliberately deferred to phase 16 — see the design spec's risk table, §13.
+
 ## Removing a component
 
 The root Application deliberately carries no
@@ -168,26 +193,37 @@ before it is fixed, reinstates the same breakage:
 
 ## First install / rebuild
 
-1. Run `./bootstrap/argocd/bootstrap.sh`. This creates the `argocd`
+1. **Enable HTTPS Certificates on the tailnet first**: Tailscale admin
+   console → DNS → HTTPS Certificates → Enable. Without this, no
+   certificate is ever issued for any Ingress — the Ingress still comes up
+   and gets a hostname, but every browser hitting it gets a TLS error, with
+   nothing in the cluster or in Argo CD naming HTTPS Certificates as the
+   cause. This is a tailnet-wide setting, done once in the admin console,
+   not a Kubernetes object; it does not live in this repository and a
+   rebuild does not recreate it. See `infrastructure/ingress/README.md` for
+   how to verify it is on.
+2. Run `./bootstrap/argocd/bootstrap.sh`. This creates the `argocd`
    namespace and installs Argo CD from the pinned chart. It needs no
    repository credential — it pulls the chart over HTTPS.
-2. Create the `repo-homelab` deploy-key Secret in the `argocd` namespace.
+3. Create the `repo-homelab` deploy-key Secret in the `argocd` namespace.
    See `docs/superpowers/plans/2026-09-01-k3s-argocd-bootstrap.md`, Task 5,
    for regenerating the key and the exact commands. This Secret exists only
    in the cluster; it is not reproducible from anything in this repository.
-3. `kubectl apply -f environments/homelab/root.yaml` — the one and only
+4. `kubectl apply -f environments/homelab/root.yaml` — the one and only
    manual apply.
-4. Create the `operator-oauth` Secret in the `tailscale` namespace once
+5. Create the `operator-oauth` Secret in the `tailscale` namespace once
    root has created that namespace at sync-wave 0. Until it exists the
    Tailscale operator stays in `ContainerCreating` and no tailnet
    hostname resolves. See `infrastructure/ingress/README.md`. Argo CD
    itself is reachable by port-forward throughout, so this does not
    block recovery.
 
-The order matters: step 2 must follow step 1, because the `argocd`
+The order matters: step 3 must follow step 2, because the `argocd`
 namespace does not exist until `bootstrap.sh` creates it. The credential
-is needed only before step 3, which is the first thing that clones this
-repository.
+is needed only before step 4, which is the first thing that clones this
+repository. Step 1 (HTTPS Certificates) has no ordering dependency on the
+others — it is a tailnet setting, not a cluster step — but it must be done
+before anyone relies on TLS working, so do it first and be done with it.
 
 ## Documentation
 

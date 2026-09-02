@@ -8,6 +8,24 @@ from there to the Service is plain HTTP inside the cluster.
 There is no LAN ingress and no `.home.arpa`. cert-manager is deliberately
 not installed — see the design spec, §11.
 
+## Prerequisites
+
+**HTTPS Certificates must be enabled on the tailnet**: Tailscale admin
+console → DNS → HTTPS Certificates → Enable. This is tailnet-wide, done
+once by hand in the admin console — it is not a Kubernetes object, does
+not live in this repository, and a cluster rebuild does not recreate it.
+Without it, an Ingress still provisions and gets a `.ts.net` hostname, but
+no certificate is ever issued for it, so every browser hitting that
+hostname gets a TLS error with no corresponding error anywhere in the
+cluster or in Argo CD. Verify it is on with:
+
+```bash
+tailscale status --json | jq .CertDomains
+```
+
+`null` means it is disabled and no certificate will ever issue; a list of
+domains means it is on.
+
 | File | Purpose |
 | --- | --- |
 | `values.yaml` | Operator Helm values. **Not** applied as a manifest |
@@ -51,12 +69,23 @@ The working pattern instead gives every Ingress its own dedicated proxy:
 `spec.tls[0].hosts[0]` is a **short** name. `<service>` becomes
 `<service>.taildf6cd4.ts.net`. Writing the full FQDN there is wrong.
 
-The `tailscale.com/proxy-class: homelab` annotation gives the Ingress a
-dedicated proxy pod — it registers as an ordinary tailnet device and
-never touches the Service layer. There is no pool to share: **every
-Ingress exposed this way costs its own proxy pod**, measured at roughly
-30Mi (see Memory below). That is a real, per-service memory cost on this
-host, not a rounding error — budget for it before adding another one.
+A `tailscale` Ingress gets a dedicated proxy pod **by default** — that part
+has nothing to do with the annotation. It registers as an ordinary tailnet
+device and never touches the Service layer. There is no pool to share:
+**every Ingress exposed this way costs its own proxy pod**, measured at
+roughly 30Mi (see Memory below). That is a real, per-service memory cost
+on this host, not a rounding error — budget for it before adding another
+one.
+
+What the `tailscale.com/proxy-class: homelab` annotation actually does is
+bind that already-dedicated proxy to the `homelab` ProxyClass, which caps
+it at 128Mi (see Memory below). **It is not decorative and must not be
+dropped when copying this template.** The chart's own default for a proxy
+with no ProxyClass is `resources: {}` — unbounded. Omit the annotation and
+the Ingress still comes up, still gets a working hostname and
+certificate, and Argo CD still reports it Synced/Healthy — there is no
+error anywhere — but the resulting proxy pod has no memory ceiling at all,
+on a host that is already swapping.
 
 A service at sync-wave 10 or later may instead own its Ingress alongside
 its own manifests. Argo CD's Ingress lives here only because Argo CD runs
@@ -81,6 +110,15 @@ scopes, each read and write, all tagged `tag:k8s-operator`:
 - Keys → Auth Keys
 
 Do not grant `all`; it confers every scope plus all device tags.
+
+`services` is required by Tailscale's own Kubernetes-operator install
+documentation for the operator generally — it is not specific to
+ProxyGroups or Tailscale Services, the mechanism this phase tried and
+abandoned (see "Exposing a new service" above, and the design spec §10).
+It may not be strictly required by the dedicated-proxy design this
+repository actually uses, but that has not been tested, and trimming it
+would mean regenerating the OAuth client to find out, so all three scopes
+are kept as originally granted.
 
     kubectl create secret generic operator-oauth -n tailscale \
       --from-literal=client_id=<id> --from-literal=client_secret=<secret>

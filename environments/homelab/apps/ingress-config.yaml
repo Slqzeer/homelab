@@ -1,5 +1,9 @@
-# ProxyClass, ProxyGroup and the Ingress objects served by the Tailscale
-# operator.
+# ProxyClass and the Ingress objects served by the Tailscale operator.
+# Each Ingress gets its own dedicated proxy via the
+# tailscale.com/proxy-class annotation, bounded by this ProxyClass; a
+# shared ProxyGroup was tried and abandoned (see
+# infrastructure/ingress/README.md and the design spec §10) and
+# infrastructure/ingress/config/proxygroup.yaml no longer exists.
 #
 # Wave 3: strictly after ingress-operator (2), because these are instances
 # of CRDs that Application installs. Splitting them across waves makes a

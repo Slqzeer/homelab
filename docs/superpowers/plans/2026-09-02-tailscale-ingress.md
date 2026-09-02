@@ -511,6 +511,13 @@ prominently — Task 5 adds a proxy pod on top.
 
 ### Task 5: Create the ProxyClass and ProxyGroup
 
+> **SUPERSEDED during execution.** The shared `ProxyGroup` approach below
+> was tried and abandoned — Tailscale Services proved unroutable on this
+> tailnet. Do **not** create `proxygroup.yaml`. See the design spec §10
+> for what actually shipped (a dedicated proxy per Ingress via
+> `tailscale.com/proxy-class`). This task is kept as a historical record
+> only.
+
 **Files:**
 - Create: `infrastructure/ingress/config/proxyclass.yaml`
 - Create: `infrastructure/ingress/config/proxygroup.yaml`
@@ -687,6 +694,12 @@ All five Applications must be `Synced` / `Healthy`.
 ---
 
 ### Task 6: Expose Argo CD on the tailnet
+
+> **SUPERSEDED during execution.** The `tailscale.com/proxy-group`
+> annotation below reflects the abandoned shared-`ProxyGroup` approach.
+> The Ingress that actually shipped uses `tailscale.com/proxy-class:
+> homelab` instead, giving it its own dedicated proxy. See the design
+> spec §10. This task is kept as a historical record only.
 
 **Files:**
 - Create: `infrastructure/ingress/config/argocd-ingress.yaml`

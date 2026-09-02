@@ -372,6 +372,56 @@ per Ingress via `tailscale.com/proxy-class`. Switching designs mid-stream
 left cluster state behind that Argo CD never created and so never prunes,
 and each leftover independently blocked the replacement from coming up.
 
+### Start here
+
+The three faults below are specific to migrating away from a ProxyGroup
+and **cannot occur on a clean rebuild** — none of their artifacts exist
+until a ProxyGroup has run at least once. If ingress will not come up on a
+fresh install, work through this checklist first, in order:
+
+1. **Operator pod stuck `ContainerCreating`** — the `operator-oauth`
+   Secret is missing, or its keys are misnamed. They must be exactly
+   `client_id` and `client_secret`; anything else and the chart's env vars
+   (`CLIENT_ID_FILE` / `CLIENT_SECRET_FILE`) point at files that don't
+   exist. See `infrastructure/ingress/README.md`.
+2. **Ingress never gets a hostname, or gets the wrong one** — check
+   `spec.tls[0].hosts[0]` on the Ingress. It must be a **short** name
+   (`argocd`), not the full FQDN — the operator appends the MagicDNS
+   suffix itself, so a full FQDN there produces a wrong or malformed
+   hostname.
+3. **Is the proxy pod even running?**
+
+   ```bash
+   sg k3s-admin -c 'kubectl -n tailscale get pods'
+   ```
+
+   No dedicated proxy pod for the Ingress means nothing further downstream
+   (certificate, routing) can work yet — fix this before looking at
+   anything else.
+4. **API permission error in the operator log** — an error naming a
+   missing permission or scope means the OAuth client is under-scoped.
+   Check its scopes against `infrastructure/ingress/README.md` (exactly
+   `services`, `devices:core`, `auth_keys`, all read+write).
+5. **Are HTTPS certificates still enabled on the tailnet?**
+
+   ```bash
+   tailscale status --json | jq .CertDomains
+   ```
+
+   `null` means HTTPS Certificates is disabled tailnet-wide and no
+   certificate will ever issue, no matter how correct everything else is.
+   Enable it: admin console → DNS → HTTPS Certificates.
+
+### Faults specific to migrating away from a ProxyGroup
+
+The three faults below were all hit while switching this cluster's live
+Ingress off a shared `ProxyGroup` and onto a dedicated
+`tailscale.com/proxy-class` proxy. Every one of them requires a ProxyGroup
+(or ProxyGroup-backed Ingress) to have existed at some point to leave the
+state behind — **none of them can happen on a fresh install**, where no
+ProxyGroup is ever created. They are kept here in case this design is
+revisited and a similar migration happens again.
+
 ### An Ingress never gets an ADDRESS: "input does not match format"
 
 **Symptom**

@@ -156,7 +156,7 @@ Automating this in phase 20 needs a *second* OAuth client with
 | -1 | `argocd` | Argo CD's own release |
 | 0 | `namespaces` | `cert-manager`, `vault`, **`tailscale`** |
 | 2 | `ingress-operator` | Operator, CRDs, `IngressClass` |
-| 3 | `ingress-config` | ProxyClass, ProxyGroup, Argo CD's Ingress |
+| 3 | `ingress-config` | ProxyClass, Argo CD's Ingress (dedicated proxy per Ingress; see §10) |
 
 **Why D6 exists.** Enabling `server.ingress` in `bootstrap/argocd/values.yaml`
 is the obvious approach and it deadlocks a rebuild:
@@ -209,8 +209,15 @@ be tagged with it.
 
    Why each is needed: `auth_keys` lets the operator mint keys for itself
    and the proxies it creates; `devices:core` lets it register, tag and
-   remove those devices; `services` backs the Tailscale Services that
-   publish per-Ingress hostnames (§10).
+   remove those devices; `services` is required by Tailscale's own
+   Kubernetes-operator install documentation for the operator generally,
+   not specifically for the ProxyGroup/Tailscale-Services mechanism this
+   phase ended up abandoning (§10) — Tailscale documents it as part of the
+   baseline operator install, independent of which Ingress-exposure
+   pattern is in use. `services` may not be strictly required by the
+   dedicated-proxy design this phase actually ships with, but trimming it
+   is untested and would force regenerating the OAuth client to find out,
+   so it is kept.
 
    The client secret is displayed once, at creation.
 4. **Create the Secret** — after the `tailscale` namespace exists:
@@ -350,6 +357,7 @@ Operator (phase 17), or a later decision to serve the LAN as well.
 | Policy paste clobbers live ACLs | Medium | §6 mandates copying live policy first |
 | Rebuild ordering: operator needs a Secret that no repo holds | Medium | `README.md` First install gains a step, as `repo-homelab` did |
 | Tailnet rename changes every hostname | Low | Names derive from the MagicDNS suffix; documented |
+| `ingress-config` at wave 3 gates every later wave (10, 20, …) with nothing naming ingress as the cause if it goes unhealthy | Medium | documented; structural fix deferred to phase 16 |
 
 ## 14. Verification
 
@@ -357,7 +365,9 @@ The phase is complete when all of the following hold:
 
 1. Operator pod `Running` in `tailscale`; a `tailscale-operator` device
    appears in `tailscale status`.
-2. ProxyGroup reports ready with **exactly one** replica pod.
+2. Argo CD's Ingress has its own dedicated proxy pod `Running` in
+   `tailscale` (per §10's fallback — there is no ProxyGroup or pool to
+   check; each Ingress gets exactly one dedicated proxy by default).
 3. Argo CD's Ingress has a populated `status.loadBalancer.ingress`.
 4. `argocd.taildf6cd4.ts.net` resolves via MagicDNS.
 5. **From `msi`, not from this host**, `https://argocd.taildf6cd4.ts.net`
