@@ -26,7 +26,7 @@ Measured 2026-09-02 on `slqzeer-ms7c56`.
 | Argo CD access | `ClusterIP` only — port-forward is the sole route |
 | Tailscale (host) | 1.102.3, `100.96.61.37`, `slqzeer-ms7c56.taildf6cd4.ts.net` |
 | MagicDNS | Working — tailnet names resolve on the host |
-| **Tailnet HTTPS certs** | **DISABLED** — `CertDomains: null` |
+| Tailnet HTTPS certs | Was disabled (`CertDomains: null`); **enabled by the operator on 2026-09-02** |
 | Tailnet devices | 2: this host, and `msi` (Windows) |
 | Component namespaces | `argocd`, `cert-manager`, `vault` (last two empty) |
 | Pods running | 13 |
@@ -173,13 +173,34 @@ Order matters: a tag must exist in the policy before an OAuth client can
 be tagged with it.
 
 1. **Enable HTTPS Certificates** — admin console → DNS → HTTPS
-   Certificates → Enable. Currently **off** (§2). Without it no
-   certificate is ever issued and the phase produces nothing usable.
-   Tailnet-wide; affects `msi` benignly.
+   Certificates → Enable. **Done 2026-09-02.** Without it no certificate
+   is ever issued and the phase produces nothing usable. Tailnet-wide;
+   affects `msi` benignly.
 2. **Apply the tag owners** — per §6, merging into the live policy.
 3. **Create the OAuth client** — `https://login.tailscale.com/admin/settings/oauth`
-   → *Generate OAuth client*. Scope **Keys → Write** (`auth_keys`), tag
-   `tag:k8s-operator`. The secret is shown once.
+   → *Generate OAuth client*. It is an **OAuth client, not an OIDC
+   client**; OIDC on that settings page is for user SSO and is unrelated.
+
+   Exactly three scopes, each **Read and Write**, and no others:
+
+   | Console category | Scope | Access |
+   | --- | --- | --- |
+   | General → Services | `services` | Read + Write |
+   | Devices → Core | `devices:core` | Read + Write |
+   | Keys → Auth Keys | `auth_keys` | Read + Write |
+
+   In the **Tags** box on the same form, select `tag:k8s-operator` — this
+   is why step 2 must come first; the tag cannot be attached until it
+   exists in the policy.
+
+   Do **not** grant `all`, which confers every scope plus all device tags.
+
+   Why each is needed: `auth_keys` lets the operator mint keys for itself
+   and the proxies it creates; `devices:core` lets it register, tag and
+   remove those devices; `services` backs the Tailscale Services that
+   publish per-Ingress hostnames (§10).
+
+   The client secret is displayed once, at creation.
 4. **Create the Secret** — after the `tailscale` namespace exists:
 
    ```bash
@@ -206,11 +227,16 @@ Both are backup-worthy until Vault takes over in phase 16.
 
 ## 10. Open question, and its fallback
 
-**Unresolved:** with a shared `ProxyGroup`, pods are named from
+**Partially resolved.** With a shared `ProxyGroup`, pods are named from
 `hostnamePrefix` (`<prefix>-0`), while a per-Ingress hostname such as
 `argocd.taildf6cd4.ts.net` is published through a separate mechanism
-layered on top. How those interact on 1.102.3 has **not** been verified,
-and is not asserted here.
+layered on top. The operator's required `services` OAuth scope (§8)
+identifies that mechanism as **Tailscale Services**, which is what makes
+one pool of proxy pods able to serve several distinct hostnames.
+
+**Still unverified:** the concrete behaviour on 1.102.3 — how the
+hostname is derived from the Ingress, and whether a certificate is issued
+per Service. This is not asserted from documentation alone.
 
 The implementation observes the actual result rather than assuming it.
 
@@ -253,7 +279,8 @@ Operator (phase 17), or a later decision to serve the LAN as well.
 | Risk | Severity | Mitigation |
 | --- | --- | --- |
 | **Memory exhaustion.** 1.1Gi available, swap at 0B. New pods land on a host already swapping | **High** | D4 and D5 cap usage; measure before/after and record real figures; ARK can be stopped if needed |
-| HTTPS certs left disabled | High | §8 step 1 is a hard gate; verification checks the cert, not just connectivity |
+| ~~HTTPS certs left disabled~~ | Closed | Enabled 2026-09-02. Verification still checks the certificate itself, not just connectivity |
+| OAuth client over-scoped | Medium | §8 names exactly three scopes and forbids `all`; over-granting hands broad tailnet control to a cluster Secret |
 | ProxyGroup hostname mechanics differ from expectation | Medium | §10 fallback, decided by observation |
 | `operator-oauth` lost or revoked | Medium | §9; port-forward (D11) remains a working way in |
 | Policy paste clobbers live ACLs | Medium | §6 mandates copying live policy first |
