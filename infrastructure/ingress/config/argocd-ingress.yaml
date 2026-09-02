@@ -8,8 +8,8 @@
 # installation of the controller that unblocks the Ingress. Keeping it out
 # of Argo CD's own release lets wave -1 go Healthy unconditionally.
 #
-# Services at wave 10+ are past this problem and may own their Ingress
-# normally. Argo CD is special-cased only because it lives at wave -1.
+# Every Ingress in this repository lives here, at wave 21, for the same
+# reason: nothing else should ever wait on ingress health to sync.
 #
 # TLS terminates at the Tailscale proxy with a real Let's Encrypt
 # certificate. The hop from proxy to argocd-server is plain HTTP inside the

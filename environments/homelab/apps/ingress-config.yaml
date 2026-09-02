@@ -5,9 +5,20 @@
 # infrastructure/ingress/README.md and the design spec §10) and
 # infrastructure/ingress/config/proxygroup.yaml no longer exists.
 #
-# Wave 3: strictly after ingress-operator (2), because these are instances
-# of CRDs that Application installs. Splitting them across waves makes a
-# rebuild deterministic instead of relying on retry to converge.
+# Wave 21: deliberately after every component, not before them. An Ingress
+# is Progressing until its controller populates status.loadBalancer.ingress,
+# which depends on the Tailscale control plane -- the OAuth credential, the
+# tailnet policy, Let's Encrypt. At an early wave this Application would gate
+# every later wave on that, so a broken ingress would silently stop Vault
+# (wave 10) from syncing at all, with no error naming ingress as the cause.
+#
+# Nothing at an earlier wave consumes what this Application creates: the
+# ProxyClass is read only when a proxy is created, which happens only
+# because an Ingress exists. It still lands after ingress-operator (2),
+# which installs the CRDs these are instances of.
+#
+# Consequence, accepted: on a rebuild no tailnet URL resolves until wave 21.
+# kubectl port-forward covers that window.
 #
 # path is infrastructure/ingress/config -- NOT infrastructure/ingress,
 # which also holds values.yaml. Every YAML under `path` is applied as a
@@ -18,7 +29,7 @@ metadata:
   name: ingress-config
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "3"
+    argocd.argoproj.io/sync-wave: "21"
 spec:
   project: default
   source:
