@@ -1,0 +1,22 @@
+# One shared pool of proxy pods serving every Tailscale Ingress.
+#
+# replicas: 1 is REQUIRED and deliberate. The CRD default is 2, which
+# doubles memory on a host that has none spare. This trades HA for memory
+# -- an acceptable trade for a single-node homelab, where the node failing
+# takes the workloads with it anyway.
+#
+# The -0 replica is the one that obtains Let's Encrypt certificates, so a
+# single replica is sufficient for TLS.
+#
+# spec.type is immutable once created. Changing it needs a delete and
+# recreate, which drops every tailnet hostname served by this group.
+#
+# Cluster-scoped resource: no namespace.
+apiVersion: tailscale.com/v1alpha1
+kind: ProxyGroup
+metadata:
+  name: ingress
+spec:
+  type: ingress
+  replicas: 1
+  proxyClass: homelab
