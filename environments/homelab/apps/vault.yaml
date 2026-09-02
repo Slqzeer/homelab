@@ -1,0 +1,38 @@
+# HashiCorp Vault, the homelab secret store.
+#
+# Wave 10 -- the platform tier. Nothing at an earlier wave depends on it,
+# and ingress-config now sits at wave 21 precisely so that ingress health
+# cannot block this Application from syncing.
+#
+# Vault requires a hand-created Secret `vault-unseal-keys` in this namespace
+# before it can auto-unseal. That Secret exists only in the cluster and in
+# no repository -- see platform/vault/README.md for the init ceremony.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vault
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+spec:
+  project: default
+  sources:
+    - repoURL: https://helm.releases.hashicorp.com
+      chart: vault
+      targetRevision: 0.34.1
+      helm:
+        releaseName: vault
+        valueFiles:
+          - $values/platform/vault/values.yaml
+    - repoURL: git@github.com:Slqzeer/homelab.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vault
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

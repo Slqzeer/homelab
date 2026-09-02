@@ -1,0 +1,50 @@
+# HashiCorp Vault -- the homelab secret store.
+# Chart: hashicorp/vault 0.34.1 (Vault 2.0.4)
+# Repo:  https://helm.releases.hashicorp.com
+#
+# Single replica with Raft integrated storage. Raft rather than the simpler
+# `file` backend because only Raft has a native snapshot API
+# (`vault operator raft snapshot save`) that produces a consistent backup
+# from a running Vault; the workstation plan requires Vault snapshots in
+# /backups/vault. With `file` you would be copying a live directory.
+#
+# Vault comes up SEALED and UNINITIALIZED. Its readiness probe fails until
+# the init ceremony runs -- see platform/vault/README.md. That is expected.
+
+# Phase 17 uses the Vault Secrets Operator, not the Agent Injector. The
+# chart enables the injector by default via its "-" sentinel, so it must be
+# turned off explicitly or it adds a Deployment nothing here uses.
+injector:
+  enabled: false
+
+csi:
+  enabled: false
+
+ui:
+  enabled: true
+
+server:
+  ha:
+    enabled: true
+    replicas: 1
+    raft:
+      enabled: true
+      setNodeId: true
+
+  dataStorage:
+    enabled: true
+    size: 5Gi
+    # local-path does not enforce capacity -- a PV is a directory on /srv,
+    # which has 853G free. This size is nominal, not a quota.
+    storageClass: local-path
+
+  # No audit device yet; nothing consumes Vault until phase 17.
+  auditStorage:
+    enabled: false
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
