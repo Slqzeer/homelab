@@ -1,4 +1,4 @@
-# Namespaces for cert-manager and Vault.
+# Namespaces for components managed from this repository.
 # Add a namespace here when the component that needs it is planned, not before.
 #
 # The `namespaces` Application has prune: true. Removing an entry from this
@@ -13,3 +13,11 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: vault
+---
+# Tailscale Kubernetes operator and the proxy pods it creates.
+# Also holds the hand-created `operator-oauth` Secret, which exists in no
+# repository -- see infrastructure/ingress/README.md.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tailscale
