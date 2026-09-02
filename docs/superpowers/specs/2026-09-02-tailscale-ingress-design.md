@@ -234,9 +234,19 @@ layered on top. The operator's required `services` OAuth scope (§8)
 identifies that mechanism as **Tailscale Services**, which is what makes
 one pool of proxy pods able to serve several distinct hostnames.
 
-**Still unverified:** the concrete behaviour on 1.102.3 — how the
-hostname is derived from the Ingress, and whether a certificate is issued
-per Service. This is not asserted from documentation alone.
+**Resolved from documentation.** The hostname comes from
+`spec.tls[0].hosts[0]` on the Ingress as a *short* name — `argocd` yields
+`argocd.taildf6cd4.ts.net`. The Ingress attaches to a pool via the
+`tailscale.com/proxy-group` annotation. With a ProxyGroup, the `-0`
+replica is always the one that obtains the Let's Encrypt certificate,
+so `replicas: 1` is sufficient for certificate issuance.
+
+Both `ProxyClass` and `ProxyGroup` are **cluster-scoped** — their
+manifests carry no `namespace`.
+
+**Still to confirm by observation:** that 1.102.3 behaves as documented
+on this cluster. Implementation verifies rather than assumes; the §10
+fallback stands if it does not.
 
 The implementation observes the actual result rather than assuming it.
 
