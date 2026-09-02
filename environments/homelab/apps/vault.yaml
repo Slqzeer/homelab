@@ -27,6 +27,22 @@ spec:
     - repoURL: git@github.com:Slqzeer/homelab.git
       targetRevision: main
       ref: values
+    # The unsealer is NOT part of the chart, so it needs a source of its own.
+    # Without this the manifest sits in git and is applied by nothing: the
+    # Application reported Synced/Healthy while Vault stayed sealed forever,
+    # because Argo CD only ever knew about the chart.
+    #
+    # path is platform/vault/config -- NOT platform/vault, which also holds
+    # values.yaml. Every YAML under a directory `path` is applied as a
+    # Kubernetes manifest, and a Helm values file has no kind. Same split, and
+    # the same reason, as infrastructure/ingress/config.
+    #
+    # It stays a source of this Application rather than an Application of its
+    # own so that Vault and the helper that unseals it cannot be deleted
+    # independently of each other.
+    - repoURL: git@github.com:Slqzeer/homelab.git
+      targetRevision: main
+      path: platform/vault/config
   destination:
     server: https://kubernetes.default.svc
     namespace: vault
