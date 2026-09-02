@@ -1,0 +1,99 @@
+# Auto-unseal helper for Vault.
+#
+# Vault OSS has no local-file seal type -- its native auto-unseal is cloud
+# KMS or Transit only. So this is a helper that calls the unseal API, not a
+# Vault seal. It exists because the alternative is a human entering three
+# keys after every reboot, pod reschedule, or k3s restart.
+#
+# SECURITY POSTURE, stated plainly: the unseal keys live in the same cluster
+# as the data they protect. Vault here defends against disk theft, backup
+# exposure, and accidental commits to git. It does NOT defend against
+# compromise of this host, because an attacker with root gets both the
+# ciphertext and the keys. This trade was chosen deliberately.
+#
+# The keys are piped on stdin, never passed as arguments: command arguments
+# are visible in `ps` to every user on this machine.
+#
+# The Secret mount is optional, so this deploys before the init ceremony has
+# happened and waits harmlessly. There is no ordering requirement between
+# deploying Vault and initialising it, on first install or on a rebuild.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-unsealer
+  namespace: vault
+data:
+  unseal.sh: |
+    #!/bin/sh
+    # vault status exits 0 unsealed, 2 sealed, 1 on error. No jq needed.
+    export VAULT_ADDR="http://vault-0.vault-internal:8200"
+    echo "vault-unsealer: watching ${VAULT_ADDR}"
+    while true; do
+      vault status >/dev/null 2>&1
+      rc=$?
+      if [ "$rc" -eq 2 ]; then
+        echo "vault-unsealer: sealed, attempting unseal"
+        for k in /unseal/key1 /unseal/key2 /unseal/key3; do
+          [ -s "$k" ] || continue
+          vault operator unseal - < "$k" >/dev/null 2>&1 || true
+        done
+        vault status >/dev/null 2>&1
+        if [ $? -eq 0 ]; then
+          echo "vault-unsealer: unsealed"
+        else
+          echo "vault-unsealer: still sealed (uninitialized, or keys absent/wrong)"
+        fi
+      fi
+      sleep 10
+    done
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault-unsealer
+  namespace: vault
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vault-unsealer
+  template:
+    metadata:
+      labels:
+        app: vault-unsealer
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 1000
+      containers:
+        - name: unsealer
+          # Same image as Vault itself -- no third-party unsealer image, so
+          # this phase adds exactly one image to the cluster.
+          image: hashicorp/vault:2.0.4
+          command: ["/bin/sh", "/scripts/unseal.sh"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: unseal-keys
+              mountPath: /unseal
+              readOnly: true
+      volumes:
+        - name: scripts
+          configMap:
+            name: vault-unsealer
+        - name: unseal-keys
+          secret:
+            secretName: vault-unseal-keys
+            # Optional so this Deployment runs before the init ceremony.
+            optional: true
