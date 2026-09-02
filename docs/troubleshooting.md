@@ -326,6 +326,27 @@ layer; it does not mount the key as the pod's SSH identity, and the pod has no
 `~/.ssh` at all. That check fails regardless of whether the Secret is correct.
 Test from the host with `ssh -i` as above.
 
+### The second cluster-only secret
+
+`repo-homelab` is no longer the only one. `operator-oauth` in the
+`tailscale` namespace holds the OAuth client the Tailscale operator uses,
+and it exists in no repository either.
+
+| Secret | Namespace | Loss impact |
+| --- | --- | --- |
+| `repo-homelab` | `argocd` | All Argo CD reconciliation stops |
+| `operator-oauth` | `tailscale` | All tailnet ingress stops; every `.ts.net` URL dies |
+
+Losing `operator-oauth` does **not** stop reconciliation — Argo CD keeps
+working, and `kubectl port-forward` still reaches it. Symptoms are
+hostnames that stop resolving and proxy pods that fail to authenticate:
+
+```bash
+kubectl -n tailscale logs deploy/operator --tail=50
+```
+
+Both are backup-worthy until Vault takes over in phase 16.
+
 ---
 
 ## 7. Argo CD itself is broken by a bad commit
@@ -339,3 +360,88 @@ revert the bad commit and **push** first, then run
 `./bootstrap/argocd/bootstrap.sh` — the script reads `values.yaml` from the
 working tree, and the `argocd` Application still targets `main` with
 `selfHeal`, so a restored Argo CD will re-apply whatever `main` holds.
+
+---
+
+## 8. Tailnet ingress: state the Tailscale operator creates but Argo CD can't see
+
+This is the entry that cost the most time getting tailnet ingress working.
+A shared `ProxyGroup` was tried first and abandoned (see the design spec
+§10 and `infrastructure/ingress/README.md`) in favor of a dedicated proxy
+per Ingress via `tailscale.com/proxy-class`. Switching designs mid-stream
+left cluster state behind that Argo CD never created and so never prunes,
+and each leftover independently blocked the replacement from coming up.
+
+### An Ingress never gets an ADDRESS: "input does not match format"
+
+**Symptom**
+
+```bash
+kubectl -n <ns> get ingress <name>
+# ADDRESS column stays empty
+```
+
+```bash
+kubectl -n tailscale logs deploy/operator --tail=50
+# "failed to provision: failed to create or get API key secret: input does not match format"
+# "tls: failed to find any PEM data in certificate input" at the secret's creation timestamp
+```
+
+**Cause**
+
+An orphaned Secret of type `kubernetes.io/tls`, named after the hostname,
+left behind by a previous proxy (here, one created by the abandoned
+ProxyGroup), with **empty** `tls.crt` and `tls.key`. The operator tries to
+reuse that Secret and fails validation before it ever reaches Let's
+Encrypt — the "input does not match format" and the PEM error are the
+same underlying empty-data problem logged from two different code paths.
+
+**Fix**
+
+Confirm the Secret's data is actually empty, then delete it:
+
+```bash
+kubectl -n <ns> get secret <hostname> -o jsonpath='{.data.tls\.crt}' | wc -c
+# 0 confirms it is empty
+kubectl -n <ns> delete secret <hostname>
+```
+
+The operator provisions a fresh Secret and certificate within a minute.
+
+### An Ingress stuck `Terminating` forever
+
+**Symptom:** `kubectl delete ingress <name>` never completes; the object
+stays `Terminating` indefinitely. `metadata.finalizers` still lists
+`tailscale.com/ingress-pg-finalizer` — the finalizer a ProxyGroup-backed
+Ingress carries.
+
+**Cause:** after switching the Ingress away from a ProxyGroup, no
+controller owns that finalizer any more, so nothing ever clears it.
+
+**Fix:** verify no proxy StatefulSet or Secret remains for that Ingress
+(its own cleanup already ran), then clear the finalizer with a merge
+patch:
+
+```bash
+kubectl -n <ns> patch ingress <name> --type merge -p '{"metadata":{"finalizers":[]}}'
+```
+
+### A hostname comes up as `<name>-1` instead of `<name>`
+
+**Symptom:** the Ingress provisions successfully, but the hostname is
+`<name>-1.taildf6cd4.ts.net`, not the expected `<name>.taildf6cd4.ts.net`.
+
+**Cause:** a stale Tailscale Service or device from an earlier attempt
+still holds the plain name in the tailnet's device list, so the operator
+is forced to disambiguate.
+
+**Fix:** delete the stale device or Service in the Tailscale admin
+console (<https://login.tailscale.com/admin/machines>), then delete the
+Ingress so the operator re-provisions and claims the now-freed name.
+
+### The lesson
+
+Argo CD prunes only what it manages. Secrets and finalizers the Tailscale
+operator creates directly against the Kubernetes API are invisible to
+Argo CD and survive a design change untouched — long enough to poison
+whatever is meant to replace them.

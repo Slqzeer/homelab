@@ -10,7 +10,10 @@ manifest ever applied by hand.
 | --- | --- |
 | `bootstrap/` | Argo CD values and the install/recovery script; namespaces |
 | `environments/homelab/` | Root Application and one Application per component |
-| `infrastructure/` | Storage, ingress, cert-manager, networking |
+| `infrastructure/ingress/` | Tailscale operator values and the Ingress manifests it serves |
+| `infrastructure/networking/` | Tailnet ACL policy — **not** reconciled by Argo CD |
+| `infrastructure/storage/` | PVC storage notes |
+| `infrastructure/cert-manager/` | Empty; deferred, see the 2026-09-02 spec |
 | `platform/` | Vault, databases, registry |
 | `observability/` | Prometheus, Grafana, logging |
 | `apps/` | Currently unused; reserved for per-application values/manifests, not Application objects |
@@ -123,22 +126,24 @@ manifests but not the image, and the deployment drifts.
 
 ## Access
 
+Argo CD is at **<https://argocd.taildf6cd4.ts.net>** from any device on
+the tailnet. The certificate is a real Let's Encrypt certificate issued
+by Tailscale, so no CA needs installing anywhere.
+
+Log in as `admin`. The initial-password Secret was deleted after the
+first password change; there is no recovery path from the cluster, so the
+password must be kept in a password manager.
+
+If Tailscale itself is unavailable, the port-forward still works:
+
 ```bash
 kubectl port-forward -n argocd svc/argocd-server 8080:80
 ```
 
-Ingress, DNS, and TLS are not yet configured.
+then <http://localhost:8080> — plain HTTP, no TLS.
 
-Log in as `admin`. The initial password is in the `argocd-initial-admin-secret`
-Secret in the `argocd` namespace:
-
-```bash
-kubectl -n argocd get secret argocd-initial-admin-secret \
-  -o jsonpath='{.data.password}' | base64 -d
-```
-
-That Secret is deleted after the first password change, so this only works
-until then.
+Ingress is Tailscale-only; there is no LAN hostname and no `.home.arpa`.
+See `infrastructure/ingress/README.md` to expose another service.
 
 ## Recovery
 
@@ -172,6 +177,12 @@ before it is fixed, reinstates the same breakage:
    in the cluster; it is not reproducible from anything in this repository.
 3. `kubectl apply -f environments/homelab/root.yaml` — the one and only
    manual apply.
+4. Create the `operator-oauth` Secret in the `tailscale` namespace once
+   root has created that namespace at sync-wave 0. Until it exists the
+   Tailscale operator stays in `ContainerCreating` and no tailnet
+   hostname resolves. See `infrastructure/ingress/README.md`. Argo CD
+   itself is reachable by port-forward throughout, so this does not
+   block recovery.
 
 The order matters: step 2 must follow step 1, because the `argocd`
 namespace does not exist until `bootstrap.sh` creates it. The credential

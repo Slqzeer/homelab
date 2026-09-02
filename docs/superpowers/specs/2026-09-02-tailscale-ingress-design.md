@@ -82,7 +82,6 @@ out of scope here (§12).
 | --- | --- | --- |
 | `infrastructure/ingress/values.yaml` | Operator Helm values; OAuth fields left empty | Argo CD |
 | `infrastructure/ingress/config/proxyclass.yaml` | Resource bounds for proxy pods | Argo CD |
-| `infrastructure/ingress/config/proxygroup.yaml` | `type: ingress`, `replicas: 1` | Argo CD |
 | `infrastructure/ingress/config/argocd-ingress.yaml` | Ingress in the `argocd` namespace | Argo CD |
 | `infrastructure/ingress/README.md` | Prerequisites, the Secret, exposing a new service | — |
 | `infrastructure/networking/policy.hujson` | Tailnet ACL policy | **Nothing — see §6** |

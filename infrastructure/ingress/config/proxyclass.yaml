@@ -3,7 +3,8 @@
 # The chart's default is `resources: {}` -- unbounded. This host runs at
 # ~1.1Gi available with swap fully exhausted, so an unbounded proxy can
 # push it into the swap death spiral that already cost us a CoreDNS
-# outage. Referenced explicitly by the ProxyGroup, not set as
+# outage. Referenced explicitly by each Ingress's
+# tailscale.com/proxy-class annotation, not set as
 # proxyConfig.defaultProxyClass, to avoid a cross-wave dangling reference.
 #
 # Cluster-scoped resource: no namespace.
