@@ -129,10 +129,23 @@ Required additions to whatever policy is already live:
   "tag:k8s-operator": [],
   "tag:k8s":          ["tag:k8s-operator"],
 },
+
+"autoApprovers": {
+  "services": {
+    "tag:k8s": ["tag:k8s"],
+  },
+},
 ```
 
 The operator identifies as `tag:k8s-operator`. Proxies it creates are
 tagged `tag:k8s`, owned by the operator so it may create them unattended.
+
+Publishing a Tailscale Service (§10) is a double opt-in: the operator
+advertises it, and the policy must separately auto-approve it, or the
+Service resolves in MagicDNS but nothing answers behind it. The
+`autoApprovers` stanza above grants that approval for anything tagged
+`tag:k8s` — which is how the operator tags both the ProxyGroup devices and
+the Services they advertise.
 
 Automating this in phase 20 needs a *second* OAuth client with
 `policy_file` write scope, distinct from the operator's.
@@ -244,11 +257,17 @@ so `replicas: 1` is sufficient for certificate issuance.
 Both `ProxyClass` and `ProxyGroup` are **cluster-scoped** — their
 manifests carry no `namespace`.
 
-**Still to confirm by observation:** that 1.102.3 behaves as documented
-on this cluster. Implementation verifies rather than assumes; the §10
-fallback stands if it does not.
-
-The implementation observes the actual result rather than assuming it.
+**Confirmed by observation.** The ProxyGroup hostname mechanism works as
+documented: the operator logged "exposing Ingress over tailscale" and
+"Updating serve config" for `argocd`, and `argocd.taildf6cd4.ts.net`
+resolved via MagicDNS to a tailnet address. What observation additionally
+found, and documentation alone did not make obvious, is that a
+ProxyGroup-backed Ingress publishes a **Tailscale Service**, and
+advertising a Service requires separate auto-approval in the tailnet
+policy (§6, §8). Without an `autoApprovers.services` stanza, the hostname
+resolves in DNS but nothing routes to it — `tailscale ping` reports "no
+matching peer" and the port never opens. The §10 fallback was not needed;
+the fix was the missing policy stanza, not a different proxy topology.
 
 **Fallback if the shared ProxyGroup does not cleanly yield per-Ingress
 hostnames:** drop D4, remove the `tailscale.com/proxy-group` annotation,

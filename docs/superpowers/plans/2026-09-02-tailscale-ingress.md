@@ -178,9 +178,13 @@ HuJSON permits comments and trailing commas that strict JSON does not.
 ```bash
 grep -n "tag:k8s-operator" infrastructure/networking/policy.hujson
 grep -n "tag:k8s\"" infrastructure/networking/policy.hujson
+grep -n "autoApprovers" infrastructure/networking/policy.hujson
 ```
 
-Both must match. The policy must contain a `tagOwners` block equivalent to:
+All three must match. Without `autoApprovers.services`, a ProxyGroup
+Ingress resolves in MagicDNS but is unreachable — the Tailscale Service it
+publishes is advertised but never auto-approved. The policy must contain
+a `tagOwners` block equivalent to:
 
 ```hujson
 "tagOwners": {

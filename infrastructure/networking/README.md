@@ -36,5 +36,25 @@ The operator identifies as `tag:k8s-operator`. Proxy pods it creates are
 tagged `tag:k8s`, owned by the operator so it can create them unattended.
 Removing either breaks all tailnet ingress.
 
+A ProxyGroup-backed Ingress also needs `autoApprovers.services`:
+
+    "autoApprovers": {
+      "services": {
+        "tag:k8s": ["tag:k8s"],
+      },
+    },
+
+Publishing a Tailscale Service is a double opt-in action: the operator
+advertises the Service, and the tailnet policy must separately approve it.
+The operator tags both the ProxyGroup devices and the Services they
+advertise with `tag:k8s`, so this stanza is what grants that approval.
+Without it, the Ingress hostname still resolves via MagicDNS but nothing
+answers on it — the Service was advertised and never approved, so it
+routes nowhere.
+
+Like the tag owners above, this stanza only takes effect once applied by
+hand in the admin console (see "`policy.hujson` is NOT reconciled by Argo
+CD" above) — Argo CD has no way to apply a Tailscale policy file.
+
 Automating this in phase 20 needs a second OAuth client with `policy_file`
 write scope, separate from the operator's.
