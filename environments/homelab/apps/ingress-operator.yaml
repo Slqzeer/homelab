@@ -1,0 +1,41 @@
+# Tailscale Kubernetes operator. Provides IngressClass "tailscale" and the
+# tailscale.com CRDs.
+#
+# Wave 2: after namespaces (0), before ingress-config (3), which creates
+# ProxyClass and ProxyGroup instances of the CRDs this Application installs.
+#
+# Requires the `operator-oauth` Secret in the tailscale namespace. That
+# Secret exists only in the cluster and in no repository -- the operator
+# pod stays in ContainerCreating without it.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ingress-operator
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  sources:
+    - repoURL: https://pkgs.tailscale.com/helmcharts
+      chart: tailscale-operator
+      targetRevision: 1.102.3
+      helm:
+        releaseName: tailscale-operator
+        valueFiles:
+          - $values/infrastructure/ingress/values.yaml
+    - repoURL: git@github.com:Slqzeer/homelab.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tailscale
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # Consistent with the argocd Application. The largest CRD in this
+      # chart is ~179KB, close enough to the 262144-byte
+      # last-applied-configuration limit that a chart upgrade could cross it.
+      - ServerSideApply=true

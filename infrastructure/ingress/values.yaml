@@ -1,0 +1,35 @@
+# Tailscale Kubernetes operator -- provides IngressClass "tailscale".
+# Chart: tailscale-operator 1.102.3 (matches host Tailscale 1.102.3;
+# keep them aligned on upgrade).
+#
+# oauth.clientId and oauth.clientSecret are deliberately left empty. With
+# them empty the chart templates NO Secret, and the operator instead reads
+# the hand-created `operator-oauth` Secret in this namespace. Putting real
+# values here would commit a tailnet credential to git. Never do that.
+#
+# The OAuth client behind that Secret holds exactly three scopes, all
+# read+write, all tagged tag:k8s-operator:
+#   General/Services, Devices/Core, Keys/Auth Keys.
+
+oauth:
+  clientId: ""
+  clientSecret: ""
+
+operatorConfig:
+  hostname: tailscale-operator
+  # This host runs a workstation, a homelab and a game server at once and
+  # is already swapping. Unbounded is not acceptable here.
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+# No defaultProxyClass is set here on purpose. It would name a ProxyClass
+# created later, at sync-wave 3, leaving a dangling reference at wave 2.
+# The ProxyGroup references its ProxyClass directly instead.
+
+# The Kubernetes API server proxy is out of scope; leave it off.
+apiServerProxyConfig:
+  mode: "false"
