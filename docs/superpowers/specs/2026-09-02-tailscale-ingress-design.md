@@ -43,7 +43,7 @@ the host has almost no free memory.
 | D1 | Tailnet names, not `.home.arpa` | User's choice. Real Let's Encrypt certs, no CA to install on any device, no DHCP fragility |
 | D2 | Tailscale Kubernetes operator, chart `1.102.3` | Exactly matches host Tailscale 1.102.3. GitOps-manageable, unlike host-level `tailscale serve` |
 | D3 | Traefik left untouched | k3s owns it. Our Ingresses name `tailscale` explicitly, so Traefik never sees them |
-| D4 | Shared `ProxyGroup`, `replicas: 1` | Chart default is a proxy pod per Ingress, and `replicas` defaults to **2**. Memory (§2) forbids both |
+| D4 | Shared `ProxyGroup` **attempted, then abandoned for the §10 fallback**: dedicated per-Ingress proxy via `tailscale.com/proxy-class`, `ProxyClass` retained for its resource bounds | Chart default is a proxy pod per Ingress, and `replicas` defaults to **2** — memory (§2) forbids both, which is why a shared pool was tried first. It was dropped because the Tailscale Service mechanism a ProxyGroup relies on proved unroutable on this tailnet even with `autoApprovers` correctly applied — see §10 |
 | D5 | `ProxyClass` with explicit resource limits | Chart default is `resources: {}` — unbounded, unacceptable on this host |
 | D6 | Argo CD's Ingress lives with the ingress component, **not** in `bootstrap/argocd/values.yaml` | Avoids a rebuild deadlock. See §7 |
 | D7 | Two Applications (operator wave 2, config wave 3) | CRDs must be established before their CRs exist. Waves make this deterministic |
@@ -238,7 +238,7 @@ in no repository, joining `repo-homelab`:
 Both are backup-worthy until Vault takes over in phase 16.
 `docs/troubleshooting.md` entry 6 is extended to cover the new one.
 
-## 10. Open question, and its fallback
+## 10. Resolved: the shared ProxyGroup failed, the fallback is the design
 
 **Partially resolved.** With a shared `ProxyGroup`, pods are named from
 `hostnamePrefix` (`<prefix>-0`), while a per-Ingress hostname such as
@@ -257,24 +257,60 @@ so `replicas: 1` is sufficient for certificate issuance.
 Both `ProxyClass` and `ProxyGroup` are **cluster-scoped** — their
 manifests carry no `namespace`.
 
-**Confirmed by observation.** The ProxyGroup hostname mechanism works as
-documented: the operator logged "exposing Ingress over tailscale" and
-"Updating serve config" for `argocd`, and `argocd.taildf6cd4.ts.net`
-resolved via MagicDNS to a tailnet address. What observation additionally
-found, and documentation alone did not make obvious, is that a
+**Confirmed by observation, then found to fail one layer deeper.** The
+ProxyGroup hostname mechanism itself works as documented: the operator
+logged "exposing Ingress over tailscale" and "Updating serve config" for
+`argocd`, and `argocd.taildf6cd4.ts.net` resolved via MagicDNS to a
+tailnet VIP. The first failure looked like a policy gap — a
 ProxyGroup-backed Ingress publishes a **Tailscale Service**, and
 advertising a Service requires separate auto-approval in the tailnet
-policy (§6, §8). Without an `autoApprovers.services` stanza, the hostname
-resolves in DNS but nothing routes to it — `tailscale ping` reports "no
-matching peer" and the port never opens. The §10 fallback was not needed;
-the fix was the missing policy stanza, not a different proxy topology.
+policy (§6, §8); without `autoApprovers.services` the hostname resolved
+in DNS but nothing routed to it. That stanza was added and the user
+applied it in the admin console, and the netmap provably picked it up —
+the host gained the capability `services/argocd`, which it lacked before,
+and the proxy's serve config was confirmed correct:
+`https://argocd.taildf6cd4.ts.net (tailnet only) (svc:argocd)` proxying to
+`http://10.43.151.249:80/`.
 
-**Fallback if the shared ProxyGroup does not cleanly yield per-Ingress
-hostnames:** drop D4, remove the `tailscale.com/proxy-group` annotation,
-and let each Ingress create its own standalone proxy. That path is
-unambiguous and works. The cost is one pod per exposed service instead of
-one pool — which §13 flags as significant on this host, but it is a
-memory cost, not a functional loss. The user-visible result is identical.
+**It still did not route.** DNS resolved to the Service VIP
+`100.92.232.41`, but that VIP was unreachable from two separate machines
+(including `msi`, ruling out a same-node hairpin): `tailscale ping`
+reported "no matching peer" and `nc` reported "No route to host". The
+decisive datum came from probing the proxy pod's own ordinary tailnet
+device IP instead of the Service VIP: `nc 100.85.234.26:443` returned
+"Connection refused" — the packet arrived and nothing was listening,
+which is a live, routable device behaving normally. Ordinary tailnet
+devices route fine on this tailnet; only the Tailscale Service layer
+(the VIP/`svc:` mechanism a ProxyGroup depends on to multiplex one pool
+of proxies across several hostnames) does not. This is deeper than the
+policy gap the autoApprovers fix addressed, and no further policy or
+config change was found to unblock it.
+
+**Fallback taken.** Per the fallback below, D4 was dropped: the
+`tailscale.com/proxy-group` annotation was removed from the Argo CD
+Ingress and replaced with `tailscale.com/proxy-class: homelab`, giving it
+a dedicated proxy that registers as an ordinary tailnet device and never
+touches the Service layer. The now-unused `ProxyGroup` manifest
+(`infrastructure/ingress/config/proxygroup.yaml`) was deleted; Argo CD
+prunes the corresponding StatefulSet. The `ProxyClass` is retained and
+now referenced directly by the Ingress, so the dedicated proxy stays
+memory-bounded exactly as it was inside the pool. The `autoApprovers`
+policy stanza is also retained even though the current design no longer
+needs it — see `infrastructure/networking/README.md` — since it is
+harmless and would be needed again if ProxyGroups are ever revisited.
+
+This history is kept rather than deleted so a future reader does not
+re-attempt the shared ProxyGroup expecting it to work: the hostname
+mechanism functions, but the underlying Tailscale Service routing does
+not, on this tailnet, as of this measurement.
+
+**Fallback (as originally authorised, now the active design):** drop D4,
+remove the `tailscale.com/proxy-group` annotation, and let each Ingress
+create its own standalone proxy via `tailscale.com/proxy-class`. That
+path is unambiguous and works. The cost is one pod per exposed service
+instead of one pool — which §13 flags as significant on this host, but it
+is a memory cost, not a functional loss. The user-visible result is
+identical.
 
 ## 11. Why phase 15 (cert-manager) is deferred
 

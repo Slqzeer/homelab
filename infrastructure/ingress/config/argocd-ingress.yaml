@@ -14,14 +14,24 @@
 # TLS terminates at the Tailscale proxy with a real Let's Encrypt
 # certificate. The hop from proxy to argocd-server is plain HTTP inside the
 # cluster, which is why configs.params."server.insecure" stays true.
+#
+# This Ingress gets its own dedicated proxy rather than sharing the
+# "ingress" ProxyGroup from Task 5. Tailscale Services -- the mechanism a
+# ProxyGroup uses to publish a per-Ingress hostname -- proved unroutable
+# on this tailnet even after autoApprovers was applied: DNS resolved the
+# VIP, but `tailscale ping` reported "no matching peer" and the VIP itself
+# was unreachable from two separate machines, while the proxy's own
+# tailnet device IP refused the connection cleanly instead of timing out.
+# A dedicated proxy registers as an ordinary tailnet device and never
+# touches the Service layer, so it sidesteps the failure. It still
+# references the ProxyClass from Task 5 so the pod stays memory-bounded.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: argocd
   namespace: argocd
   annotations:
-    # Share the pool from Task 5 instead of creating a dedicated proxy pod.
-    tailscale.com/proxy-group: ingress
+    tailscale.com/proxy-class: homelab
 spec:
   ingressClassName: tailscale
   defaultBackend:

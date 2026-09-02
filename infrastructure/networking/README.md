@@ -56,5 +56,15 @@ Like the tag owners above, this stanza only takes effect once applied by
 hand in the admin console (see "`policy.hujson` is NOT reconciled by Argo
 CD" above) — Argo CD has no way to apply a Tailscale policy file.
 
+**Status: applied, but not load-bearing for the current design.** After
+this stanza was applied, the Tailscale Service mechanism it approves
+proved unroutable on this tailnet regardless — see design doc §10. The
+Argo CD Ingress now uses a dedicated proxy (`tailscale.com/proxy-class`)
+instead of the shared `ProxyGroup`, which needs no Tailscale Service and
+so does not need this approval today. The stanza is left in place because
+it is harmless and would be required again if ProxyGroups are ever
+revisited — do not remove it thinking it is dead config, and do not
+assume it is doing anything for the cluster right now.
+
 Automating this in phase 20 needs a second OAuth client with `policy_file`
 write scope, separate from the operator's.
