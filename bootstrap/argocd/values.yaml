@@ -4,9 +4,15 @@
 # Chart: argo-cd 10.5.0 (Argo CD v3.5.2)
 
 configs:
+  cm:
+    # Argo CD's own external URL, used to build redirects and links.
+    # Must match the tailnet hostname from
+    # infrastructure/ingress/config/argocd-ingress.yaml.
+    url: https://argocd.taildf6cd4.ts.net
   params:
-    # Nothing terminates TLS in front of Argo CD during the port-forward
-    # phase. Revisit when ingress + cert-manager land (plan phases 13-15).
+    # TLS terminates at the Tailscale proxy, which forwards plain HTTP to
+    # this Service inside the cluster. This is the intended steady state,
+    # not a temporary port-forward workaround.
     server.insecure: true
 
 # No SSO in scope; local admin only.

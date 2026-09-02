@@ -1,0 +1,35 @@
+# Argo CD on the tailnet at https://argocd.taildf6cd4.ts.net
+#
+# This Ingress lives here, NOT in bootstrap/argocd/values.yaml, and that is
+# deliberate. Argo CD self-manages at sync-wave -1, and Argo CD reports an
+# Ingress as Progressing until status.loadBalancer.ingress is populated.
+# Only this operator populates it, and it installs at wave 2 -- which root
+# would never reach while still waiting on wave -1. The Ingress would block
+# installation of the controller that unblocks the Ingress. Keeping it out
+# of Argo CD's own release lets wave -1 go Healthy unconditionally.
+#
+# Services at wave 10+ are past this problem and may own their Ingress
+# normally. Argo CD is special-cased only because it lives at wave -1.
+#
+# TLS terminates at the Tailscale proxy with a real Let's Encrypt
+# certificate. The hop from proxy to argocd-server is plain HTTP inside the
+# cluster, which is why configs.params."server.insecure" stays true.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: argocd
+  namespace: argocd
+  annotations:
+    # Share the pool from Task 5 instead of creating a dedicated proxy pod.
+    tailscale.com/proxy-group: ingress
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: argocd-server
+      port:
+        number: 80
+  tls:
+    # Short name only. Becomes argocd.taildf6cd4.ts.net via MagicDNS.
+    - hosts:
+        - argocd
