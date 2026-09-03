@@ -1,0 +1,29 @@
+# Vault UI on the tailnet at https://vault.taildf6cd4.ts.net
+#
+# Backend is the vault-ui Service on 8200, which the chart creates when
+# ui.enabled is true. TLS terminates at the Tailscale proxy with a real
+# Let's Encrypt certificate; the hop to vault-ui is plain HTTP inside the
+# cluster, matching the posture used for Argo CD.
+#
+# The proxy-class annotation is NOT decorative: a tailscale Ingress gets a
+# dedicated proxy by default, and this annotation is what bounds that pod's
+# memory. Omitting it leaves the proxy unbounded (chart default is
+# `resources: {}`).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vault
+  namespace: vault
+  annotations:
+    tailscale.com/proxy-class: homelab
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: vault-ui
+      port:
+        number: 8200
+  tls:
+    # Short name only. Becomes vault.taildf6cd4.ts.net via MagicDNS.
+    - hosts:
+        - vault
