@@ -11,8 +11,21 @@
 # compromise of this host, because an attacker with root gets both the
 # ciphertext and the keys. This trade was chosen deliberately.
 #
-# The keys are piped on stdin, never passed as arguments: command arguments
-# are visible in `ps` to every user on this machine.
+# A key is never passed as a command argument: arguments are visible in `ps`
+# to every user on this machine. It is read out of its mounted file by Vault
+# itself, via the CLI's `key=@<path>` syntax, so only the FILENAME reaches the
+# argument list.
+#
+# This is not the mechanism originally designed, and the difference matters if
+# you ever rewrite this loop. `vault operator unseal - < key` does NOT work:
+# the CLI has no `-` stdin convention, so `-` is taken as the literal key and
+# rejected with "'key' must be a valid hex or base64 string". Piping to the
+# no-argument form does not work either -- Vault refuses it outright with
+# "file descriptor 0 is not a terminal" and tells you to pass the key as an
+# argument instead. The CLI offers exactly two documented routes, a TTY prompt
+# and a command argument, and a Deployment can use neither. `vault write
+# sys/unseal key=@<path>` is the third way: the same unauthenticated API, with
+# the key loaded from the file rather than the command line.
 #
 # The Secret mount is optional, so this deploys before the init ceremony has
 # happened and waits harmlessly. There is no ordering requirement between
@@ -35,7 +48,9 @@ data:
         echo "vault-unsealer: sealed, attempting unseal"
         for k in /unseal/key1 /unseal/key2 /unseal/key3; do
           [ -s "$k" ] || continue
-          vault operator unseal - < "$k" >/dev/null 2>&1 || true
+          # key=@<path> makes Vault read the key from the file. Only the path
+          # is an argument; the key itself never reaches the command line.
+          vault write -format=json sys/unseal key=@"$k" >/dev/null 2>&1 || true
         done
         vault status >/dev/null 2>&1
         if [ $? -eq 0 ]; then
