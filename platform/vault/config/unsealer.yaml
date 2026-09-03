@@ -27,41 +27,17 @@
 # sys/unseal key=@<path>` is the third way: the same unauthenticated API, with
 # the key loaded from the file rather than the command line.
 #
+# THE SCRIPT IS INLINE, NOT IN A CONFIGMAP, AND THAT IS DELIBERATE.
+# It lived in a ConfigMap first. Editing a ConfigMap does not roll the pods
+# that mount it, so a corrected script reached the cluster and the running
+# helper went on executing the old one from memory -- Argo CD showed Synced,
+# the ConfigMap held the fix, and Vault stayed sealed. Inline, the script is
+# part of the pod template, so any change to it rolls the Deployment the way
+# every other change does.
+#
 # The Secret mount is optional, so this deploys before the init ceremony has
 # happened and waits harmlessly. There is no ordering requirement between
 # deploying Vault and initialising it, on first install or on a rebuild.
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: vault-unsealer
-  namespace: vault
-data:
-  unseal.sh: |
-    #!/bin/sh
-    # vault status exits 0 unsealed, 2 sealed, 1 on error. No jq needed.
-    export VAULT_ADDR="http://vault-0.vault-internal:8200"
-    echo "vault-unsealer: watching ${VAULT_ADDR}"
-    while true; do
-      vault status >/dev/null 2>&1
-      rc=$?
-      if [ "$rc" -eq 2 ]; then
-        echo "vault-unsealer: sealed, attempting unseal"
-        for k in /unseal/key1 /unseal/key2 /unseal/key3; do
-          [ -s "$k" ] || continue
-          # key=@<path> makes Vault read the key from the file. Only the path
-          # is an argument; the key itself never reaches the command line.
-          vault write -format=json sys/unseal key=@"$k" >/dev/null 2>&1 || true
-        done
-        vault status >/dev/null 2>&1
-        if [ $? -eq 0 ]; then
-          echo "vault-unsealer: unsealed"
-        else
-          echo "vault-unsealer: still sealed (uninitialized, or keys absent/wrong)"
-        fi
-      fi
-      sleep 10
-    done
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -86,7 +62,35 @@ spec:
           # Same image as Vault itself -- no third-party unsealer image, so
           # this phase adds exactly one image to the cluster.
           image: hashicorp/vault:2.0.4
-          command: ["/bin/sh", "/scripts/unseal.sh"]
+          command: ["/bin/sh", "-c"]
+          args:
+            # Kubernetes expands only $(VAR) in args; ${VAR}, "$k" and $? are
+            # passed through to the shell untouched.
+            - |
+              # vault status exits 0 unsealed, 2 sealed, 1 on error. No jq needed.
+              export VAULT_ADDR="http://vault-0.vault-internal:8200"
+              echo "vault-unsealer: watching ${VAULT_ADDR}"
+              while true; do
+                vault status >/dev/null 2>&1
+                rc=$?
+                if [ "$rc" -eq 2 ]; then
+                  echo "vault-unsealer: sealed, attempting unseal"
+                  for k in /unseal/key1 /unseal/key2 /unseal/key3; do
+                    [ -s "$k" ] || continue
+                    # key=@<path> makes Vault read the key from the file. Only
+                    # the path is an argument; the key never reaches the
+                    # command line.
+                    vault write -format=json sys/unseal key=@"$k" >/dev/null 2>&1 || true
+                  done
+                  vault status >/dev/null 2>&1
+                  if [ $? -eq 0 ]; then
+                    echo "vault-unsealer: unsealed"
+                  else
+                    echo "vault-unsealer: still sealed (uninitialized, or keys absent/wrong)"
+                  fi
+                fi
+                sleep 10
+              done
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -97,16 +101,10 @@ spec:
             limits:
               memory: 64Mi
           volumeMounts:
-            - name: scripts
-              mountPath: /scripts
-              readOnly: true
             - name: unseal-keys
               mountPath: /unseal
               readOnly: true
       volumes:
-        - name: scripts
-          configMap:
-            name: vault-unsealer
         - name: unseal-keys
           secret:
             secretName: vault-unseal-keys
