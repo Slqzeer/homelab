@@ -1,7 +1,7 @@
 # Tailscale Kubernetes operator. Provides IngressClass "tailscale" and the
 # tailscale.com CRDs.
 #
-# Wave 2: after namespaces (0), before ingress-config (3), which creates
+# Wave 2: after namespaces (0), before ingress-config (21), which creates
 # a ProxyClass instance and Ingress objects using the CRDs this Application
 # installs. Each Ingress gets its own dedicated proxy, bounded by the
 # ProxyClass via the tailscale.com/proxy-class annotation; a shared

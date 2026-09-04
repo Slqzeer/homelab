@@ -17,8 +17,12 @@
 # because an Ingress exists. It still lands after ingress-operator (2),
 # which installs the CRDs these are instances of.
 #
-# Consequence, accepted: on a rebuild no tailnet URL resolves until wave 21.
-# kubectl port-forward covers that window.
+# Consequence, accepted: on a rebuild no tailnet URL resolves until wave 21
+# is applied. That wave does not open by itself: Vault at wave 10 comes up
+# sealed, Argo CD does not advance past a wave that isn't Healthy, and
+# wave 21 (this Application) stays unapplied until a human runs the Vault
+# init ceremony -- see platform/vault/README.md. kubectl port-forward is
+# the route in for however long that takes, not a timer that expires.
 #
 # path is infrastructure/ingress/config -- NOT infrastructure/ingress,
 # which also holds values.yaml. Every YAML under `path` is applied as a

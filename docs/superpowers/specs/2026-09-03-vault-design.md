@@ -43,7 +43,7 @@ binding constraint. **Storage is**, because it has never once been used.
 | V2 | Raft integrated storage, **1 replica** | The plan requires "snapshots Vault". Only Raft has a native snapshot API producing a consistent backup from a running Vault. `file` storage would mean copying a live directory |
 | V3 | Auto-unseal via an in-cluster helper reading keys from a Secret | User's explicit choice. Vault OSS has no local-file seal type, so this is a helper calling the unseal API, not a native seal |
 | V4 | The helper reuses the `hashicorp/vault` image | No third-party unsealer image. This phase adds exactly one new image to the cluster |
-| V5 | Unseal keys piped on **stdin**, never as arguments | Command arguments are visible in `ps` to every user on the host. `vault operator unseal $KEY` would leak the keys |
+| V5 | Unseal keys read from a mounted file via `key=@<path>`, never as arguments | Command arguments are visible in `ps` to every user on the host. `vault operator unseal $KEY` would leak the keys. (Originally designed as stdin piping; corrected post-implementation, see dated note below) |
 | V6 | `vault operator init` is run by hand | Automating it puts unseal keys and the root token through Job logs and the k3s datastore |
 | V7 | Injector and CSI disabled | Phase 17 uses the Vault Secrets Operator instead. The chart enables the injector by default via its `"-"` sentinel |
 | V8 | `ingress-config` moves from wave 3 to **21** | Removes the wave coupling that would block Vault. See §6 |
@@ -76,7 +76,7 @@ you ──https──► vault.taildf6cd4.ts.net     (tailnet proxy terminates T
 | Path | Contents |
 | --- | --- |
 | `platform/vault/values.yaml` | Vault Helm values |
-| `platform/vault/unsealer.yaml` | The auto-unseal Deployment and its ConfigMap script |
+| `platform/vault/config/unsealer.yaml` | The auto-unseal Deployment, script inline in the pod template |
 | `platform/vault/README.md` | Init ceremony, unseal keys, snapshots, recovery |
 | `infrastructure/ingress/config/vault-ingress.yaml` | Ingress for the Vault UI |
 | `environments/homelab/apps/vault.yaml` | Application, sync-wave `10` |
@@ -89,6 +89,33 @@ you ──https──► vault.taildf6cd4.ts.net     (tailnet proxy terminates T
 The unsealer lives in `platform/vault/` beside Vault rather than in its own
 component directory: it has no independent purpose, its lifecycle is Vault's,
 and separating them would invite someone to delete one without the other.
+
+> **Corrected 2026-09-04, after implementation.** The unsealer manifest was
+> originally planned at `platform/vault/unsealer.yaml`, script in a
+> ConfigMap. It actually lives one level down, at
+> `platform/vault/config/unsealer.yaml`, with the script inline in the pod
+> template. Two separate reasons, both structural:
+>
+> - **The `config/` subdirectory exists because an Argo CD directory `path`
+>   source applies every YAML beneath it as a Kubernetes manifest, and a
+>   Helm values file has no `kind`.** Putting `unsealer.yaml` next to
+>   `values.yaml` in `platform/vault/` and pointing a manifest source
+>   directly at that directory would have Argo CD try to apply
+>   `values.yaml` too. Splitting the manifest into its own `config/`
+>   subdirectory is the same fix, for the same reason, as
+>   `infrastructure/ingress/config`.
+> - **The ConfigMap is gone because editing a ConfigMap does not roll the
+>   pods that mount it.** A corrected script reached the cluster as a
+>   ConfigMap update while the running pod went on executing the old
+>   script from memory — Argo CD reported Synced, the ConfigMap held the
+>   fix, and Vault stayed sealed regardless. Inline, in the pod template,
+>   any change to the script changes the pod template and rolls the
+>   Deployment the way every other change does.
+>
+> The `vault` Application also gained a third source pointing at
+> `platform/vault/config` for the first reason above — without it, the
+> manifest sat in git, applied by nothing. See `platform/vault/README.md`
+> and `docs/troubleshooting.md` entry 9 for the full story.
 
 ## 6. Sync waves, and closing the coupling this repo already has
 
@@ -119,8 +146,13 @@ Argo CD Ingress is precisely the operation that produced an orphaned
 finalizer and a hostname collision on 2026-09-02.
 
 Consequence, accepted: on a rebuild from scratch no tailnet URL resolves
-until wave 21. `kubectl port-forward` covers that window, which is why
-it stays documented.
+until wave 21 is applied. That wave does not open on its own: Vault at
+wave 10 comes up sealed and stays `Progressing`, and Argo CD does not
+advance past a wave that is not `Healthy`, until a human runs the Vault
+init ceremony (§8) and creates `vault-unseal-keys`. `kubectl port-forward`
+is the route in for however long that takes — a person closes the window
+by performing the ceremony, not by waiting it out — which is why
+port-forward stays documented.
 
 ## 7. The unseal helper
 
@@ -135,17 +167,21 @@ while true; do
   if [ $? -eq 2 ]; then
     for k in /unseal/key1 /unseal/key2 /unseal/key3; do
       [ -s "$k" ] || continue
-      vault operator unseal - < "$k" >/dev/null 2>&1 || true
+      vault write -format=json sys/unseal key=@"$k" >/dev/null 2>&1 || true
     done
   fi
   sleep 10
 done
 ```
 
+(This block was corrected post-implementation — see the dated note at the
+end of this section.)
+
 Three properties are deliberate:
 
-- **Keys arrive on stdin from mounted files.** Never as arguments (V5),
-  never echoed, never logged.
+- **Keys are read from mounted files via `key=@<path>`.** Never as
+  arguments (V5), never echoed, never logged — only the filename reaches
+  the argument list.
 - **The Secret mount is `optional: true`.** The helper deploys before the
   Secret exists, waits harmlessly, and begins working the moment the Secret
   is created. There is no ordering requirement between deploying Vault and
@@ -157,6 +193,22 @@ Three properties are deliberate:
 
 Failures are tolerated and retried: unsealing an uninitialized Vault fails
 harmlessly, which is the state between deployment and the init ceremony.
+
+> **Corrected 2026-09-04, after implementation.** This section and decision
+> V5 originally specified `vault operator unseal - < "$k"`, piping the key
+> on stdin. That command does not work: the Vault CLI has no `-` stdin
+> convention, so `-` is sent as the literal key and rejected with `'key'
+> must be a valid hex or base64 string`; piping to the no-argument form is
+> refused outright with `file descriptor 0 is not a terminal`.
+> `vault operator unseal -help` documents exactly two routes — a TTY
+> prompt, or the key as a command argument — and a Deployment can use
+> neither. The script block above and V5 have been rewritten to the
+> mechanism actually running in the cluster, `vault write -format=json
+> sys/unseal key=@"$k"`, which keeps V5's original reasoning (arguments are
+> visible in `ps`) intact: the key still never appears in the argument
+> list, only the filename does. See `platform/vault/README.md` and
+> `docs/troubleshooting.md` entry 9 for the full story, including the two
+> other defects hit alongside this one.
 
 ## 8. The init ceremony
 
@@ -193,9 +245,10 @@ implying a standing superuser token is the intended steady state.
 No PersistentVolume or PersistentVolumeClaim has ever existed on this
 cluster (§2). `docs/troubleshooting.md` entry 1 explicitly predicts that
 PVC directories under `/srv/kubernetes/storage` will bite non-root pods,
-naming phase 16 as where it resurfaces. The Vault chart ships
-`securityContext: {}`, so the container runs as whatever UID its image
-declares — a non-root process mounting a PVC.
+naming phase 16 as where it resurfaces. The Vault chart sets
+`runAsNonRoot: true, runAsUser: 100, runAsGroup: 1000, fsGroup: 1000`
+(confirmed by rendering the chart), so the container runs as a non-root
+process mounting a PVC.
 
 Therefore Vault is **not installed until storage is proven**. The first
 implementation task creates a PVC and a non-root pod that writes a file,
@@ -292,7 +345,7 @@ Costs one additional proxy pod, roughly 30Mi measured.
 | Init ceremony performed twice, or keys lost before storage | High | §8 makes it a single explicit operator step with the password manager first |
 | Vault 2.0.x is a major version; chart 0.34.1 is recent | Medium | Pin both; verify `vault status` and the unseal API behave as documented rather than assuming |
 | Root token left as a standing superuser | Medium | §8 documents revocation once phase 17 lands |
-| Wave 21 move delays all tailnet URLs on a rebuild | Low | Accepted (§6); port-forward covers the window |
+| Wave 21 move delays all tailnet URLs on a rebuild until the Vault init ceremony runs | Low | Accepted (§6); port-forward is the route in until a human closes it |
 | Vault 2.0.4 is BUSL-licensed | Low | Permitted for internal homelab use. OpenBao is the Apache-licensed fork if this ever matters |
 
 ## 15. Verification

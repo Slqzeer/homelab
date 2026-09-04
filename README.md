@@ -15,6 +15,7 @@ manifest ever applied by hand.
 | `infrastructure/storage/` | PVC storage notes |
 | `infrastructure/cert-manager/` | Empty; deferred, see the 2026-09-02 spec |
 | `platform/` | Vault, databases, registry |
+| `platform/vault/` | HashiCorp Vault: Helm values, unsealer manifest, init/backup docs |
 | `observability/` | Prometheus, Grafana, logging |
 | `apps/` | Currently unused; reserved for per-application values/manifests, not Application objects |
 
@@ -22,8 +23,10 @@ manifest ever applied by hand.
 
 Commit an Application to `environments/homelab/apps/` and push. The root
 Application picks it up; nothing is applied by hand. Order components with the
-`argocd.argoproj.io/sync-wave` annotation: infrastructure 1-5, platform 10,
-apps 20.
+`argocd.argoproj.io/sync-wave` annotation: infrastructure 0-2, platform 10,
+apps 20, `ingress-config` deliberately last at 21 (see below). Platform (10)
+gates apps (20) and `ingress-config` (21) the same way infrastructure gates
+platform — see below for what that means on a rebuild.
 
 Every Application object belongs in `environments/homelab/apps/` — `root.yaml`
 recurses only that directory. The top-level `apps/` directory is a different
@@ -31,30 +34,48 @@ path and is not watched by anything: an Application placed there is never
 applied, and there is no error. It stays out of Argo CD entirely, so nothing
 reports it as missing or out of sync — the component simply never appears.
 
-### A new component can also "never appear" for a different reason: `ingress-config` at wave 3
+### A new component can also "never appear" for a reason with nothing in its own manifest
 
-`environments/homelab/apps/ingress-config.yaml` sits at sync-wave 3 and, by
-Argo CD's wave semantics, gates every later wave — nothing at wave 10
-(platform) or wave 20 (apps) starts syncing until every earlier wave is
-`Healthy`. If ingress breaks for any reason (the `operator-oauth` Secret
-lost, the OAuth client revoked, Let's Encrypt failing) `ingress-config`
-never goes `Healthy`, and a component you just added at a later wave will
-silently never sync — with nothing in its own Application object naming
-ingress as the cause. This is a structural coupling, not a bug in the new
-component's manifest.
+By Argo CD's wave semantics, a wave gates every later wave — nothing at a
+later wave starts syncing until every earlier wave is `Healthy`. Before
+phase 16, `environments/homelab/apps/ingress-config.yaml` sat at sync-wave
+3, early enough to gate the platform (10) and apps (20) tiers. It depends on
+cluster-only state (the `operator-oauth` Secret, the OAuth client, Let's
+Encrypt) and an Ingress is `Progressing`, not `Healthy`, until the Tailscale
+control plane finishes provisioning it — so any ingress trouble at all
+silently blocked every component behind it, with nothing in the blocked
+component's own Application object naming ingress as the cause.
 
-If a newly committed component never appears, the first thing to check is
-not that component — it is the overall wave picture:
+Phase 16 removed that coupling: `ingress-config` now sits at wave 21,
+deliberately after everything else, specifically so that Vault at wave 10
+could not be blocked by it. Nothing in this repository now waits on ingress
+health, so ingress is no longer the likely culprit for a component that
+never appears.
+
+The coupling was moved, not eliminated — **Vault at wave 10 is now the
+early gate**, ahead of both apps (20) and `ingress-config` (21), and it
+depends on hand-created cluster-only state the same way ingress did (the
+`vault-unseal-keys` Secret, created by a human running the init ceremony —
+see `platform/vault/README.md`). It is a stricter gate in one respect:
+ingress could eventually recover on its own once its dependencies came
+back, but a perfect rebuild still needs a human to run the ceremony before
+Vault ever goes `Healthy`. If `vault-unseal-keys` is deleted, or Vault
+otherwise stays sealed, the `vault` Application freezes at `Progressing`,
+and `ingress-config` freezes with it — any future change to an Ingress or
+the ProxyClass silently stops being applied until Vault is unsealed again.
+
+The general lesson still holds, and is worth keeping regardless of which
+Application happens to sit early: if a newly committed component never
+appears, the first thing to check is not that component — it is the overall
+wave picture:
 
 ```bash
 sg k3s-admin -c 'kubectl -n argocd get applications'
 ```
 
 Anything at or before your component's wave that is not `Synced`/`Healthy`
-is blocking it. `ingress-config` is the most likely culprit because it sits
-early (wave 3) and depends on cluster-only state (see `docs/troubleshooting.md`
-entry 8). A structural fix (decoupling later waves from ingress health) is
-deliberately deferred to phase 16 — see the design spec's risk table, §13.
+is blocking it. See the design spec's §6 for the full wave table and why
+`ingress-config` moved.
 
 ## Removing a component
 
@@ -155,6 +176,10 @@ Argo CD is at **<https://argocd.taildf6cd4.ts.net>** from any device on
 the tailnet. The certificate is a real Let's Encrypt certificate issued
 by Tailscale, so no CA needs installing anywhere.
 
+Vault is at **<https://vault.taildf6cd4.ts.net>**, same tailnet, same
+certificate arrangement. See `platform/vault/README.md` for the init
+ceremony — Vault comes up sealed and uninitialized until that runs once.
+
 Log in as `admin`. The initial-password Secret was deleted after the
 first password change; there is no recovery path from the cluster, so the
 password must be kept in a password manager.
@@ -191,6 +216,15 @@ before it is fixed, reinstates the same breakage:
    the bad commit reinstalls the bad values regardless of what has been
    pushed.
 
+### Vault: snapshots and keys are both required
+
+A Vault Raft snapshot is encrypted with Vault's master key. Restoring one
+into a fresh Vault requires the same unseal keys. Snapshots live on disk at
+`/backups/vault`; the unseal keys live only in a password manager. Neither
+is sufficient alone, and that separation is deliberate — keeping both in one
+place would create a single point of total loss and total compromise at
+once. See `platform/vault/README.md`.
+
 ## First install / rebuild
 
 1. **Enable HTTPS Certificates on the tailnet first**: Tailscale admin
@@ -217,6 +251,16 @@ before it is fixed, reinstates the same breakage:
    hostname resolves. See `infrastructure/ingress/README.md`. Argo CD
    itself is reachable by port-forward throughout, so this does not
    block recovery.
+6. Run the Vault init ceremony — see `platform/vault/README.md`. **This is
+   not optional on a rebuild.** Vault sits at sync-wave 10, and Argo CD does
+   not advance a wave whose resources are not `Healthy`. A freshly deployed
+   Vault comes up sealed, with a failing readiness probe, so the `vault`
+   Application sits `Progressing` at wave 10 until this ceremony completes
+   and `vault-unseal-keys` is created — and **nothing at wave 21 is applied
+   until then**, including the ProxyClass and every Ingress, Argo CD's own
+   included. Until the ceremony runs, no tailnet hostname resolves for
+   anything and `kubectl port-forward` is the only route in. This is not a
+   problem in practice: the ceremony itself needs `kubectl`, not a browser.
 
 The order matters: step 3 must follow step 2, because the `argocd`
 namespace does not exist until `bootstrap.sh` creates it. The credential
@@ -224,6 +268,9 @@ is needed only before step 4, which is the first thing that clones this
 repository. Step 1 (HTTPS Certificates) has no ordering dependency on the
 others — it is a tailnet setting, not a cluster step — but it must be done
 before anyone relies on TLS working, so do it first and be done with it.
+Step 6 has no fixed position either — it only needs Vault deployed, which
+happens automatically at wave 10 — but until it runs, everything from wave
+21 on stays blocked, so do it as soon as `vault-0` exists.
 
 ## Documentation
 

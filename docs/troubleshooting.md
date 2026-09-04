@@ -336,6 +336,14 @@ and it exists in no repository either.
 | --- | --- | --- |
 | `repo-homelab` | `argocd` | All Argo CD reconciliation stops |
 | `operator-oauth` | `tailscale` | All tailnet ingress stops; every `.ts.net` URL dies |
+| `vault-unseal-keys` | `vault` | Vault stops auto-unsealing; recoverable by hand from the password manager |
+
+`vault-unseal-keys` is the only one of the three that is reproducible,
+because the operator holds a copy of the keys in a password manager.
+`repo-homelab` can never move into Vault — Argo CD needs it to clone this
+repository, which is how Vault itself gets deployed; a credential required
+to deploy the secret store cannot live inside it. `operator-oauth` can
+migrate, but only once phase 17 lands the Vault Secrets Operator.
 
 Losing `operator-oauth` does **not** stop reconciliation — Argo CD keeps
 working, and `kubectl port-forward` still reaches it. Symptoms are
@@ -345,7 +353,8 @@ hostnames that stop resolving and proxy pods that fail to authenticate:
 kubectl -n tailscale logs deploy/operator --tail=50
 ```
 
-Both are backup-worthy until Vault takes over in phase 16.
+All three are backup-worthy. Phase 16 landed without either
+`repo-homelab` or `operator-oauth` moving into Vault — see above for why.
 
 ---
 
@@ -495,3 +504,113 @@ Argo CD prunes only what it manages. Secrets and finalizers the Tailscale
 operator creates directly against the Kubernetes API are invisible to
 Argo CD and survive a design change untouched — long enough to poison
 whatever is meant to replace them.
+
+---
+
+## 9. Vault is sealed, or will not come back after a restart
+
+### Symptom
+
+`vault-0` is Running but never becomes Ready, and
+
+    sg k3s-admin -c 'kubectl -n vault exec vault-0 -- vault status'
+
+reports `Sealed true`. Anything depending on Vault fails.
+
+### A sealed Vault is normal at two moments
+
+Immediately after deployment and before the init ceremony, and for a few
+seconds after any pod restart. Only a Vault that stays sealed is a fault.
+
+### Three faults hit during phase 16, each with a green Argo CD and a broken cluster
+
+`Synced`/`Healthy` on the `vault` Application was **not** evidence any of
+these were fine. Every one of them looked correct from Argo CD's side while
+Vault stayed sealed.
+
+**1. Keys present and correct, helper running, still sealed — the unseal
+command itself was wrong.** The helper's own logging swallows the real
+error with `>/dev/null 2>&1`, so its logs say only "still sealed" no matter
+what actually failed. Diagnose by running one unseal by hand and reading
+the API's answer directly:
+
+    sg k3s-admin -c 'kubectl -n vault exec deploy/vault-unsealer -- sh -c "VAULT_ADDR=http://vault-0.vault-internal:8200 vault write -format=json sys/unseal key=@/unseal/key1"'
+
+`'key' must be a valid hex or base64 string` means the key argument itself
+is malformed — including the case where a literal `-` was sent as the key,
+which is what `vault operator unseal - < "$k"` actually does. The Vault CLI
+has no `-` stdin convention; that form is rejected outright, and piping to
+the no-argument form fails differently again, with
+`file descriptor 0 is not a terminal`. The mechanism that works is
+`vault write -format=json sys/unseal key=@"$k"` — see
+`platform/vault/README.md` and `platform/vault/config/unsealer.yaml` for why.
+
+**2. A corrected script that never runs.** The unsealer's script was fixed
+in git, Argo CD showed Synced, and Vault stayed sealed anyway, because the
+script originally lived in a ConfigMap. Editing a ConfigMap does not roll
+the pods that mount it, so the running pod kept executing the old script
+from memory indefinitely. Check the pod's age against when the fix was
+pushed:
+
+    sg k3s-admin -c 'kubectl -n vault get pods -l app=vault-unsealer'
+
+A pod older than the fix is running stale code no matter what git or Argo
+CD say. This is why the script now lives inline in the pod template
+(`config/unsealer.yaml`): any change to it changes the pod template, which
+rolls the Deployment the way every other change does.
+
+**3. A manifest in git that nothing applies.** The unsealer manifest sat in
+`platform/vault/` with no Application source pointing at it, so it was
+never applied at all — not missing, not failing, simply never submitted to
+the API server — while the `vault` Application still reported
+Synced/Healthy, because Argo CD only reports on what it was told to manage.
+Confirm the object you expect is actually one Argo CD knows about:
+
+    sg k3s-admin -c "kubectl -n argocd get application vault -o jsonpath='{.status.resources}'"
+
+If the resource you expect is missing from that list, Argo CD was never
+told to look at it, regardless of whether the file exists in git.
+
+**Synced/Healthy means Argo CD applied everything it knows about. It says
+nothing about a file it was never told to look at.** All three faults above
+are instances of that one fact, and it is the most transferable thing this
+phase produced — checking Argo CD's status is not the same as checking that
+the cluster does what the repository claims.
+
+### Other checks, if the three above don't match
+
+**Is the Secret present with the right key names?**
+
+    sg k3s-admin -c 'kubectl -n vault get secret vault-unseal-keys -o go-template="{{range \$k, \$v := .data}}{{\$k}}{{\"\n\"}}{{end}}"'
+
+Must print exactly `key1`, `key2`, `key3`, one per line. The helper loops
+over those literal paths; any other name means it silently never unseals.
+The Secret mount is `optional: true`, so the helper runs happily without it
+at all — a running helper proves nothing about whether it can unseal.
+
+Do not use `-o jsonpath={.data}` piped through `grep` to pull out the key
+names: that emits key names *and* the base64-encoded key values in the
+same stream, distinguished only by a character-class pattern, so a value
+that happened to look like a bare word would print alongside the names.
+The `go-template` form above ranges over the map and prints only the keys.
+
+**Is Vault initialised at all?** `Initialized false` in `vault status`
+means the init ceremony never ran. See `platform/vault/README.md`. Do not
+run `vault operator init` against a Vault that already holds data.
+
+**Did the PVC survive?**
+
+    sg k3s-admin -c 'kubectl -n vault get pvc data-vault-0'
+
+A Vault that returns *uninitialized* after a restart has lost its storage —
+a much more serious fault than a seal problem, meaning the PV is not
+persisting.
+
+### The way back in without the helper
+
+Manual unseal always works with the keys from your password manager, using
+the TTY prompt a human has and the helper's Deployment does not:
+
+    sg k3s-admin -c 'kubectl -n vault exec -it vault-0 -- vault operator unseal'
+
+Run it three times, once per key.

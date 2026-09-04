@@ -87,9 +87,16 @@ certificate, and Argo CD still reports it Synced/Healthy — there is no
 error anywhere — but the resulting proxy pod has no memory ceiling at all,
 on a host that is already swapping.
 
-A service at sync-wave 10 or later may instead own its Ingress alongside
-its own manifests. Argo CD's Ingress lives here only because Argo CD runs
-at wave -1; see the comment in `config/argocd-ingress.yaml`.
+**Every Ingress in this repository lives here, at wave 21 — not alongside
+the service it fronts.** This was reconsidered during phase 16 (Vault) and
+decided the other way: a service owning its own Ingress at its own wave
+would reintroduce, per-service, exactly the wave-coupling decision V8
+removed for `ingress-config` itself (see the design spec §6 and §8). The
+Vault Ingress (`config/vault-ingress.yaml`) is the worked example — Vault
+is a wave-10 platform component, but its Ingress lives here at wave 21 with
+everything else, not beside `platform/vault/`. Argo CD's own Ingress lives
+here for the same reason, on top of the wave -1 bootstrapping problem
+described in the comment in `config/argocd-ingress.yaml`.
 
 ## The `operator-oauth` Secret
 
@@ -99,7 +106,9 @@ stored as the Secret `operator-oauth` in the `tailscale` namespace, keys
 
 **This Secret exists only in the cluster and in no repository.** If it is
 lost or the client is revoked, all tailnet ingress stops. It is
-backup-worthy state until Vault takes over in phase 16.
+backup-worthy state; phase 16 landed without it moving into Vault, and it
+can migrate only once phase 17 provides the Vault Secrets Operator. See
+`docs/troubleshooting.md` entry 6.
 
 To recreate it, make an OAuth client at
 <https://login.tailscale.com/admin/settings/oauth> with exactly these

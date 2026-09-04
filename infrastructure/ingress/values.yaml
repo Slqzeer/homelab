@@ -27,7 +27,7 @@ operatorConfig:
       memory: 256Mi
 
 # No defaultProxyClass is set here on purpose. It would name a ProxyClass
-# created later, at sync-wave 3, leaving a dangling reference at wave 2.
+# created later, at sync-wave 21, leaving a dangling reference at wave 2.
 # Each Ingress references the ProxyClass directly instead, via the
 # tailscale.com/proxy-class annotation (a shared ProxyGroup was tried and
 # abandoned -- see infrastructure/ingress/README.md and the design spec §10).
