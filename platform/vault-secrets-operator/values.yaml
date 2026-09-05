@@ -1,0 +1,47 @@
+# Vault Secrets Operator -- the path by which a workload obtains a secret from
+# Vault without anyone copying a value by hand.
+# Chart: hashicorp/vault-secrets-operator 1.5.1 (app 1.5.1)
+# Repo:  https://helm.releases.hashicorp.com
+#
+# The VaultConnection and VaultAuth objects are deliberately NOT created here.
+# The chart can emit them, but they are committed as manifests in config/
+# instead so they land at sync-wave 22, after ingress: their health depends on
+# Vault configuration a human applies, and nothing that gates ingress may
+# depend on that. See the design spec section 6.
+defaultVaultConnection:
+  enabled: false
+defaultAuthMethod:
+  enabled: false
+
+controller:
+  replicas: 1
+
+  manager:
+    # Reconciles one VaultStaticSecret today. The chart's default request of
+    # 64Mi is more than Vault itself measured at (62Mi).
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 96Mi
+
+  kubeRbacProxy:
+    # Mandatory in 1.5.1 -- no flag disables it. It fronts the metrics
+    # endpoint, which nothing scrapes until phase 22.
+    resources:
+      requests:
+        cpu: 5m
+        memory: 16Mi
+      limits:
+        memory: 64Mi
+
+hooks:
+  upgradeCRDs:
+    # Off: this is a Helm-specific workaround for Helm not upgrading files in
+    # a chart's crds/ directory. Argo CD renders with --include-crds and
+    # applies them as ordinary manifests, so the Job is redundant -- and as a
+    # pre-upgrade hook it would run as a PreSync Job on every single sync.
+    # If Argo CD's skipCrds is ever turned on for this Application, this must
+    # be turned back on with it.
+    enabled: false

@@ -21,3 +21,11 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: tailscale
+---
+# Chart default namespace for the Vault Secrets Operator. Created here at
+# wave 0 rather than by CreateNamespace=true, so that every namespace in this
+# cluster has exactly one origin.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vault-secrets-operator-system

@@ -1,0 +1,40 @@
+# Vault Secrets Operator: the controller and its CRDs.
+#
+# Wave 11 -- immediately after Vault (10). Safe there because this
+# Application's health depends only on its own pods starting, not on Vault
+# being configured or unsealed. Its custom resources are a separate
+# Application at wave 22; see environments/homelab/apps/vso-config.yaml for
+# why they are not next to it.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vso-operator
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "11"
+spec:
+  project: default
+  sources:
+    - repoURL: https://helm.releases.hashicorp.com
+      chart: vault-secrets-operator
+      targetRevision: 1.5.1
+      helm:
+        # Pinned deliberately: it prefixes every object name the chart
+        # creates. Nothing in Vault's configuration depends on it (the
+        # authenticating ServiceAccount is our own -- see the design spec
+        # section 9), but a change here still renames live objects.
+        releaseName: vso
+        valueFiles:
+          - $values/platform/vault-secrets-operator/values.yaml
+    - repoURL: git@github.com:Slqzeer/homelab.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vault-secrets-operator-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
