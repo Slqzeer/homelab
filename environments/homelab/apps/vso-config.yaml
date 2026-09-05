@@ -1,0 +1,36 @@
+# The Vault -> Kubernetes Secret path: ServiceAccount, VaultConnection,
+# VaultAuth, VaultStaticSecret.
+#
+# Wave 22 -- AFTER ingress-config (21), which looks backwards next to its
+# operator at wave 11 and is deliberate. A VaultStaticSecret only becomes
+# Healthy once Vault holds the KV mount, the policy and the role, and those
+# come from a script a human runs (platform/vault/configure-vault.sh). At an
+# earlier wave this Application would gate wave 21, so a rebuild where someone
+# unsealed Vault but forgot the script would silently kill every tailnet URL,
+# with nothing naming the script as the cause.
+#
+# That is the failure phase 16 removed by moving ingress to wave 21.
+# Re-introducing it one phase later would be an unforced error, and nothing
+# consumes the canary, so the late placement costs nothing.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vso-config
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "22"
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:Slqzeer/homelab.git
+    targetRevision: main
+    path: platform/vault-secrets-operator/config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vault
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
