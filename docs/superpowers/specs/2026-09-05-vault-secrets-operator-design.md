@@ -47,7 +47,8 @@ that first gives Vault a secrets engine, an auth method, a policy and a role.
 | S7 | `vso-config` sits at wave **22**, after `ingress-config` (21) | §6. Its health depends on imperative state no wave can guarantee |
 | S8 | `vso-operator` sits at wave 11 | Its health depends only on its pods starting, not on Vault being configured or unsealed |
 | S9 | **`operator-oauth` is NOT migrated into Vault** | §10. It cannot be, and the phase-16 spec was wrong to say it could |
-| S10 | Helm `releaseName` pinned to `vso`, deliberately | §9. The Vault role binds to a ServiceAccount name Helm derives from it |
+| S10 | A **dedicated ServiceAccount `vault-canary`** in namespace `vault` is what authenticates, not the operator's own | §9. VSO requires the ServiceAccount to reside in the consuming secret's namespace, and this removes any dependency on Helm-generated names |
+| S11 | Helm `releaseName` pinned to `vso` | For predictable object names only. Auth no longer depends on it (S10) |
 
 ## 4. Architecture
 
@@ -81,7 +82,7 @@ and never the value. That is the property the roadmap asks for.
 | --- | --- |
 | `platform/vault/configure-vault.sh` | Idempotent Vault configuration. **Human-run, not reconciled** |
 | `platform/vault-secrets-operator/values.yaml` | VSO Helm values |
-| `platform/vault-secrets-operator/config/vault-secrets.yaml` | `VaultConnection`, `VaultAuth`, `VaultStaticSecret` |
+| `platform/vault-secrets-operator/config/vault-secrets.yaml` | `ServiceAccount`, `VaultConnection`, `VaultAuth`, `VaultStaticSecret` |
 | `platform/vault-secrets-operator/README.md` | What the path is, how to verify it, how it fails |
 | `environments/homelab/apps/vso-operator.yaml` | Application, wave `11` |
 | `environments/homelab/apps/vso-config.yaml` | Application, wave `22` |
@@ -136,9 +137,8 @@ Every step checks before acting, so a rebuild re-runs it safely.
 3. Enable the `kubernetes` auth method
 4. Configure it with the in-cluster API server address
 5. Write policy `vso-canary-read`, granting `read` on **`homelab/data/canary`**
-6. Create role `vso-canary`, binding ServiceAccount
-   `vso-vault-secrets-operator-controller-manager` in namespace
-   `vault-secrets-operator-system` to that policy
+6. Create role `vso-canary`, binding ServiceAccount **`vault-canary` in
+   namespace `vault`** to that policy, with the audience set to `vault`
 
 **The `data/` segment in step 5 is not a typo.** KV v2 stores values one level
 below the mount, so a policy written against `homelab/canary` matches nothing
@@ -164,29 +164,59 @@ Three objects, all in `platform/vault-secrets-operator/config/`:
   HTTP in-cluster, matching the posture used for Argo CD and Vault's own UI
   (phase 16, V9). Single node; pod traffic never leaves the host.
 - **`VaultAuth`** — how to authenticate: the `kubernetes` mount, role
-  `vso-canary`, and the operator's ServiceAccount.
+  `vso-canary`, ServiceAccount `vault-canary`, audience `vault`.
 - **`VaultStaticSecret`** — what to fetch. Required fields are `mount`, `path`,
   `type` and `destination`; `refreshAfter` sets the poll interval.
+- **`ServiceAccount vault-canary`** — the identity that authenticates (§9).
+  Four objects, not three; it is listed here because it is easy to mistake for
+  incidental scaffolding when it is the thing Vault actually trusts.
+
+All live in namespace `vault`, which `VaultAuth` requires (§9). `VaultConnection`
+requires both `address` and `skipTLSVerify`.
 
 The canary materialises as Secret `vault-canary` in namespace `vault`. It is
 permanent and deliberately boring: its only job is to be the first thing checked
 when the path appears broken. VSO's failure mode is a Secret that quietly stops
 updating, so a known-good object with a known value is worth its negligible cost.
 
-## 9. The release-name coupling
+## 9. Which ServiceAccount authenticates
 
-Step 6 of the script names a ServiceAccount that **Helm derives from the release
-name**: `vso` + `-vault-secrets-operator-controller-manager`. An imperative
-string inside a shell script must match a name generated from a declarative
-values file.
+**Corrected 2026-09-05, while writing the implementation plan.** An earlier
+draft of this spec bound the Vault role to the operator's own ServiceAccount,
+`vso-vault-secrets-operator-controller-manager`, and treated the resulting
+dependency on Helm's release name as a headline risk.
 
-Change `releaseName` and authentication breaks, with nothing in git indicating
-why — Argo CD will report the Application perfectly Synced while VSO logs a
-permission denial.
+That was wrong, and the `VaultAuth` CRD states the rule itself:
 
-Mitigation is not clever, just explicit: `releaseName: vso` is pinned with a
-comment saying the script depends on it, and the script carries the reciprocal
-comment. Both point at this section.
+> `serviceAccount`: ServiceAccount to use when authenticating to Vault's
+> authentication backend. **This must reside in the consuming secret's
+> (VDS/VSS/PKI) namespace.**
+
+The authenticating identity must therefore live in namespace `vault`, beside the
+`VaultStaticSecret` — not in the operator's namespace. VSO's ClusterRole grants
+`serviceaccounts/token: create` cluster-wide, so it can mint a token for any
+ServiceAccount named this way.
+
+This phase creates its own ServiceAccount, `vault-canary` in namespace `vault`,
+and Vault's role binds `system:serviceaccount:vault:vault-canary`.
+
+Two consequences, both good:
+
+- **The release-name coupling disappears entirely.** No string in the script
+  refers to anything Helm generates. `releaseName: vso` stays pinned (S11), but
+  only for predictable object names; authentication no longer depends on it.
+- It follows VSO's own guidance of a distinct ServiceAccount per Vault role, so
+  a second consumer in phase 18 cannot silently inherit the canary's access.
+
+**The coupling that remains** is narrower and unavoidable: the script writes
+`system:serviceaccount:vault:vault-canary` into a Vault role, and a manifest
+creates a ServiceAccount of that name. Two files must agree on one string. Both
+carry a comment naming the other, and §14 verifies the binding by
+authenticating rather than by reading either file.
+
+The **audience must match on both sides**: `VaultAuth` requests a token with
+audience `vault`, and the Vault role is configured to expect `vault`. A mismatch
+produces a permission denial that names neither side as the cause.
 
 ## 10. Why `operator-oauth` cannot move into Vault
 
@@ -242,7 +272,8 @@ discovering later during an outage.
 | Risk | Severity | Mitigation |
 | --- | --- | --- |
 | KV v2 policy written without the `data/` segment | **High — near-certain if unexamined** | §7 states it; the script carries a comment; the troubleshooting entry leads with it |
-| Release name changed, breaking the Vault role binding | High | §9; reciprocal comments in both files; Argo CD reports Synced while auth fails |
+| ~~Release name changed, breaking the Vault role binding~~ | **Eliminated** | §9 — the design no longer references any Helm-generated name |
+| ServiceAccount name or token audience disagree between the script and the manifests | Medium | §9; reciprocal comments; verification authenticates rather than reads. Argo CD reports Synced while auth fails, so the check must be a login |
 | Rebuild unseals Vault but skips the config script | Medium | Ceremony documented as one procedure in two places; wave 22 placement means the damage is confined to the canary, not ingress |
 | Vault's config is imperative and unversioned in-cluster | Accepted | S4; the script is committed and idempotent, so the *intent* is versioned even though the state is not |
 | VSO fails silently — Secret stops updating, nothing alerts | Medium | S6's canary is the deliberate answer; real alerting waits for phase 22 |
