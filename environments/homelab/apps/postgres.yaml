@@ -1,0 +1,32 @@
+# PostgreSQL, the first stateful workload.
+#
+# Wave 23 -- after vso-config (22), because the StatefulSet cannot start
+# without Secret postgres-credentials and VSO creates that at 22. On a rebuild
+# the database therefore comes up last, after the Vault ceremony, which is
+# correct: its credential does not exist until then.
+#
+# Nothing sits behind Postgres, so an unhealthy database gates nothing.
+# Anything added later that does NOT depend on Postgres belongs at a wave
+# below 23, not above it out of habit.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: postgres
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "23"
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:Slqzeer/homelab.git
+    targetRevision: main
+    path: platform/databases/postgres/config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: databases
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

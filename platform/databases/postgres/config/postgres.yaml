@@ -1,0 +1,114 @@
+# PostgreSQL 18.6 -- the cluster's first stateful workload.
+#
+# A plain StatefulSet rather than a chart. The Bitnami chart renders
+# `bitnami/postgresql:latest`, and an unpinned tag on a database can change the
+# MAJOR version across a restart; PostgreSQL refuses to start on a data
+# directory written by a different major. See the design spec section 5.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: databases
+spec:
+  # Headless: required for the StatefulSet's stable network identity. With one
+  # replica, `postgres.databases.svc` resolves to the pod, which is all any
+  # in-cluster client needs. There is no Ingress -- the Postgres wire protocol
+  # is not HTTP and does not belong behind the tailnet proxy.
+  clusterIP: None
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: databases
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      serviceAccountName: postgres
+      securityContext:
+        # Probed from the image on 2026-09-06: the postgres user is uid 70,
+        # gid 70 -- NOT the 999 usually assumed -- and the entrypoint starts
+        # as root and drops privileges itself. Setting the user explicitly
+        # makes it skip the root path entirely; fsGroup makes the volume
+        # writable, the mechanism proven on this cluster in phase 16.
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+      containers:
+        - name: postgres
+          image: postgres:18.6-alpine
+          args:
+            # Both below the defaults. This host is also a workstation and a
+            # game server; PostgreSQL's defaults assume a dedicated machine.
+            - -c
+            - shared_buffers=64MB
+            - -c
+            - max_connections=50
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+          ports:
+            - name: postgres
+              containerPort: 5432
+          resources:
+            requests:
+              cpu: 50m
+              memory: 192Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            # Mounted at /var/lib/postgresql, NOT at the data directory
+            # itself. PostgreSQL 18's image puts PGDATA at
+            # /var/lib/postgresql/18/docker, so this mount leaves PGDATA a
+            # subdirectory -- which is what initdb requires, since it refuses
+            # to initialise into a non-empty directory and a freshly
+            # provisioned volume is not reliably empty.
+            - name: data
+              mountPath: /var/lib/postgresql
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            # Deliberately tolerant. This host has a recorded history of probe
+            # timeouts under memory pressure (troubleshooting entry 4, and the
+            # VSO leader-election restart in entry 10). Killing a database
+            # because the host was briefly busy is worse than waiting.
+            failureThreshold: 6
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: local-path
+        resources:
+          requests:
+            # local-path does not enforce capacity -- a PV is a directory on
+            # /srv, which has 852G free. Nominal, not a quota.
+            storage: 10Gi
