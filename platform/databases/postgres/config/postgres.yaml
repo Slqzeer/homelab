@@ -101,7 +101,23 @@ spec:
             # because the host was briefly busy is worse than waiting.
             failureThreshold: 6
   volumeClaimTemplates:
-    - metadata:
+    - # apiVersion/kind are required here, not decorative. volumeClaimTemplates
+      # is an atomic list under server-side apply -- argocd-controller owns the
+      # whole entry as one unit (`f:volumeClaimTemplates: {}` in
+      # --show-managed-fields), not field-by-field. The API server echoes back
+      # `apiVersion: v1` / `kind: PersistentVolumeClaim` on every read because
+      # the embedded object is defaulted like a standalone PVC. Argo CD's
+      # StatefulSet diff normalizer already knows to ignore the other things
+      # the API server adds here (`spec.volumeMode`, `status.phase`), but not
+      # these two -- Vault's chart-rendered StatefulSet sets them explicitly
+      # and is Synced; ours omitted them and was permanently OutOfSync,
+      # looping a no-op re-apply every reconcile (confirmed via `kubectl diff
+      # --server-side`, which showed no change). Omitting them is what caused
+      # it: the target's atomic-list value then never equals the live one on
+      # the one sub-field the normalizer doesn't cover.
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
         name: data
       spec:
         accessModes:
