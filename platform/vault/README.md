@@ -59,13 +59,29 @@ Vault comes up sealed and uninitialized. This runs once, by hand.
 
 4. The helper unseals within about ten seconds.
 
+5. **Configure Vault.** Unsealing alone leaves Vault empty — no secrets
+   engine, no auth method, no policy, no role. Run
+   `platform/vault/configure-vault.sh` inside the pod, as described in
+   `platform/vault-secrets-operator/README.md`. A rebuild that unseals but
+   does not configure leaves `vso-config` unhealthy at wave 22.
+
 Five shares with a threshold of three buys nothing today, since the cluster
 holds a full quorum. It costs nothing either, and it keeps the option of
 later withdrawing the keys and splitting custody among people without
 re-initialising Vault. Initialising 1-of-1 would close that door.
 
-**The root token is not a permanent credential.** Revoke it once phase 17
-establishes real auth methods.
+**The root token is being kept, deliberately, not revoked.** Phase 17 added
+the Vault Secrets Operator, but that does not make the root token disposable:
+`configure-vault.sh` logs in with it and is a permanent, re-runnable step of
+every rebuild (see `platform/vault-secrets-operator/README.md`), and the only
+other auth path Vault has, role `vso-canary`, grants read on exactly one KV
+path — nowhere near enough to run the ceremony or diagnose a failure. This is
+the same reasoning `docs/superpowers/specs/2026-09-05-vault-secrets-operator-design.md`
+§11 gives for deferring revocation: doing it in the phase that first depends
+on Vault working would remove the credential needed to diagnose a failure. If
+it is ever revoked anyway, the way back is `vault operator generate-root`
+with the unseal keys — a command not otherwise documented in this
+repository.
 
 ## How the helper actually unseals Vault
 

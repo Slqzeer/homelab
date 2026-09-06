@@ -106,8 +106,12 @@ stored as the Secret `operator-oauth` in the `tailscale` namespace, keys
 
 **This Secret exists only in the cluster and in no repository.** If it is
 lost or the client is revoked, all tailnet ingress stops. It is
-backup-worthy state; phase 16 landed without it moving into Vault, and it
-can migrate only once phase 17 provides the Vault Secrets Operator. See
+backup-worthy state permanently, not until some future migration — it can
+**never** move into Vault, phase 17 (the Vault Secrets Operator)
+notwithstanding: the operator mounts this Secret at sync-wave 2, and Vault
+does not exist until wave 10, so a rebuild would wait forever for a secret
+that itself requires Vault to be up. See
+`docs/superpowers/specs/2026-09-05-vault-secrets-operator-design.md` §10 and
 `docs/troubleshooting.md` entry 6.
 
 To recreate it, make an OAuth client at

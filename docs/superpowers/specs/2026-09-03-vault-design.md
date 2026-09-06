@@ -240,6 +240,16 @@ permanently.
 phase 17 establishes real auth methods. Documented as such rather than left
 implying a standing superuser token is the intended steady state.
 
+> **Correction, 2026-09-06 (whole-phase review of phase 17).** Phase 17
+> landed and this did not happen, deliberately. The Kubernetes auth method
+> phase 17 establishes grants role `vso-canary` read on exactly one KV
+> path — nowhere near enough to run `configure-vault.sh` or to diagnose a
+> failure. The root token stays as the standing credential
+> `configure-vault.sh` logs in with on every rebuild; see
+> `docs/superpowers/specs/2026-09-05-vault-secrets-operator-design.md` §11
+> and `platform/vault/README.md`. If it is ever revoked, the way back is
+> `vault operator generate-root` with the unseal keys.
+
 ## 9. Storage — the unproven path
 
 No PersistentVolume or PersistentVolumeClaim has ever existed on this
@@ -303,6 +313,15 @@ Secrets Operator. So the trajectory is 2 → 3 after this phase → 2 after
 phase 17, and the real payoff is that application secrets from phase 18
 onward have somewhere proper to live.
 
+> **Correction, 2026-09-06 (written while documenting phase 17).** The
+> paragraph above is wrong: `operator-oauth` cannot migrate into Vault, not
+> even once VSO exists. The Tailscale operator mounts it at sync-wave 2, and
+> Vault does not exist until wave 10 — wave 2 gates wave 10, so a rebuild
+> would wait forever for a secret that itself requires Vault to be up. See
+> `docs/superpowers/specs/2026-09-05-vault-secrets-operator-design.md` §10
+> for the full argument. The count of cluster-only secrets does **not** fall
+> to two after phase 17; it stays at three.
+
 `vault-unseal-keys` is recoverable from the password manager, unlike the
 other two. That is the one genuinely new safety property this phase adds.
 
@@ -326,7 +345,9 @@ Costs one additional proxy pod, roughly 30Mi measured.
 ## 13. Out of scope
 
 - **Vault Secrets Operator** — phase 17, its own spec
-- Migrating `operator-oauth` into Vault — needs phase 17
+- Migrating `operator-oauth` into Vault — ~~needs phase 17~~. **Corrected
+  2026-09-06:** phase 17 landed and it cannot migrate at all. See §11's
+  correction note and the phase-17 spec §10
 - Scheduled backups — phase 27
 - Any auth method beyond the root token — phase 17
 - Vault policies and roles — nothing consumes Vault yet
@@ -344,7 +365,7 @@ Costs one additional proxy pod, roughly 30Mi measured.
 | Snapshot and keys separated — recovery needs both | High if forgotten | §10 invariant documented in README, not only a component doc |
 | Init ceremony performed twice, or keys lost before storage | High | §8 makes it a single explicit operator step with the password manager first |
 | Vault 2.0.x is a major version; chart 0.34.1 is recent | Medium | Pin both; verify `vault status` and the unseal API behave as documented rather than assuming |
-| Root token left as a standing superuser | Medium | §8 documents revocation once phase 17 lands |
+| Root token left as a standing superuser | Medium | §8 documents this, corrected 2026-09-06: phase 17 landed and the token was kept, deliberately, as the credential `configure-vault.sh` needs |
 | Wave 21 move delays all tailnet URLs on a rebuild until the Vault init ceremony runs | Low | Accepted (§6); port-forward is the route in until a human closes it |
 | Vault 2.0.4 is BUSL-licensed | Low | Permitted for internal homelab use. OpenBao is the Apache-licensed fork if this ever matters |
 

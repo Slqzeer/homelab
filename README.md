@@ -16,6 +16,7 @@ manifest ever applied by hand.
 | `infrastructure/cert-manager/` | Empty; deferred, see the 2026-09-02 spec |
 | `platform/` | Vault, databases, registry |
 | `platform/vault/` | HashiCorp Vault: Helm values, unsealer manifest, init/backup docs |
+| `platform/vault-secrets-operator/` | Vault Secrets Operator: Helm values, `VaultConnection`/`VaultAuth`/`VaultStaticSecret` manifests |
 | `observability/` | Prometheus, Grafana, logging |
 | `apps/` | Currently unused; reserved for per-application values/manifests, not Application objects |
 
@@ -23,10 +24,12 @@ manifest ever applied by hand.
 
 Commit an Application to `environments/homelab/apps/` and push. The root
 Application picks it up; nothing is applied by hand. Order components with the
-`argocd.argoproj.io/sync-wave` annotation: infrastructure 0-2, platform 10,
-apps 20, `ingress-config` deliberately last at 21 (see below). Platform (10)
-gates apps (20) and `ingress-config` (21) the same way infrastructure gates
-platform — see below for what that means on a rebuild.
+`argocd.argoproj.io/sync-wave` annotation: infrastructure 0-2, platform 10
+(`vault`), apps 20, `ingress-config` and `vso-operator` sharing wave 21
+deliberately (see below for why `vso-operator` is not right after `vault`),
+and `vso-config` last of all at 22. Platform (10) gates apps (20) and wave 21
+the same way infrastructure gates platform — see below for what that means on
+a rebuild.
 
 Every Application object belongs in `environments/homelab/apps/` — `root.yaml`
 recurses only that directory. The top-level `apps/` directory is a different
@@ -252,15 +255,29 @@ once. See `platform/vault/README.md`.
    itself is reachable by port-forward throughout, so this does not
    block recovery.
 6. Run the Vault init ceremony — see `platform/vault/README.md`. **This is
-   not optional on a rebuild.** Vault sits at sync-wave 10, and Argo CD does
-   not advance a wave whose resources are not `Healthy`. A freshly deployed
-   Vault comes up sealed, with a failing readiness probe, so the `vault`
-   Application sits `Progressing` at wave 10 until this ceremony completes
-   and `vault-unseal-keys` is created — and **nothing at wave 21 is applied
+   not optional on a rebuild, and it now has two halves: unseal, then
+   configure.** Vault sits at sync-wave 10, and Argo CD does not advance a
+   wave whose resources are not `Healthy`. A freshly deployed Vault comes up
+   sealed, with a failing readiness probe, so the `vault` Application sits
+   `Progressing` at wave 10 until the unseal half completes and
+   `vault-unseal-keys` is created — and **nothing at wave 21 is applied
    until then**, including the ProxyClass and every Ingress, Argo CD's own
-   included. Until the ceremony runs, no tailnet hostname resolves for
-   anything and `kubectl port-forward` is the only route in. This is not a
-   problem in practice: the ceremony itself needs `kubectl`, not a browser.
+   included. Until unseal runs, no tailnet hostname resolves for anything
+   and `kubectl port-forward` is the only route in. This is not a problem in
+   practice: the ceremony itself needs `kubectl`, not a browser.
+
+   The second half — running `platform/vault/configure-vault.sh`, see
+   `platform/vault-secrets-operator/README.md` — has a different blast
+   radius, and the contrast is the whole reason `vso-config` sits at
+   sync-wave 22, after both `ingress-config` and its own operator,
+   `vso-operator`, which share wave 21: skipping the configure half leaves
+   `vso-config` `Progressing`/unhealthy, but because wave 22 sits after
+   every Ingress, that failure does **not** cost any tailnet URL. `vso-operator`
+   itself was deliberately moved off wave 11 (right after `vault`) for the
+   same reason `ingress-config` sits at 21 — see the design spec's §6 and
+   `environments/homelab/apps/vso-operator.yaml` for why a component whose
+   own health says nothing about Vault should still not sit in front of
+   every tailnet URL.
 
 The order matters: step 3 must follow step 2, because the `argocd`
 namespace does not exist until `bootstrap.sh` creates it. The credential
@@ -268,9 +285,11 @@ is needed only before step 4, which is the first thing that clones this
 repository. Step 1 (HTTPS Certificates) has no ordering dependency on the
 others — it is a tailnet setting, not a cluster step — but it must be done
 before anyone relies on TLS working, so do it first and be done with it.
-Step 6 has no fixed position either — it only needs Vault deployed, which
-happens automatically at wave 10 — but until it runs, everything from wave
-21 on stays blocked, so do it as soon as `vault-0` exists.
+Step 6's unseal half has no fixed position either — it only needs Vault
+deployed, which happens automatically at wave 10 — but until it runs,
+everything from wave 21 on stays blocked, so do it as soon as `vault-0`
+exists. The configure half can trail behind it without that same urgency,
+precisely because wave 22 already sits after every Ingress.
 
 ## Documentation
 

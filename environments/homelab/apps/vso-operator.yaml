@@ -1,17 +1,28 @@
 # Vault Secrets Operator: the controller and its CRDs.
 #
-# Wave 11 -- immediately after Vault (10). Safe there because this
+# Wave 21 -- alongside ingress-config, not right after Vault (10). This
 # Application's health depends only on its own pods starting, not on Vault
-# being configured or unsealed. Its custom resources are a separate
-# Application at wave 22; see environments/homelab/apps/vso-config.yaml for
-# why they are not next to it.
+# being configured or unsealed, which made wave 11 look safe -- but wave 11
+# gates wave 21, so a wave-11 VSO would sit in front of ingress-config: the
+# ProxyClass, every Ingress, and Argo CD's own. Phase 16 moved ingress to 21
+# specifically to get it out from behind a component that can fail for
+# reasons of its own, and putting VSO at 11 would have put a new one right
+# back in front of it. The risk is not hypothetical: the VSO manager has
+# already been observed restarting under host memory pressure (lost leader
+# election -- see docs/troubleshooting.md entry 10). Nothing should sit
+# between a rebuild and the Argo CD URL that does not have to.
+#
+# Same wave as ingress-config means the two sync in parallel -- VSO no
+# longer gates it -- while both still precede vso-config at 22, which is the
+# ordering that actually matters: the CRs at 22 need the CRDs this
+# Application installs. Nothing needs VSO running before wave 22.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: vso-operator
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "11"
+    argocd.argoproj.io/sync-wave: "21"
 spec:
   project: default
   sources:

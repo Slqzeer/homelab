@@ -296,8 +296,8 @@ the Secret is lost, the whole loop stops — including Argo CD's management of
 itself.
 
 This Secret exists **only in the cluster** and is reproducible from nothing in
-this repository. Treat it as backup-worthy state until it moves into Vault
-(plan phase 17).
+this repository. Treat it as backup-worthy state permanently, not until some
+future migration — it can never move into Vault; see below for why.
 
 ### Diagnose
 
@@ -343,7 +343,13 @@ because the operator holds a copy of the keys in a password manager.
 `repo-homelab` can never move into Vault — Argo CD needs it to clone this
 repository, which is how Vault itself gets deployed; a credential required
 to deploy the secret store cannot live inside it. `operator-oauth` can
-migrate, but only once phase 17 lands the Vault Secrets Operator.
+**never** migrate either, for a different reason: the Tailscale operator
+mounts it at sync-wave 2, and Vault does not exist until wave 10 — wave 2
+gates wave 10, so a rebuild would wait forever for a secret that itself
+requires Vault to be up. This corrects an earlier claim in the phase-16
+design spec that landing the Vault Secrets Operator (phase 17) would be
+enough; it is not. See
+`docs/superpowers/specs/2026-09-05-vault-secrets-operator-design.md` §10.
 
 Losing `operator-oauth` does **not** stop reconciliation — Argo CD keeps
 working, and `kubectl port-forward` still reaches it. Symptoms are
@@ -614,3 +620,99 @@ the TTY prompt a human has and the helper's Deployment does not:
     sg k3s-admin -c 'kubectl -n vault exec -it vault-0 -- vault operator unseal'
 
 Run it three times, once per key.
+
+---
+
+## 10. Secret from Vault is missing or stale
+
+### Symptom
+
+`kubectl -n vault get secret vault-canary` returns nothing, or the value it
+holds no longer matches what is in Vault.
+
+### Start here: is the Secret there at all?
+
+    sg k3s-admin -c 'kubectl -n vault get secret vault-canary'
+
+If it exists, check its age against when you last changed the Vault value —
+`refreshAfter` is `60s`, so anything older than a minute or two past your
+change is stale, not merely slow.
+
+### What does VSO say?
+
+Read its logs before changing anything — the failure is usually named
+there, not guessed at:
+
+    sg k3s-admin -c 'kubectl -n vault-secrets-operator-system logs deploy/vso-vault-secrets-operator-controller-manager -c manager --tail=50'
+
+### Likely causes, in order
+
+**1. The KV v2 `data/` segment, missing from the policy.** This is the most
+common mistake made with KV v2, and it produces a permission denial that
+reads exactly like a wrong path. KV v2 stores values one level below the
+mount, so a policy written against `homelab/canary` matches nothing; it
+must be `homelab/data/canary`. Check the live policy:
+
+    sg k3s-admin -c 'kubectl -n vault exec -it vault-0 -- vault login'
+    sg k3s-admin -c 'kubectl -n vault exec -it vault-0 -- vault policy read vso-canary-read'
+    sg k3s-admin -c 'kubectl -n vault exec vault-0 -- rm -f /home/vault/.vault-token'
+
+**2. Audience, role, or ServiceAccount disagree between the script and the
+manifest.** Three strings — role `vso-canary`, ServiceAccount
+`vault-canary`, audience `vault` — must match exactly between
+`platform/vault/configure-vault.sh` and
+`platform/vault-secrets-operator/config/vault-secrets.yaml`. A mismatch in
+any one of them is a permission denial naming neither side. Compare
+mechanically rather than by eye, run from the repository root (both paths
+are relative to it):
+
+    grep -E 'bound_service_account_names|bound_service_account_namespaces|audience=|auth/kubernetes/role/' platform/vault/configure-vault.sh
+    grep -E 'role:|serviceAccount:|- vault$|name: vault-canary' platform/vault-secrets-operator/config/vault-secrets.yaml
+
+Expected: role `vso-canary` on both sides; ServiceAccount `vault-canary`;
+namespace `vault`; audience `vault`.
+
+**3. The VSO manager restarted under host memory pressure — not a
+misconfiguration at all.** Observed once on this cluster, about 8 hours
+after install:
+
+    restartCount=1, reason=Error, exitCode=1     (NOT OOMKilled / 137)
+
+with, in the previous container's logs:
+
+    Error retrieving lease lock ... context deadline exceeded
+    Failed to renew lease
+    problem running manager: leader election lost
+
+A slow API server call timed out, the manager lost leader election, and
+restarted cleanly — the same family as entry 4
+(`argocd-repo-server` failing its liveness probe on a loaded host), and
+told apart from a real memory problem the same way: `exitCode 1` with
+lease-renewal messages means API server latency from host contention,
+nothing to tune in the component; `OOMKilled` / `exitCode 137` means a
+genuine memory limit, and then the limits in
+`platform/vault-secrets-operator/values.yaml` are the thing to raise.
+Measured usage here is 36Mi against a 96Mi limit, so trimmed limits were
+**not** the cause of the observed restart — don't raise them reflexively
+on the strength of this fault alone.
+
+**4. Was the ceremony run on this cluster at all?**
+
+    sg k3s-admin -c 'kubectl -n vault exec -it vault-0 -- vault login'
+    sg k3s-admin -c 'kubectl -n vault exec -it vault-0 -- vault auth list'
+    sg k3s-admin -c 'kubectl -n vault exec vault-0 -- rm -f /home/vault/.vault-token'
+
+No `kubernetes/` mount in the list means `configure-vault.sh` never ran on
+this cluster — see `platform/vault/README.md` and
+`platform/vault-secrets-operator/README.md` for the ceremony.
+
+### The general point, again
+
+As in entry 9: **a Synced Application describes what Argo CD applied,
+never what is working.** `vso-config` can report all four objects
+Synced/Healthy — `ServiceAccount`, `VaultConnection`, `VaultAuth`,
+`VaultStaticSecret` — while authentication fails and the Secret quietly
+stops updating. Check the `VaultStaticSecret`'s own status, not the
+Application's:
+
+    sg k3s-admin -c 'kubectl -n vault get vaultstaticsecret vault-canary -o jsonpath={.status.conditions[*].message}'

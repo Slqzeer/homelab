@@ -127,10 +127,29 @@ consumes the canary, so the late placement costs nothing.
 its pods start, become Ready, and report Healthy whether or not Vault is
 configured, unsealed, or even running.
 
+> **Correction, 2026-09-06 (whole-phase review, post-implementation).** The
+> paragraph above is the wrong conclusion from a true premise. Wave 11 gates
+> wave 21, so a wave-11 `vso-operator` sits in front of `ingress-config` —
+> the ProxyClass, every Ingress, and Argo CD's own — regardless of whether
+> its own health depends on Vault. That is exactly the coupling phase 16
+> removed by moving `ingress-config` to 21, reintroduced one phase later by
+> a component that did not need to be early at all: nothing needs VSO
+> running before wave 22, where its CRs actually get created. `vso-operator`
+> was moved to wave 21, alongside `ingress-config`, after the VSO manager
+> was observed restarting once under host memory pressure (see
+> `docs/troubleshooting.md` entry 10) turned the risk from hypothetical to
+> demonstrated. See `environments/homelab/apps/vso-operator.yaml` for the
+> corrected placement.
+
 ## 7. Vault configuration — the unreconciled part
 
 `platform/vault/configure-vault.sh`, run by the operator with their root token.
-Every step checks before acting, so a rebuild re-runs it safely.
+Every step either checks before acting or overwrites with the same value, so
+a rebuild re-runs it safely. Steps 4-6 (the auth config, the policy, and the
+role) are the overwriting kind, not the checking kind — safe because the
+script always writes the same values from git, but meaning a hand-edit made
+directly in Vault to the policy or role is silently reverted the next time
+this script runs.
 
 1. Mount KV v2 at `homelab/`
 2. Seed `homelab/canary`
