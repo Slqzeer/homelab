@@ -29,3 +29,9 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: vault-secrets-operator-system
+---
+# Stateful data services. PostgreSQL (phase 18) is the first.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: databases

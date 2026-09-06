@@ -72,4 +72,44 @@ vault write auth/kubernetes/role/vso-canary \
     token_policies=vso-canary-read \
     ttl=1h
 
+echo "==> seeding homelab/postgres"
+if vault kv get homelab/postgres >/dev/null 2>&1; then
+  echo "    already present, leaving the credential alone"
+else
+  # Generated here and never displayed. It exists only in Vault and in the
+  # Secret VSO derives from it -- no human sees or types it.
+  #
+  # Alphanumeric only: a / or @ inside a password breaks connection URLs in
+  # ways that surface far from the cause.
+  #
+  # Written to a file so that only the FILENAME becomes an argument. A
+  # password on a command line is visible in `ps`, which is the same reason
+  # the unsealer reads its keys with key=@<path>.
+  PWFILE=$(mktemp)
+  head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32 > "$PWFILE"
+  vault kv put homelab/postgres username=postgres password=@"$PWFILE" >/dev/null
+  rm -f "$PWFILE"
+  echo "    generated"
+fi
+
+echo "==> policy vso-postgres-read"
+# The data/ segment is REQUIRED and is not a typo -- see the note on
+# vso-canary-read above.
+vault policy write vso-postgres-read - <<'POLICY'
+path "homelab/data/postgres" {
+  capabilities = ["read"]
+}
+POLICY
+
+echo "==> role vso-postgres"
+# bound_service_account_names must match the ServiceAccount created in
+# platform/databases/postgres/config/vault-secrets.yaml, and audience must
+# match that file's VaultAuth spec.kubernetes.audiences.
+vault write auth/kubernetes/role/vso-postgres \
+    bound_service_account_names=postgres \
+    bound_service_account_namespaces=databases \
+    audience=vault \
+    token_policies=vso-postgres-read \
+    ttl=1h
+
 echo "==> done"
