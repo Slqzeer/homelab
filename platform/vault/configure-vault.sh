@@ -86,6 +86,7 @@ else
   # password on a command line is visible in `ps`, which is the same reason
   # the unsealer reads its keys with key=@<path>.
   PWFILE=$(mktemp)
+  trap 'rm -f "$PWFILE"' EXIT
   head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32 > "$PWFILE"
   vault kv put homelab/postgres username=postgres password=@"$PWFILE" >/dev/null
   rm -f "$PWFILE"

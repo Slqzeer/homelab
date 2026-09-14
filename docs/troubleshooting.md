@@ -733,8 +733,22 @@ client that connected successfully before now gets
 
 If this returns nothing, this is not a database problem — it is the same
 Vault-path problem entry 10 already covers, just for a second consumer. Go
-to entry 10 and work through it with namespace `databases`, ServiceAccount
-`postgres`, and role `vso-postgres` in place of the canary's names.
+to entry 10 and work through it with these substitutions in place of the
+canary's names:
+
+| Canary | PostgreSQL |
+| --- | --- |
+| Namespace `vault` | Namespace `databases` |
+| ServiceAccount `vault-canary` | ServiceAccount `postgres` |
+| Role `vso-canary` | Role `vso-postgres` |
+| Policy `vso-canary-read` | Policy `vso-postgres-read` |
+| Secret `vault-canary` | Secret `postgres-credentials` |
+| `platform/vault-secrets-operator/config/vault-secrets.yaml` | `platform/databases/postgres/config/vault-secrets.yaml` |
+
+Entry 10's own commands name the canary's policy and manifest path
+literally — reading them for PostgreSQL without swapping those two in
+particular checks the wrong policy and greps the wrong file, and both
+still return something that looks plausible.
 
 ### 2. `initdb` refusing a non-empty directory
 
@@ -761,7 +775,21 @@ the database itself. A client using the newly-rotated Secret gets a real,
 correctly-formed credential the database has simply never seen. This will
 look exactly like a broken credential and is not; see
 `platform/databases/postgres/README.md`'s rotation-limitation section for
-the `ALTER USER` fix and why no automatic path exists yet.
+the `\password` fix and why no automatic path exists yet.
+
+### 3b. The same divergence, reached without anyone rotating anything
+
+Rotation is not the only way to get here. If Vault is rebuilt from empty —
+not restored from a snapshot — while the PostgreSQL PVC on `/srv` survives
+(exactly the property phase 16 established for `/srv/kubernetes/storage`),
+the seed guard in `configure-vault.sh` finds no `homelab/postgres`, so it
+generates a **new** password. VSO delivers that new value into
+`postgres-credentials` as usual, and the surviving database still holds the
+old one. The symptom, cause, and fix are identical to §3 above — the only
+difference is how the two sides came to disagree. Since a Vault rebuild
+with a surviving PVC is the far more likely way to meet this cluster's
+history than a human forgetting to run `\password`, check this route
+first if no one on the team remembers rotating anything.
 
 ### 4. A permission error on the data directory
 
@@ -779,9 +807,78 @@ other images in this cluster. A mismatch here, or a poisoned snapshot root
 per entry 1, produces a permission-denied error at container start, before
 `psql` ever gets a chance to run.
 
+### 5. The Application itself was permanently OutOfSync
+
+Unrelated to the four faults above and not specific to PostgreSQL — the
+`postgres` Application spent time permanently OutOfSync with no visible
+difference, from `volumeClaimTemplates`'s atomic-list ownership under
+server-side apply. See entry 12, which generalizes it: it will recur on the
+next StatefulSet, not just this one.
+
 ### The standing point, again
 
 As entries 9 and 10 both established: a Synced Application says what Argo
 CD applied, never what is running. `postgres` can show Synced/Healthy while
 crash-looping on a non-empty-directory error, or silently refusing every
 client because of the rotation divergence in §3 above.
+
+---
+
+## 12. An Application is permanently OutOfSync with no visible difference
+
+### Symptom
+
+An Application never reaches `Synced`. It sits `OutOfSync` forever, runs a
+sync operation on every reconcile, and each one reports success — then goes
+`OutOfSync` again on the next poll. `kubectl diff --server-side` against the
+live object comes back clean: no field, no line, nothing a human would call
+a difference.
+
+### Cause
+
+`volumeClaimTemplates` on a StatefulSet is an **atomic list** under
+server-side apply — `argocd-controller` owns the whole entry as one unit,
+not field by field. The API server echoes back `apiVersion: v1` /
+`kind: PersistentVolumeClaim` on every read of the embedded PVC, because it
+defaults that embedded object exactly as if it were a standalone one. Argo
+CD's StatefulSet diff normalizer already knows to discount some fields the
+API server adds here (`spec.volumeMode`, `status.phase`) — but not these
+two. Omit them from the manifest in git, and the target's atomic-list value
+can never equal the live one on that one sub-field, even though every field
+a human would think to compare already matches — because normalization
+here isn't per-field, it's all-or-nothing per list entry.
+
+### Diagnose
+
+    sg k3s-admin -c 'kubectl -n databases get statefulset postgres -o json --show-managed-fields'
+
+(substitute the affected namespace and StatefulSet name). Look for
+`f:volumeClaimTemplates: {}` under the `argocd-controller` entry — an
+atomic list claimed whole, unlike the field-by-field ownership every other
+section of the output shows.
+
+### Fix
+
+Declare `apiVersion: v1` and `kind: PersistentVolumeClaim` explicitly on
+the embedded PVC inside `volumeClaimTemplates`, matching what the API
+server already echoes back on every read. Vault's StatefulSet (rendered by
+its Helm chart) never hits this, only because the chart happens to write
+both fields already — a hand-written manifest does not get that for free.
+
+### The general shape
+
+When Argo CD's normalizer discounts *some* server-added fields in an atomic
+list but not all, the target can never equal live, and the Application
+reports `OutOfSync` forever for a difference that does not exist by any
+comparison a human can run. This is the sharpest instance yet of the
+principle entries 8 through 11 all converge on: a `Synced` Application
+describes what Argo CD applied and never what is running — and here even
+`OutOfSync` stops meaning what it usually means, since `kubectl diff
+--server-side` confirms there is nothing actually different.
+
+Confirmed on this cluster on the `postgres` StatefulSet, fixed in commit
+`b6ceb74` — see `platform/databases/postgres/config/postgres.yaml`'s
+`volumeClaimTemplates` comment for the specific fix, and entry 11 above
+for the rest of that component's faults. Nothing about the mechanism is
+PostgreSQL-specific: it will recur on the next StatefulSet, or any other
+atomic list the API server defaults fields into.

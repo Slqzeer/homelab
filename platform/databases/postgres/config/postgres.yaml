@@ -2,8 +2,15 @@
 #
 # A plain StatefulSet rather than a chart. The Bitnami chart renders
 # `bitnami/postgresql:latest`, and an unpinned tag on a database can change the
-# MAJOR version across a restart; PostgreSQL refuses to start on a data
-# directory written by a different major. See the design spec section 5.
+# MAJOR version across a restart. Because PGDATA here is version-namespaced
+# (/var/lib/postgresql/18/docker, see the volume mount comment below), that
+# does NOT make PostgreSQL refuse to start -- it finds no PG_VERSION at the
+# new major's path, runs initdb there, and comes up Ready/healthy/Synced and
+# EMPTY, with POSTGRES_PASSWORD applied to the new cluster so auth still
+# works. Nothing errors; the old data sits untouched at the old version's
+# path, which is also the way back -- reverting the image tag recovers it.
+# See the design spec section 5. No major-version upgrade procedure exists
+# in this repository yet; that is a known, deliberate gap.
 ---
 apiVersion: v1
 kind: Service
