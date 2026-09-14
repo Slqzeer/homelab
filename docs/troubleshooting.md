@@ -716,3 +716,72 @@ stops updating. Check the `VaultStaticSecret`'s own status, not the
 Application's:
 
     sg k3s-admin -c 'kubectl -n vault get vaultstaticsecret vault-canary -o jsonpath={.status.conditions[*].message}'
+
+---
+
+## 11. PostgreSQL will not start, or rejects the password
+
+### Symptom
+
+`postgres-0` never becomes Ready, crash-loops shortly after starting, or a
+client that connected successfully before now gets
+`password authentication failed for user "postgres"`.
+
+### 1. Is the Secret there at all?
+
+    sg k3s-admin -c 'kubectl -n databases get secret postgres-credentials'
+
+If this returns nothing, this is not a database problem — it is the same
+Vault-path problem entry 10 already covers, just for a second consumer. Go
+to entry 10 and work through it with namespace `databases`, ServiceAccount
+`postgres`, and role `vso-postgres` in place of the canary's names.
+
+### 2. `initdb` refusing a non-empty directory
+
+The symptom is a pod that crash-loops with, in its own logs:
+
+    directory "/var/lib/postgresql/18/docker" exists but is not empty
+
+The cause is the PVC mounted directly at the data directory instead of one
+level up, at `/var/lib/postgresql`. PostgreSQL 18's official image moved
+`PGDATA` to `/var/lib/postgresql/18/docker` — **not**
+`/var/lib/postgresql/data`, where older guides for this image still point.
+Mounting at `/var/lib/postgresql` leaves `PGDATA` a subdirectory of the
+mount, which is what `initdb` requires; a freshly provisioned volume is not
+reliably empty at exactly the mount point itself. Confirm the live value:
+
+    sg k3s-admin -c 'kubectl -n databases exec postgres-0 -- sh -c "echo PGDATA=\$PGDATA"'
+
+### 3. The password works but a rotation did not take
+
+This is entry 10's divergence again, on a real running database instead of
+a canary Secret. `POSTGRES_PASSWORD` is read only once, at `initdb` —
+changing `homelab/postgres` in Vault updates `postgres-credentials`, not
+the database itself. A client using the newly-rotated Secret gets a real,
+correctly-formed credential the database has simply never seen. This will
+look exactly like a broken credential and is not; see
+`platform/databases/postgres/README.md`'s rotation-limitation section for
+the `ALTER USER` fix and why no automatic path exists yet.
+
+### 4. A permission error on the data directory
+
+Cross-reference entry 1 — the same ACL-inheritance fault that poisoned
+non-root containers cluster-wide affects PVC directories under
+`/srv/kubernetes/storage` for exactly the same reason, and PostgreSQL runs
+as a non-root uid. Confirm the pod's security context matches what the
+image actually needs:
+
+    sg k3s-admin -c 'kubectl -n databases get pod postgres-0 -o jsonpath={.spec.securityContext}'
+
+Expect `{"fsGroup":70,"runAsGroup":70,"runAsNonRoot":true,"runAsUser":70}` —
+the image's `postgres` user is uid/gid 70, not the 999 usually assumed for
+other images in this cluster. A mismatch here, or a poisoned snapshot root
+per entry 1, produces a permission-denied error at container start, before
+`psql` ever gets a chance to run.
+
+### The standing point, again
+
+As entries 9 and 10 both established: a Synced Application says what Argo
+CD applied, never what is running. `postgres` can show Synced/Healthy while
+crash-looping on a non-empty-directory error, or silently refusing every
+client because of the rotation divergence in §3 above.

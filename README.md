@@ -17,6 +17,7 @@ manifest ever applied by hand.
 | `platform/` | Vault, databases, registry |
 | `platform/vault/` | HashiCorp Vault: Helm values, unsealer manifest, init/backup docs |
 | `platform/vault-secrets-operator/` | Vault Secrets Operator: Helm values, `VaultConnection`/`VaultAuth`/`VaultStaticSecret` manifests |
+| `platform/databases/postgres/` | PostgreSQL: StatefulSet, PVC, its own Vault-Secrets-Operator wiring, README |
 | `observability/` | Prometheus, Grafana, logging |
 | `apps/` | Currently unused; reserved for per-application values/manifests, not Application objects |
 
@@ -27,9 +28,11 @@ Application picks it up; nothing is applied by hand. Order components with the
 `argocd.argoproj.io/sync-wave` annotation: infrastructure 0-2, platform 10
 (`vault`), apps 20, `ingress-config` and `vso-operator` sharing wave 21
 deliberately (see below for why `vso-operator` is not right after `vault`),
-and `vso-config` last of all at 22. Platform (10) gates apps (20) and wave 21
-the same way infrastructure gates platform — see below for what that means on
-a rebuild.
+`vso-config` at 22, and `postgres` last of all at 23 — it cannot start
+without the Secret `vso-config` creates, so it has to come after it, and
+nothing in this cluster yet depends on Postgres, so nothing is gated by
+putting it last. Platform (10) gates apps (20) and wave 21 the same way
+infrastructure gates platform — see below for what that means on a rebuild.
 
 Every Application object belongs in `environments/homelab/apps/` — `root.yaml`
 recurses only that directory. The top-level `apps/` directory is a different
@@ -272,12 +275,18 @@ once. See `platform/vault/README.md`.
    sync-wave 22, after both `ingress-config` and its own operator,
    `vso-operator`, which share wave 21: skipping the configure half leaves
    `vso-config` `Progressing`/unhealthy, but because wave 22 sits after
-   every Ingress, that failure does **not** cost any tailnet URL. `vso-operator`
-   itself was deliberately moved off wave 11 (right after `vault`) for the
-   same reason `ingress-config` sits at 21 — see the design spec's §6 and
-   `environments/homelab/apps/vso-operator.yaml` for why a component whose
-   own health says nothing about Vault should still not sit in front of
-   every tailnet URL.
+   every Ingress, that failure does **not** cost any tailnet URL. The
+   ceremony now also seeds PostgreSQL's credential (`homelab/postgres`), so
+   the same skip leaves a second Application unhealthy too: `postgres` at
+   wave 23 cannot start without the Secret `vso-config` creates one wave
+   earlier. Both `vso-config` (22) and `postgres` (23) sit after
+   `ingress-config` (21), so this still costs no tailnet URL — the same
+   reasoning as for `vso-config` alone, just now covering two Applications
+   instead of one. `vso-operator` itself was deliberately moved off wave 11
+   (right after `vault`) for the same reason `ingress-config` sits at 21 —
+   see the design spec's §6 and `environments/homelab/apps/vso-operator.yaml`
+   for why a component whose own health says nothing about Vault should
+   still not sit in front of every tailnet URL.
 
 The order matters: step 3 must follow step 2, because the `argocd`
 namespace does not exist until `bootstrap.sh` creates it. The credential

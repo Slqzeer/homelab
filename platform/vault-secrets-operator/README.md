@@ -90,6 +90,27 @@ Vault's role binds `system:serviceaccount:vault:vault-canary` directly — the
 so it could not be the operator's own ServiceAccount (which lives in
 `vault-secrets-operator-system`) even if that seemed simpler.
 
+## Two consumers, not one
+
+`vault-canary` was the only thing exercising this path when this file was
+first written. Phase 18 added a second, real one:
+
+| Consumer | Namespace | Secret | Vault path |
+| --- | --- | --- | --- |
+| `vault-canary` | `vault` | `vault-canary` | `homelab/canary` |
+| PostgreSQL | `databases` | `postgres-credentials` | `homelab/postgres` |
+
+Each namespace needs its **own** `ServiceAccount`, `VaultConnection` and
+`VaultAuth` — never a shared one — because the `VaultAuth` CRD requires
+that ServiceAccount to live in the consuming Secret's own namespace (see
+above). `databases` therefore carries a complete second copy of these
+objects, under the names `postgres` (`ServiceAccount`, `VaultAuth`) and
+`vault` (`VaultConnection`), rather than referencing anything that lives in
+namespace `vault`. See `platform/databases/postgres/README.md` for that
+namespace's own three strings that must agree — role `vso-postgres`,
+ServiceAccount `postgres`, audience `vault` — the same requirement as
+above, just a second, independent instance of it.
+
 ## The three strings that must agree
 
 A shell script (`platform/vault/configure-vault.sh`) and a manifest
