@@ -48,7 +48,7 @@ binding constraint. **Storage is**, because it has never once been used.
 | V7 | Injector and CSI disabled | Phase 17 uses the Vault Secrets Operator instead. The chart enables the injector by default via its `"-"` sentinel |
 | V8 | `ingress-config` moves from wave 3 to **21** | Removes the wave coupling that would block Vault. See §6 |
 | V9 | TLS terminates at the tailnet proxy; Vault serves HTTP in-cluster | Same posture as Argo CD. Single node — pod traffic never leaves the host. cert-manager remains the upgrade path |
-| V10 | Backup automation deferred to phase 27 | The plan schedules it there. This phase delivers a verified manual procedure |
+| V10 | Backup automation deferred to roadmap §33 | The plan schedules it there. This phase delivers a verified manual procedure |
 | V11 | Storage proven before Vault is installed | §9. No PVC has ever existed on this cluster |
 
 ## 4. Architecture
@@ -278,8 +278,8 @@ which has 853G free. The PVC size is therefore nominal, not a quota.
 running Vault. Destination `/backups/vault`, per the plan.
 
 **Scheduled automation is out of scope** (V10) — the plan places backup
-automation at phase 27. This phase delivers a verified manual command so
-that phase 27 schedules something already known to work.
+automation at roadmap §33. This phase delivers a verified manual command so
+that roadmap §33 schedules something already known to work.
 
 **The recovery invariant, which must be stated wherever backups are:**
 
@@ -348,7 +348,7 @@ Costs one additional proxy pod, roughly 30Mi measured.
 - Migrating `operator-oauth` into Vault — ~~needs phase 17~~. **Corrected
   2026-09-06:** phase 17 landed and it cannot migrate at all. See §11's
   correction note and the phase-17 spec §10
-- Scheduled backups — phase 27
+- Scheduled backups — roadmap §33
 - Any auth method beyond the root token — phase 17
 - Vault policies and roles — nothing consumes Vault yet
 - cert-manager and in-cluster TLS — still deferred (V9)

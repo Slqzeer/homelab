@@ -139,8 +139,8 @@ and `SHA256SUMS.sealed`. The `.sealed` file is concrete evidence of the
 invariant below: it is a checksum manifest that only makes sense if the
 snapshot's payload is itself sealed with Vault's master key.
 
-Scheduled automation is phase 27. This is the verified manual procedure it
-will schedule.
+Scheduled automation is roadmap §33 (`docs/workstation-plan.md`). This is
+the verified manual procedure it will schedule.
 
 **A snapshot alone cannot restore anything.** It is encrypted with Vault's
 master key, so restoring into a fresh Vault needs the same unseal keys. The

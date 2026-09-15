@@ -45,7 +45,7 @@ assume a dedicated machine. This one is also a workstation and a game host.
 | P7 | Sync-wave **23** | It cannot start before the Secret exists, and that Secret comes from `vso-config` at 22 |
 | P8 | PVC mounted at `/var/lib/postgresql` | §6. Makes `PGDATA` a subdirectory automatically, which `initdb` requires |
 | P9 | `runAsUser: 70`, `fsGroup: 70` | §6. Verified from the image; avoids a root container |
-| P10 | Backups are `pg_dumpall` to `/backups`, run by hand | Phase 27 schedules them. This phase proves the procedure works |
+| P10 | Backups are `pg_dumpall` to `/backups`, run by hand | Roadmap §33 schedules them. This phase proves the procedure works |
 | P11 | No `/dev/shm` sizing yet | §11. Nothing queries this database; adding it now is complexity for a load that does not exist |
 
 ## 4. Architecture
@@ -190,7 +190,7 @@ once something actually connects.
 
 - Any consumer of the database — nothing connects to it yet
 - Vault dynamic database credentials (§10)
-- Scheduled backups — phase 27; this phase proves the manual procedure
+- Scheduled backups — roadmap §33; this phase proves the manual procedure
 - Replication, failover, connection pooling — single node
 - Exposure beyond the cluster
 - `/dev/shm` sizing for parallel query workers (P11). Kubernetes gives it 64MB
