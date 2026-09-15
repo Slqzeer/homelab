@@ -300,6 +300,49 @@ everything from wave 21 on stays blocked, so do it as soon as `vault-0`
 exists. The configure half can trail behind it without that same urgency,
 precisely because wave 22 already sits after every Ingress.
 
+## Known gaps
+
+Things this cluster is known to be missing. None of them is urgent today,
+and each is here because the alternative is that it lives only in whoever
+last thought about it.
+
+- **No `NetworkPolicy` anywhere, including `databases`.** Every pod in the
+  cluster can reach PostgreSQL on 5432; the password is the only thing in
+  the way. That is acceptable precisely because nothing connects to the
+  database yet — there is no traffic to permit and therefore nothing a
+  policy could usefully deny. It stops being acceptable the moment the
+  first consumer arrives, which is also the moment you learn what the
+  policy should say. Pick it up in that phase, not before.
+- **Both `VaultStaticSecret` destinations keep VSO's `_raw` key**, so each
+  derived Secret carries its credential twice: once parsed, once in the
+  verbatim KV JSON. `spec.destination.transformation.excludeRaw: true`
+  removes the duplicate. This affects the phase-17 canary in `vault` as
+  well as `postgres` in `databases`, so it is one small cross-cutting
+  change rather than a component fix. Every extra copy widens what a
+  `kubectl get secret -o yaml`, an Argo CD resource view, or an etcd
+  backup exposes.
+- **PostgreSQL has no `startupProbe`.** `pg_isready` reports "rejecting"
+  during crash recovery, and the liveness probe allows 30s plus six
+  20s-spaced failures — so 150 seconds is the longest WAL replay the pod
+  may perform before liveness kills it and recovery restarts from the
+  beginning. At the few kilobytes this database currently holds that is
+  irrelevant. It becomes a restart loop the first time it comes back from
+  an unclean shutdown holding real data.
+- **`/backups` is mode 0777**, and `pg_dumpall` output contains a
+  SCRAM-SHA-256 verifier for the `postgres` superuser, so any local
+  account on this host can read a credential artifact out of a backup
+  file. The password's entropy makes offline recovery infeasible, which is
+  why this is a handling-hygiene problem and not an emergency — see
+  `platform/databases/postgres/README.md` for the full two-sided
+  argument. Roadmap §33 asks for it independently.
+- **There is no PostgreSQL major-version upgrade procedure.** This matters
+  more than it sounds: because `PGDATA` is version-namespaced, a major
+  image bump does not refuse to start — it silently initialises an empty
+  database while the old data sits intact and invisible one directory
+  away. Reverting the image tag recovers everything. The full explanation
+  is in `platform/databases/postgres/README.md`; the procedure itself
+  (`pg_upgrade`, or dump/restore) is unwritten.
+
 ## Documentation
 
 - `docs/workstation-plan.md` — overall roadmap

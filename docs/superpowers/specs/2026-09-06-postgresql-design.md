@@ -115,6 +115,14 @@ requests 192Mi, limit 512Mi. Deliberately modest against ~1.2Gi available.
 database on the tailnet is not something this phase needs, and a Postgres wire
 protocol behind an HTTP proxy would not work anyway.
 
+> **Corrected 2026-09-15, after implementation.** The Service that shipped is
+> *headless* (`clusterIP: None`), not a virtual-IP ClusterIP. A StatefulSet
+> needs a headless governing Service for stable network identity, and with one
+> replica `postgres.databases.svc` resolves to the pod either way, so the
+> intent of this paragraph — in-cluster only, no Ingress — is unchanged and
+> `kubectl get svc` still reports `TYPE ClusterIP`. The manifest is right and
+> this sentence was loose; recorded rather than silently reconciled.
+
 ## 7. Repository layout
 
 **New:**
