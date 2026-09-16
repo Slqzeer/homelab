@@ -36,14 +36,17 @@ From a separate pod, `REDISCLI_AUTH` is the form to use — never `-a`,
 which puts the password on the command line, visible to anything that can
 read `ps` on the node for as long as the process runs:
 
-    kubectl -n databases run redis-client --rm -i --restart=Never \
-      --image=redis:8.2-alpine \
-      --env="REDISCLI_AUTH=$(kubectl -n databases get secret redis-credentials -o jsonpath='{.data.password}' | base64 -d)" \
-      -- redis-cli -h redis.databases.svc -p 6379 ping
+    cat > /tmp/redis-ping.sh <<'EOF'
+    kubectl -n databases run redis-client --rm -i --restart=Never --image=redis:8.2-alpine --env="REDISCLI_AUTH=$(kubectl -n databases get secret redis-credentials -o jsonpath='{.data.password}' | base64 -d)" -- redis-cli -h redis.databases.svc -p 6379 ping
+    EOF
+    sg k3s-admin -c 'sh /tmp/redis-ping.sh'
 
-Run through `sg k3s-admin -c '...'` as usual; it is written bare above only
-because the inner `$(...)` needs to expand in the calling shell, not
-inside `sg`'s quoted string.
+The inner `$(...)` needs its own single-quoted `jsonpath='{.data.password}'`,
+which collides with `sg k3s-admin -c '...'`'s own single quotes — the two
+cannot simply nest. Writing the command to a file first and having `sg` run
+the file sidesteps the collision entirely; the heredoc body above is
+deliberately one long line, not wrapped, because a line a human is meant to
+copy must never depend on a trailing backslash surviving the paste.
 
 **`requirepass` applies to loopback as well.** Unlike PostgreSQL, which
 trusts its own Unix socket unconditionally (see

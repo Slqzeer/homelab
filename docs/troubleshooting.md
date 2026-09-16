@@ -887,6 +887,15 @@ atomic list the API server defaults fields into.
 
 ## 13. Redis will not start, or refuses the password
 
+### Symptom
+
+`redis-*` never becomes Ready, crash-loops shortly after starting, a client
+gets `NOAUTH` with a password you are sure is correct, or — worse — a
+client connects with no password at all and nobody notices for a while.
+The six shapes below cover what has actually gone wrong here; the
+underlying design and every command's context lives in
+`platform/databases/redis/README.md`.
+
 ### Pod in `CrashLoopBackOff` with a config-file error
 
 `redis.conf`'s last line (`include /etc/redis/secret/requirepass.conf`)
@@ -992,3 +1001,24 @@ is too small for this workload and the container's memory **limit** needs
 raising — raising `maxmemory` further only grows the dataset the eviction
 policy is trying to bound, it does not fix a limit that is already too
 tight.
+
+### The general shape
+
+The backup myth above is the sharpest instance of a lesson worth stating
+on its own: **the pod spec said the filesystem was read-only, and it was
+not.** `readOnlyRootFilesystem: true` promised the container could not
+write to disk; `/data` was writable anyway, because the image's own
+`VOLUME /data` declaration gets an anonymous writable mount from the
+container runtime that this setting never touches — and that mount
+appears nowhere in the pod spec, in `kubectl get pod -o yaml`, or in a
+standalone `docker run` of the image. No amount of reading the manifest
+would have caught it, because the manifest was not lying about anything it
+actually controlled. Only reading the mount table inside the actual
+running pod — `/proc/1/mountinfo` — settled the question, in both
+directions: it showed the gap while the implicit volume was still
+writable, and it confirmed the fix once the explicit `nodata` `emptyDir`
+shadowed it. The transferable lesson, as in entries 9 through 12: when a
+container's actual filesystem disagrees with what its manifest claims, go
+read the mount table in the pod, not the YAML — and, per the backup myth
+above, do not trust a command's reply either; `BGSAVE` says one thing and
+`INFO persistence` says another, and only the second one is true.
