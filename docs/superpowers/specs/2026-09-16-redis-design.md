@@ -72,7 +72,7 @@ and ARK reclaims ~8GB the moment it starts.
 | R5 | **Password reaches Redis via a config-file `include`, never a flag or env var** | §6. `configure-vault.sh` already establishes the rule: a password on a command line is visible in `ps` |
 | R6 | Tuning in a ConfigMap; only `requirepass` in the Secret | §6. Keeps knobs readable in git and the credential in Vault |
 | R7 | `maxmemory 128mb` + `maxmemory-policy allkeys-lru` | §7. Without eviction, a cache under a container limit is OOM-killed instead of evicting |
-| R8 | `readOnlyRootFilesystem: true`, no volumes at all | §7. Makes "this is not durable storage" enforced rather than documented |
+| R8 | `readOnlyRootFilesystem: true`, no volumes at all | §7. Makes "this is not durable storage" enforced by the filesystem — though **not** announced by Redis, see §7 on `BGSAVE` |
 | R9 | Namespace `databases`, reusing its existing `VaultConnection` | §8 |
 | R10 | Sync-wave **23**, the same wave as `postgres` | §9. Same wave means parallel, and neither gates the other |
 | R11 | `excludeRaw: true` from the start | Avoids introducing a third instance of a known gap. Fixing the existing two is explicitly out of scope (§12) |
@@ -196,9 +196,28 @@ against a healthy server and 1 against a dead port, where `redis-cli` prints
 alternative.
 
 `save ""` and `appendonly no` disable both persistence paths. With R8's
-read-only root filesystem, a manual `BGSAVE` then *fails* rather than silently
-producing a dump file. That is the intended outcome: it makes R1 enforced by the
-container rather than merely written down here.
+read-only root filesystem, a manual `BGSAVE` cannot write anything — verified
+2026-09-16, with the log reporting `Failed opening the temp RDB file
+temp-24.rdb (in server root dir /data) for saving: Read-only file system` and
+no file produced.
+
+**But it does not report that failure to the client.** `BGSAVE` is
+asynchronous: it replies `Background saving started` and forks, so the reply is
+not the result. The outcome surfaces only in
+`INFO persistence` → `rdb_last_bgsave_status:err`, and in the log. Anyone
+checking whether this cache can be dumped by reading `BGSAVE`'s reply will
+conclude that it can.
+
+This was measured, and it corrects an earlier draft of this section that
+claimed `BGSAVE` returns an error. The protection is real — nothing is
+written — but it is enforced by the filesystem, not announced by Redis.
+
+> A Docker probe alone would have missed this: the `redis` image declares
+> `VOLUME /data`, so `docker run --read-only` still gets a writable anonymous
+> volume there and `BGSAVE` genuinely succeeds. Kubernetes creates no such
+> implicit volume, so with `readOnlyRootFilesystem: true` and nothing mounted
+> at `/data`, the path is read-only. The verification above was re-run with
+> `/data` explicitly read-only to model the cluster rather than Docker.
 
 ## 8. Namespace
 
@@ -297,7 +316,7 @@ would drift from the mounted file. The pod restart is the documented route.)
 | Password visible in `ps` or in the pod spec | **High** — and the default spelling causes it | R5/§6: config-file `include`; verified `ps` shows only `redis-server *:6379` |
 | `include` fails on Kubernetes' symlinked Secret mount | High — would fail closed at startup | §6: verified against a `..data/` symlink layout, not a plain file |
 | OOM-kill loop instead of eviction | **High, and self-sustaining** | R7/§7: `maxmemory` well below the container limit, `allkeys-lru` |
-| Cache silently treated as durable storage | Medium | R8: read-only root filesystem makes `BGSAVE` fail rather than succeed quietly |
+| Cache silently treated as durable storage | Medium | R8: the read-only filesystem blocks the write. Note `BGSAVE` still *replies* `Background saving started` — §7 — so the README must point at `rdb_last_bgsave_status`, not at the reply |
 | Rotation diverges from the running server | Low **here** | §11: documented; the fix is a pod restart, which costs nothing |
 | Script re-run clobbers a live credential | High if unguarded | §10: seed only when absent — the guard both existing paths already prove |
 | KV v2 policy written without `data/` | Medium — the most common KV v2 error | §10; the script's existing comments warn about it |
@@ -332,6 +351,9 @@ The phase is complete when all hold:
 8. `redis-credentials` contains **no `_raw` key** — R11 verified, not assumed.
 9. Data does **not** survive a pod deletion, and the pod returns Ready with an
    empty keyspace. This is the one phase where that is the passing result.
-10. `configure-vault.sh` re-run leaves the existing password unchanged.
-11. All Applications Synced/Healthy; both tailnet URLs 200.
-12. Memory measured before and after and recorded, not estimated.
+10. `BGSAVE` writes nothing: `INFO persistence` reports
+    `rdb_last_bgsave_status:err`. **Do not assert on `BGSAVE`'s reply** — it
+    answers `Background saving started` regardless, because it is asynchronous.
+11. `configure-vault.sh` re-run leaves the existing password unchanged.
+12. All Applications Synced/Healthy; both tailnet URLs 200.
+13. Memory measured before and after and recorded, not estimated.
