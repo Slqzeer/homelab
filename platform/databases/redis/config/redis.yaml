@@ -1,10 +1,11 @@
 # Redis 8.2 as a CACHE -- phase 19, the cache branch of the roadmap's two.
 #
 # There is no PVC, no volumeClaimTemplate and no persistence. `save ""` and
-# `appendonly no` disable both on-disk paths, and readOnlyRootFilesystem means
-# a manual BGSAVE cannot write anything. It is the container, not this comment,
-# that stops anyone treating this as durable storage. If a future phase needs
-# persistence, that is a deliberate change here, not an accident.
+# `appendonly no` disable both on-disk paths, and the `nodata` mount below
+# makes the data directory read-only, so a manual BGSAVE cannot write
+# anything either. It is the container, not this comment, that stops anyone
+# treating this as durable storage. If a future phase needs persistence, that
+# is a deliberate change here, not an accident.
 #
 # NOTE: BGSAVE still REPLIES "Background saving started" -- it is asynchronous,
 # so the reply is not the result. The refusal shows up in INFO persistence as
@@ -108,9 +109,11 @@ spec:
             - name: redis
               containerPort: 6379
           securityContext:
-            # Nothing is ever written to disk, so the root filesystem can be
-            # read-only. This is what makes BGSAVE unable to write -- note it
-            # still reports success to the client; see the header comment.
+            # The root filesystem is read-only. This covers `/` ONLY, and is
+            # NOT by itself what stops BGSAVE: the image declares VOLUME
+            # /data, which containerd gives an implicit writable volume that
+            # this setting does not touch. The `nodata` mount under volumes:
+            # is what closes that. Both are needed. See the header comment.
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
             capabilities:
