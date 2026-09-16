@@ -10,7 +10,10 @@
 # so the reply is not the result. The refusal shows up in INFO persistence as
 # rdb_last_bgsave_status:err and in the log as "Read-only file system".
 # Anyone auditing this by reading BGSAVE's reply will reach the wrong
-# conclusion. See platform/databases/redis/README.md.
+# conclusion. Note also that readOnlyRootFilesystem alone is NOT enough here:
+# it covers `/` only, and this image declares VOLUME /data, which containerd
+# honours with an anonymous writable volume. The `nodata` mount below is what
+# actually closes that. See platform/databases/redis/README.md.
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -129,6 +132,9 @@ spec:
             - name: credential
               mountPath: /etc/redis/secret
               readOnly: true
+            - name: nodata
+              mountPath: /data
+              readOnly: true
           readinessProbe:
             exec:
               # NOT a bare `redis-cli ping`. With requirepass set, that prints
@@ -173,3 +179,14 @@ spec:
               - key: requirepass.conf
                 path: requirepass.conf
             defaultMode: 0440
+        - name: nodata
+          # Shadows an implicit volume you cannot see in this spec. The redis
+          # image's Dockerfile declares `VOLUME /data`, and containerd honours
+          # it by creating an anonymous WRITABLE volume there -- even with
+          # readOnlyRootFilesystem: true, which only covers `/`. Without this
+          # mount, BGSAVE genuinely succeeds and writes a dump.rdb, silently
+          # defeating the "nothing is ever written to disk" property. Mounting
+          # an empty volume read-only over that path restores it. Verified
+          # 2026-09-16: BGSAVE then leaves rdb_last_bgsave_status:err and logs
+          # "Failed opening the temp RDB file ... Read-only file system".
+          emptyDir: {}
