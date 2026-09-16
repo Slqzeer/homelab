@@ -1,0 +1,31 @@
+# Redis, the cache. Phase 19.
+#
+# Wave 23 -- the SAME wave as postgres, not 24. Redis depends on the VSO
+# operator (21) and on the Vault ceremony, not on PostgreSQL, and the phase-18
+# spec warns specifically against stacking a wave "out of habit". Sharing a
+# wave means the two reconcile in parallel and neither gates the other.
+#
+# Nothing sits behind wave 23, so an unhealthy cache gates nothing, and it
+# sits after ingress-config (21), so a failure here costs no tailnet URL.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: redis
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "23"
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:Slqzeer/homelab.git
+    targetRevision: main
+    path: platform/databases/redis/config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: databases
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

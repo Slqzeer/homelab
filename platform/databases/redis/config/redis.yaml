@@ -1,0 +1,175 @@
+# Redis 8.2 as a CACHE -- phase 19, the cache branch of the roadmap's two.
+#
+# There is no PVC, no volumeClaimTemplate and no persistence. `save ""` and
+# `appendonly no` disable both on-disk paths, and readOnlyRootFilesystem means
+# a manual BGSAVE cannot write anything. It is the container, not this comment,
+# that stops anyone treating this as durable storage. If a future phase needs
+# persistence, that is a deliberate change here, not an accident.
+#
+# NOTE: BGSAVE still REPLIES "Background saving started" -- it is asynchronous,
+# so the reply is not the result. The refusal shows up in INFO persistence as
+# rdb_last_bgsave_status:err and in the log as "Read-only file system".
+# Anyone auditing this by reading BGSAVE's reply will reach the wrong
+# conclusion. See platform/databases/redis/README.md.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  namespace: databases
+data:
+  redis.conf: |
+    # Tuning lives here, in git, readable in a diff. The credential does not.
+    #
+    # maxmemory is the SAFETY MECHANISM, not tuning. A cache given a container
+    # memory limit but no maxmemory does not start evicting as it fills -- it
+    # grows until the kernel OOM-kills it, and Kubernetes restarts it into the
+    # same trajectory. allkeys-lru is what turns that loop into eviction.
+    # 128mb sits at half the 256Mi container limit on purpose: maxmemory bounds
+    # the DATASET, while RSS runs higher from allocator fragmentation and from
+    # the four modules Redis 8 auto-loads (~22MiB at idle, measured).
+    maxmemory 128mb
+    maxmemory-policy allkeys-lru
+
+    # Both persistence paths off. See the header comment.
+    save ""
+    appendonly no
+
+    # MUST BE THE LAST LINE. Redis applies directives in read order and a later
+    # one wins, so an include placed higher could have its requirepass silently
+    # overridden by a following line -- in the direction of NO password.
+    # The file itself is rendered by VSO from Vault; see vault-secrets.yaml.
+    include /etc/redis/secret/requirepass.conf
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: databases
+spec:
+  # A normal ClusterIP, unlike PostgreSQL's headless Service -- this is a
+  # Deployment with no stable network identity to preserve. No Ingress: the
+  # Redis wire protocol is not HTTP and does not belong behind the tailnet
+  # proxy.
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: databases
+spec:
+  replicas: 1
+  strategy:
+    # Recreate, not RollingUpdate: a rolling update would briefly run two
+    # caches, doubling the memory footprint on a host that is also a
+    # workstation and a game server. There is no data to keep available
+    # during the gap -- a cold cache is the normal cost of a restart here.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      serviceAccountName: redis
+      securityContext:
+        # Probed from the image on 2026-09-16: the redis user is uid 999,
+        # gid 1000 -- ASYMMETRIC, not the 999/999 usually assumed. (Phase 18
+        # found the mirror image: postgres is 70/70, not the 999 everyone
+        # expects. Neither image matches folklore.)
+        #
+        # fsGroup is set even though there is no PVC: it governs the SECRET
+        # volume too, making requirepass.conf group-readable by 1000 so uid
+        # 999 can read it. Without it the file is root-owned and mode 0440
+        # would lock redis out of its own password at startup.
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: redis
+          image: redis:8.2-alpine
+          # One argument: the config file. The password is NOT here, and that
+          # is the whole design -- see spec R5.
+          args:
+            - /etc/redis/redis.conf
+          ports:
+            - name: redis
+              containerPort: 6379
+          securityContext:
+            # Nothing is ever written to disk, so the root filesystem can be
+            # read-only. This is what makes BGSAVE unable to write -- note it
+            # still reports success to the client; see the header comment.
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              # Twice maxmemory. The gap is headroom so that eviction, not the
+              # OOM killer, is the thing that reacts first as the cache fills.
+              memory: 256Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/redis/redis.conf
+              subPath: redis.conf
+              readOnly: true
+            - name: credential
+              mountPath: /etc/redis/secret
+              readOnly: true
+          readinessProbe:
+            exec:
+              # NOT a bare `redis-cli ping`. With requirepass set, that prints
+              # "NOAUTH Authentication required." and STILL EXITS 0 -- measured
+              # 2026-09-16 -- so it is a probe that can never fail. Matching
+              # the response text instead needs no password: NOAUTH is a
+              # SUCCESS condition here, proving the server is listening,
+              # speaking the protocol, and enforcing auth. Against a dead port
+              # redis-cli prints "Connection refused" and matches neither.
+              command:
+                - sh
+                - -c
+                - redis-cli ping 2>&1 | grep -qE 'PONG|NOAUTH'
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - redis-cli ping 2>&1 | grep -qE 'PONG|NOAUTH'
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            # Deliberately tolerant, matching PostgreSQL's reasoning: this host
+            # has a recorded history of probe timeouts under memory pressure
+            # (troubleshooting entries 4 and 10). Killing a cache because the
+            # host was briefly busy is worse than waiting.
+            failureThreshold: 6
+      volumes:
+        - name: config
+          configMap:
+            name: redis-config
+        - name: credential
+          secret:
+            secretName: redis-credentials
+            # Only the rendered config fragment is projected. Without `items`
+            # the username and password keys would also appear as files here,
+            # which nothing reads -- fewer copies of a credential on disk is
+            # strictly better.
+            items:
+              - key: requirepass.conf
+                path: requirepass.conf
+            defaultMode: 0440
