@@ -77,6 +77,7 @@ and ARK reclaims ~8GB the moment it starts.
 | R10 | Sync-wave **23**, the same wave as `postgres` | §9. Same wave means parallel, and neither gates the other |
 | R11 | `excludeRaw: true` from the start | Avoids introducing a third instance of a known gap. Fixing the existing two is explicitly out of scope (§12) |
 | R12 | No Ingress | The Redis wire protocol is not HTTP, the same reason phase 18 gave for Postgres |
+| R13 | **Probes match `PONG\|NOAUTH`, never a bare `redis-cli ping`** | §7.1. A bare `ping` exits 0 even when it fails with `NOAUTH`, making the obvious probe one that can never fail |
 
 ## 5. Architecture
 
@@ -170,6 +171,29 @@ Kubernetes restarts it into the same trajectory. `allkeys-lru` is what converts
 that crash loop into the eviction a cache is supposed to perform. The 2x gap
 between 128mb and 256Mi is the headroom that keeps eviction, not the OOM killer,
 as the thing that reacts first.
+
+### 7.1 The probe must not be a bare `redis-cli ping`
+
+Measured 2026-09-16: with `requirepass` set, `redis-cli ping` prints
+`NOAUTH Authentication required.` and **exits 0**. A probe spelled
+`exec: ["redis-cli", "ping"]` therefore passes unconditionally — it reports
+Ready as long as the binary exists, which is close to no probe at all.
+
+`redis-cli -e ping` does propagate the failure (exit 1), but unauthenticated it
+fails *always*, so it is equally useless. Supplying the password to fix that
+would put it in the probe's own command line, defeating R5 on a timer.
+
+The probe used instead needs no password:
+
+```sh
+redis-cli ping 2>&1 | grep -qE 'PONG|NOAUTH'
+```
+
+`NOAUTH` is a *success* condition here: it proves the server is listening,
+speaking the Redis protocol, and enforcing authentication. Verified to exit 0
+against a healthy server and 1 against a dead port, where `redis-cli` prints
+`Could not connect to Redis ...: Connection refused` and matches neither
+alternative.
 
 `save ""` and `appendonly no` disable both persistence paths. With R8's
 read-only root filesystem, a manual `BGSAVE` then *fails* rather than silently
@@ -277,6 +301,7 @@ would drift from the mounted file. The pod restart is the documented route.)
 | Rotation diverges from the running server | Low **here** | §11: documented; the fix is a pod restart, which costs nothing |
 | Script re-run clobbers a live credential | High if unguarded | §10: seed only when absent — the guard both existing paths already prove |
 | KV v2 policy written without `data/` | Medium — the most common KV v2 error | §10; the script's existing comments warn about it |
+| **A probe that can never fail** | **High — it looks correct and hides every fault** | R13/§7.1: match `PONG\|NOAUTH`; verified to fail against a dead port |
 | Unpinned image changing major version | Eliminated | R3 — exact minor pinned |
 | Wave stacked above 23 out of habit | Low, but compounding | R10/§9: same wave as `postgres`, per the phase-18 spec's own warning |
 
@@ -296,12 +321,17 @@ The phase is complete when all hold:
    phase 18 applied to `psql`.
 4. The same throwaway pod **without** the password is refused with `NOAUTH`.
    A password that is set but not enforced is the failure this checks for.
-5. `ps` inside the running pod shows no password.
-6. `config get maxmemory maxmemory-policy` returns `134217728` and
+5. `ps` inside the running pod shows no password. **Read the full `ps`
+   output rather than grepping for the password** — a `grep <password>` places
+   that password in its own argv, so `ps` matches the grep itself and reports a
+   leak that does not exist. This was hit while probing the design.
+6. The liveness probe **fails** when Redis is not answering — confirmed against
+   a dead port, not assumed from the fact that it passes when healthy.
+7. `config get maxmemory maxmemory-policy` returns `134217728` and
    `allkeys-lru`, read from the live pod rather than from the ConfigMap.
-7. `redis-credentials` contains **no `_raw` key** — R11 verified, not assumed.
-8. Data does **not** survive a pod deletion, and the pod returns Ready with an
+8. `redis-credentials` contains **no `_raw` key** — R11 verified, not assumed.
+9. Data does **not** survive a pod deletion, and the pod returns Ready with an
    empty keyspace. This is the one phase where that is the passing result.
-9. `configure-vault.sh` re-run leaves the existing password unchanged.
-10. All Applications Synced/Healthy; both tailnet URLs 200.
-11. Memory measured before and after and recorded, not estimated.
+10. `configure-vault.sh` re-run leaves the existing password unchanged.
+11. All Applications Synced/Healthy; both tailnet URLs 200.
+12. Memory measured before and after and recorded, not estimated.
