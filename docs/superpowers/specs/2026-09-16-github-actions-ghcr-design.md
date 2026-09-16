@@ -143,7 +143,7 @@ intermediate controller is needed.
 | D5 | Pin `:sha-xxxxxxx@sha256:...` — both tag and digest | §3.1. Legible *and* immutable |
 | D6 | Package private; PAT with `read:packages` only, held in Vault; VSO mints the `dockerconfigjson` with `excludes: [".*"]` | §9. Without the exclude, the PAT ships twice — a third instance of the known `_raw` gap |
 | D7 | Write-back uses `GITHUB_TOKEN` | §8.2. GitHub does not retrigger workflows on `GITHUB_TOKEN` pushes: recursion is prevented by the platform, not by a `[skip ci]` marker a later edit could drop |
-| D8 | Namespace `apps`, with its own `VaultConnection`; sync-wave **23** | §10 |
+| D8 | Namespace `apps`, with its own `VaultConnection`; `registry` at sync-wave **23**, `beacon` at **24** | §10 |
 | D9 | Ingress `beacon.taildf6cd4.ts.net`, `tailscale.com/proxy-class: homelab`, owned by the **beacon** repo | §8.3 |
 | D10 | Every third-party Action pinned to a commit SHA | The same discipline this repository already applies to every container image tag |
 | D11 | No self-hosted runner | §12. Keeps GitHub outside the cluster's trust boundary; the cost is a stated gap, not a hidden one |
@@ -174,8 +174,9 @@ WORKSTREAM 4 -- cluster side                 (PAT -> Vault -> VSO)
                                 type: kubernetes.io/dockerconfigjson
                                 excludes: [".*"]
                           v
-  Application `beacon` wave 23 --> ns `apps` --> Deployment imagePullSecrets
-                                             --> Ingress beacon.taildf6cd4.ts.net
+  Application `registry` wave 23 --> ns `apps` --> Secret ghcr-pull
+  Application `beacon`   wave 24 --> ns `apps` --> Deployment imagePullSecrets
+                                               --> Ingress beacon.taildf6cd4.ts.net
 ```
 
 The Tailscale OAuth secret lives only in GitHub and never enters the cluster.
@@ -409,14 +410,26 @@ silently ignored with no error; a namespace sharing its name is an obvious trap
 for the next reader, so it is named here as a non-relationship rather than left
 to be inferred.
 
-Sync-wave **23**, shared with `postgres` and `redis` — not 24.
+The credential and its consumer are **two Applications**, not one:
+`registry` (this repository, `platform/registry/config`) and `beacon` (the
+beacon repository, `deploy/`). Splitting them keeps homelab-owned
+infrastructure out of the application, and means a broken canary cannot take
+the credential path down with it.
 
-`beacon` depends on the VSO operator (wave 21) and on Vault having been seeded,
-which are exactly the preconditions `postgres` and `redis` share. It does not
-depend on either of them. The root README states the rule directly: "a
-component that does not depend on Postgres (or on anything else at wave 23)
-belongs at or below 23, not above it out of habit." Sharing the wave lets all
-three reconcile in parallel, and nothing sits behind 23, so an unhealthy canary
+`registry` takes sync-wave **23**, shared with `postgres` and `redis`. It
+depends on the VSO operator (wave 21) and on Vault having been seeded, which
+are exactly the preconditions those two share; it depends on neither of them.
+The root README states the rule directly: "a component that does not depend on
+Postgres (or on anything else at wave 23) belongs at or below 23, not above it
+out of habit." Sharing the wave lets all three reconcile in parallel.
+
+`beacon` takes **24** — and this is the case the README's rule explicitly
+allows, not the habit it warns against. That warning is about components with
+*no* dependency on the wave below. Here there is a real one: beacon's pod
+cannot pull its image until `registry` has created the `ghcr-pull` Secret.
+Without the ordering the pod would `ImagePullBackOff` and recover on its own,
+which is correct but noisy, and indistinguishable at a glance from a genuinely
+broken credential. Nothing sits behind wave 24, so an unhealthy canary still
 gates nothing.
 
 ## 11. New cluster-only state
