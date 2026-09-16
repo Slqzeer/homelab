@@ -65,14 +65,14 @@ and ARK reclaims ~8GB the moment it starts.
 
 | # | Decision | Rationale |
 | --- | --- | --- |
-| R1 | **Cache branch: no PVC, no persistence, no backups** | §2. `save ""`, `appendonly no` |
+| R1 | **Cache branch: no PVC, no persistence, no backups** | §2. `save ""`, `appendonly no`. Note the pod does carry three non-persistent volumes — config, credential, and the `/data` shadow — none of which outlive it |
 | R2 | **Deployment, not StatefulSet** | No volume and no stable network identity to preserve. A StatefulSet here would be cargo-culted from phase 18 |
 | R3 | Official `redis:8.2-alpine`, pinned to an exact minor | Same reasoning phase 18 applied to Postgres (P2). Bitnami is rejected for the same `:latest` reason recorded in the phase-18 spec §5 |
 | R4 | Password required, generated in Vault, delivered by VSO | The cluster has no `NetworkPolicy` anywhere (known gap), so the password is the only thing in the way |
 | R5 | **Password reaches Redis via a config-file `include`, never a flag or env var** | §6. `configure-vault.sh` already establishes the rule: a password on a command line is visible in `ps` |
 | R6 | Tuning in a ConfigMap; only `requirepass` in the Secret | §6. Keeps knobs readable in git and the credential in Vault |
 | R7 | `maxmemory 128mb` + `maxmemory-policy allkeys-lru` | §7. Without eviction, a cache under a container limit is OOM-killed instead of evicting |
-| R8 | `readOnlyRootFilesystem: true`, no volumes at all | §7. Makes "this is not durable storage" enforced by the filesystem — though **not** announced by Redis, see §7 on `BGSAVE` |
+| R8 | `readOnlyRootFilesystem: true`, **plus an empty `emptyDir` mounted `readOnly` at `/data`** | §7. `readOnlyRootFilesystem` covers `/` only; the image's `VOLUME /data` gets an implicit writable volume that the shadowing mount closes. Enforced by the filesystem, but **not** announced by Redis — see §7 on `BGSAVE` |
 | R9 | Namespace `databases`, reusing its existing `VaultConnection` | §8 |
 | R10 | Sync-wave **23**, the same wave as `postgres` | §9. Same wave means parallel, and neither gates the other |
 | R11 | `excludeRaw: true` from the start | Avoids introducing a third instance of a known gap. Fixing the existing two is explicitly out of scope (§12) |
@@ -212,12 +212,32 @@ This was measured, and it corrects an earlier draft of this section that
 claimed `BGSAVE` returns an error. The protection is real — nothing is
 written — but it is enforced by the filesystem, not announced by Redis.
 
-> A Docker probe alone would have missed this: the `redis` image declares
-> `VOLUME /data`, so `docker run --read-only` still gets a writable anonymous
-> volume there and `BGSAVE` genuinely succeeds. Kubernetes creates no such
-> implicit volume, so with `readOnlyRootFilesystem: true` and nothing mounted
-> at `/data`, the path is read-only. The verification above was re-run with
-> `/data` explicitly read-only to model the cluster rather than Docker.
+> **Corrected 2026-09-16, after deployment — this paragraph was wrong.** It
+> said Kubernetes creates no implicit volume for the image's Dockerfile
+> `VOLUME /data`, so `readOnlyRootFilesystem: true` alone would leave `/data`
+> read-only. It does not. On this k3s/containerd runtime, `/proc/1/mountinfo`
+> in the running pod shows `/data rw,noatime - ext4 /dev/sdb1`, an anonymous
+> writable volume under `containerd/.../volumes/<hash>` — **invisible in the
+> pod spec**. `readOnlyRootFilesystem` covers `/` only.
+>
+> The consequence was measured, not theorised: the first deployed Redis
+> answered `BGSAVE` by writing a real 88-byte `/data/dump.rdb`. The property
+> this section claimed did not hold.
+>
+> **The fix is an explicit `emptyDir` mounted `readOnly: true` at `/data`**,
+> which shadows the implicit volume. Verified before being mandated: the pod
+> stays Running/Ready and serves, `touch /data/x` returns `Read-only file
+> system`, and `BGSAVE` leaves `rdb_last_bgsave_status:err` with the log line
+> quoted above. R8 is amended accordingly — `readOnlyRootFilesystem` is
+> necessary here but **not sufficient**, and the shadowing mount is what
+> actually enforces the guarantee.
+>
+> Worth keeping as a general lesson: a Docker probe could not have caught
+> this, and neither could reading the pod spec. `docker run --read-only`
+> reproduces the writable `/data` for a different reason (Docker's own
+> anonymous volume), which is why the original draft mistook it for a
+> Docker-only artifact. The mount table inside the running pod was the only
+> thing that would have settled it.
 
 ## 8. Namespace
 
@@ -316,7 +336,8 @@ would drift from the mounted file. The pod restart is the documented route.)
 | Password visible in `ps` or in the pod spec | **High** — and the default spelling causes it | R5/§6: config-file `include`; verified `ps` shows only `redis-server *:6379` |
 | `include` fails on Kubernetes' symlinked Secret mount | High — would fail closed at startup | §6: verified against a `..data/` symlink layout, not a plain file |
 | OOM-kill loop instead of eviction | **High, and self-sustaining** | R7/§7: `maxmemory` well below the container limit, `allkeys-lru` |
-| Cache silently treated as durable storage | Medium | R8: the read-only filesystem blocks the write. Note `BGSAVE` still *replies* `Background saving started` — §7 — so the README must point at `rdb_last_bgsave_status`, not at the reply |
+| Cache silently treated as durable storage | Medium | R8: the read-only filesystem plus the `/data` shadowing mount block the write. Note `BGSAVE` still *replies* `Background saving started` — §7 — so the README must point at `rdb_last_bgsave_status`, not at the reply |
+| **An implicit volume defeats `readOnlyRootFilesystem`** | **Medium — invisible in the pod spec, and it shipped** | §7: the image's `VOLUME /data` became a writable ext4 mount; caught only by reading `/proc/1/mountinfo` in the running pod. Closed by the shadowing `emptyDir` |
 | Rotation diverges from the running server | Low **here** | §11: documented; the fix is a pod restart, which costs nothing |
 | Script re-run clobbers a live credential | High if unguarded | §10: seed only when absent — the guard both existing paths already prove |
 | KV v2 policy written without `data/` | Medium — the most common KV v2 error | §10; the script's existing comments warn about it |
