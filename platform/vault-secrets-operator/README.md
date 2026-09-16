@@ -90,26 +90,45 @@ Vault's role binds `system:serviceaccount:vault:vault-canary` directly — the
 so it could not be the operator's own ServiceAccount (which lives in
 `vault-secrets-operator-system`) even if that seemed simpler.
 
-## Two consumers, not one
+## Three consumers, not one
 
 `vault-canary` was the only thing exercising this path when this file was
-first written. Phase 18 added a second, real one:
+first written. Phase 18 added a second, real one, and phase 19 a third:
 
 | Consumer | Namespace | Secret | Vault path |
 | --- | --- | --- | --- |
 | `vault-canary` | `vault` | `vault-canary` | `homelab/canary` |
 | PostgreSQL | `databases` | `postgres-credentials` | `homelab/postgres` |
+| Redis | `databases` | `redis-credentials` | `homelab/redis` |
 
-Each namespace needs its **own** `ServiceAccount`, `VaultConnection` and
-`VaultAuth` — never a shared one — because the `VaultAuth` CRD requires
-that ServiceAccount to live in the consuming Secret's own namespace (see
-above). `databases` therefore carries a complete second copy of these
-objects, under the names `postgres` (`ServiceAccount`, `VaultAuth`) and
-`vault` (`VaultConnection`), rather than referencing anything that lives in
-namespace `vault`. See `platform/databases/postgres/README.md` for that
-namespace's own three strings that must agree — role `vso-postgres`,
-ServiceAccount `postgres`, audience `vault` — the same requirement as
-above, just a second, independent instance of it.
+Every namespace needs its **own** `ServiceAccount` and `VaultAuth` — never
+a shared one — because the `VaultAuth` CRD requires that ServiceAccount to
+live in the consuming Secret's own namespace (see above). PostgreSQL,
+being the first consumer in `databases`, also created its own
+`VaultConnection` there, named `vault`. So `databases` carries a complete
+second copy of all three objects the canary has in namespace `vault`,
+under the names `postgres` (`ServiceAccount`, `VaultAuth`) and `vault`
+(`VaultConnection`), rather than referencing anything that lives in
+namespace `vault` itself.
+
+Redis is the case that refines this further: it needs its own
+`ServiceAccount` and `VaultAuth` (`redis` in both cases, authenticating as
+a different Vault role), but it does **not** get its own
+`VaultConnection` — it reuses the `vault` `VaultConnection` PostgreSQL
+already created in `databases`. That is not a shortcut; it follows from
+what the CRD actually requires. A `VaultConnection` describes where Vault
+is (`http://vault.vault.svc:8200`), which is namespace-scoped state true
+for every consumer in that namespace, not per-consumer identity. The CRD's
+"own namespace" requirement is stated about the `VaultAuth`'s
+ServiceAccount specifically — never about the `VaultConnection` — so a
+second `VaultConnection` object in the same namespace, pointing at the
+same Vault, would be a duplicate resource with no requirement forcing it
+to exist. See `platform/databases/postgres/README.md` and
+`platform/databases/redis/README.md` for each namespace's own three
+strings that must agree — role `vso-postgres` / `vso-redis`, ServiceAccount
+`postgres` / `redis`, audience `vault` in both cases — the same
+requirement as above, just two independent instances of it sharing one
+`VaultConnection`.
 
 ## The three strings that must agree
 

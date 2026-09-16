@@ -882,3 +882,113 @@ Confirmed on this cluster on the `postgres` StatefulSet, fixed in commit
 for the rest of that component's faults. Nothing about the mechanism is
 PostgreSQL-specific: it will recur on the next StatefulSet, or any other
 atomic list the API server defaults fields into.
+
+---
+
+## 13. Redis will not start, or refuses the password
+
+### Pod in `CrashLoopBackOff` with a config-file error
+
+`redis.conf`'s last line (`include /etc/redis/secret/requirepass.conf`)
+points at a file that must actually be there and readable. Check the
+Secret carries the key first:
+
+    sg k3s-admin -c 'kubectl -n databases get secret redis-credentials -o jsonpath="{.data.requirepass\.conf}"'
+
+An empty result means VSO never rendered that template — go to entry 10
+and work through it with Redis's own names (role `vso-redis`, ServiceAccount
+`redis`, Secret `redis-credentials`). If the key is there, check the file's
+permissions from inside the pod:
+
+    sg k3s-admin -c 'kubectl -n databases exec deploy/redis -- ls -lnL /etc/redis/secret/'
+
+Expect `-r--r----- 1 0 1000` (`ls -n` prints numeric IDs; without `-n` the
+group prints as `redis`, its display name for gid 1000, which reads
+confusingly like a username at first glance). Group `1000` is what makes
+this file readable at all: the pod runs as uid 999 gid 1000, and it is
+`fsGroup: 1000` on the pod's `securityContext` — not anything on the
+container's own `securityContext` — that makes a Secret volume file
+group-readable by that gid. A file owned by root at `0440` with the wrong
+group locks Redis out of its own password before `redis-server` ever
+finishes parsing its config, and the log names the config file, not the
+underlying Secret.
+
+### Clients get `NOAUTH` with what they believe is the right password
+
+The Vault value was rotated but the server was not restarted. Redis reads
+`requirepass` once, at startup, exactly like PostgreSQL reads
+`POSTGRES_PASSWORD` once, at `initdb` (entry 11 §3) — except here the fix
+is cheap. See the component README's rotation section
+(`platform/databases/redis/README.md`) for why, and run:
+
+    sg k3s-admin -c 'kubectl -n databases rollout restart deploy/redis'
+
+### Clients connect with NO password at all
+
+The `include` directive is not taking effect — most likely it was moved
+off the last line of `redis.conf` and a later directive silently
+overrode `requirepass` back to empty (Redis applies directives in read
+order; a later one wins). Verify with `-e`, not a bare `ping`:
+
+    sg k3s-admin -c "kubectl -n databases run redis-authcheck --rm -i --restart=Never --image=redis:8.2-alpine -- redis-cli -e -h redis.databases.svc -p 6379 ping"
+
+A working, password-enforcing server refuses this with `NOAUTH
+Authentication required.` and a non-zero exit. **Without `-e`, `redis-cli`
+exits `0` even on `NOAUTH`** — measured on this image — so a casual check
+using the bare form can look like a pass when authentication is actually
+completely absent.
+
+### The pod is Ready but Redis is broken
+
+Someone replaced a probe with a bare `redis-cli ping`. That command prints
+`NOAUTH Authentication required.` and exits `0` regardless of whether
+authentication is actually working, so Kubernetes reports the pod Ready no
+matter what is wrong underneath. Compare the live probe against
+`platform/databases/redis/config/redis.yaml`, which matches the response
+text instead (`grep -qE 'PONG|NOAUTH'`) for exactly this reason — see the
+component README's "Why the probe is not `redis-cli ping`" section.
+
+### "I took a backup" — no, you did not
+
+`BGSAVE` replies `Background saving started` even when the write is about
+to be refused — it is asynchronous, and the reply only confirms the fork
+happened. Check the result, not the reply:
+
+    sg k3s-admin -c 'kubectl -n databases exec deploy/redis -- sh -c '\''REDISCLI_AUTH=$(sed -n "s/^requirepass //p" /etc/redis/secret/requirepass.conf) redis-cli info persistence'\''' | grep rdb_last_bgsave_status
+
+A correctly configured cache reads `rdb_last_bgsave_status:err`, and the
+pod log carries the reason:
+
+    sg k3s-admin -c 'kubectl -n databases logs deploy/redis --tail=50'
+    # Failed opening the temp RDB file temp-NN.rdb (in server root dir /data) for saving: Read-only file system
+
+If instead `rdb_last_bgsave_status` reads `ok`, something has removed or
+broken the `nodata` `emptyDir` mount in `config/redis.yaml` — see the
+component README's "`BGSAVE` writes nothing" section for the full
+mechanism (`readOnlyRootFilesystem` covers `/` only; the image's own
+`VOLUME /data` gets an anonymous writable mount that only an explicit
+read-only `emptyDir` shadows), and for why neither the pod spec nor a
+`docker run` test of the image alone would ever show this — only the
+mount table inside the actual running pod does:
+
+    sg k3s-admin -c 'kubectl -n databases exec deploy/redis -- cat /proc/1/mountinfo'
+
+This cache has no backups by design, whether `BGSAVE` is refused or not.
+If a durable copy is ever needed, the fix is a different datastore for
+that data, not a flag on this one.
+
+### Evictions or OOMKills under load
+
+    sg k3s-admin -c 'kubectl -n databases exec deploy/redis -- sh -c '\''REDISCLI_AUTH=$(sed -n "s/^requirepass //p" /etc/redis/secret/requirepass.conf) redis-cli info memory'\''' | grep maxmemory
+    sg k3s-admin -c 'kubectl -n databases describe pod -l app=redis'
+
+If `maxmemory` reads `0`, the ConfigMap's tuning is not reaching the
+running server — most likely the same startup-only-read gap the component
+README's "The same applies to the ConfigMap" section describes; a
+`rollout restart` picks up whatever `redis-config` currently holds. If it
+reads `134217728` (128MiB) as expected and the container is still
+`OOMKilled`, the gap between measured RSS and the configured dataset size
+is too small for this workload and the container's memory **limit** needs
+raising — raising `maxmemory` further only grows the dataset the eviction
+policy is trying to bound, it does not fix a limit that is already too
+tight.

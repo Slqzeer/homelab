@@ -18,6 +18,7 @@ manifest ever applied by hand.
 | `platform/vault/` | HashiCorp Vault: Helm values, unsealer manifest, init/backup docs |
 | `platform/vault-secrets-operator/` | Vault Secrets Operator: Helm values, `VaultConnection`/`VaultAuth`/`VaultStaticSecret` manifests |
 | `platform/databases/postgres/` | PostgreSQL: StatefulSet, PVC, its own Vault-Secrets-Operator wiring, README |
+| `platform/databases/redis/` | Redis: ephemeral cache, its own Vault-Secrets-Operator wiring, README |
 | `observability/` | Prometheus, Grafana, logging |
 | `apps/` | Currently unused; reserved for per-application values/manifests, not Application objects |
 
@@ -28,10 +29,15 @@ Application picks it up; nothing is applied by hand. Order components with the
 `argocd.argoproj.io/sync-wave` annotation: infrastructure 0-2, platform 10
 (`vault`), apps 20, `ingress-config` and `vso-operator` sharing wave 21
 deliberately (see below for why `vso-operator` is not right after `vault`),
-`vso-config` at 22, and `postgres` last of all at 23 — it cannot start
-without the Secret `vso-config` creates, so it has to come after it, and
-nothing in this cluster yet depends on Postgres, so nothing is gated by
-putting it last. Platform (10) gates apps (20) and wave 21 the same way
+`vso-config` at 22, and wave 23 last of all, now shared by both `postgres`
+and `redis` — neither can start without a Secret `vso-config` creates one
+wave earlier, so both have to come after it, and sharing the wave rather
+than stacking one behind the other lets them reconcile in parallel since
+neither depends on the other. Nothing in this cluster yet depends on
+Postgres or on Redis, so nothing is gated by putting them last. The rule
+going forward: a component that does not depend on Postgres (or on
+anything else at wave 23) belongs at or below 23, not above it out of
+habit. Platform (10) gates apps (20) and wave 21 the same way
 infrastructure gates platform — see below for what that means on a rebuild.
 
 Every Application object belongs in `environments/homelab/apps/` — `root.yaml`
@@ -313,14 +319,16 @@ last thought about it.
   policy could usefully deny. It stops being acceptable the moment the
   first consumer arrives, which is also the moment you learn what the
   policy should say. Pick it up in that phase, not before.
-- **Both `VaultStaticSecret` destinations keep VSO's `_raw` key**, so each
-  derived Secret carries its credential twice: once parsed, once in the
-  verbatim KV JSON. `spec.destination.transformation.excludeRaw: true`
-  removes the duplicate. This affects the phase-17 canary in `vault` as
-  well as `postgres` in `databases`, so it is one small cross-cutting
-  change rather than a component fix. Every extra copy widens what a
-  `kubectl get secret -o yaml`, an Argo CD resource view, or an etcd
-  backup exposes.
+- **Two of three `VaultStaticSecret` destinations still keep VSO's `_raw`
+  key**, so each derived Secret carries its credential twice: once parsed,
+  once in the verbatim KV JSON. `spec.destination.transformation.excludeRaw:
+  true` removes the duplicate. This affects the phase-17 canary in `vault`
+  and `postgres` in `databases`; `redis`, added in phase 19, ships with
+  `excludeRaw: true` from the start and does not carry the duplicate. The
+  gap is therefore two Secrets, not three, and the fix for those two
+  remains outstanding — one small cross-cutting change rather than a
+  component fix. Every extra copy widens what a `kubectl get secret -o
+  yaml`, an Argo CD resource view, or an etcd backup exposes.
 - **PostgreSQL has no `startupProbe`.** `pg_isready` reports "rejecting"
   during crash recovery, and the liveness probe allows 30s plus six
   20s-spaced failures — so 150 seconds is the longest WAL replay the pod
