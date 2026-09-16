@@ -11,13 +11,19 @@ one: a cache that costs nothing to lose. There is no `volumeClaimTemplate`,
 no `PersistentVolumeClaim` anywhere in `config/`, `save ""` and
 `appendonly no` disable both of Redis's own on-disk paths, and the pod's
 `/data` mount (see "BGSAVE writes nothing" below) closes the one path that
-would otherwise still exist. A restart — deliberate, OOM, node reboot,
-whatever — throws the whole keyspace away and starts empty. That is the
-design, not a gap: nothing in this cluster yet depends on Redis holding
-anything across a restart, and the moment something does, that is a
-different phase with a different Deployment, most likely PostgreSQL's
-branch of the same roadmap fork (a StatefulSet with a PVC) rather than this
-one grown a persistence flag.
+would otherwise still exist. The guarantee this adds up to is that
+**nothing outlives the pod**, not that nothing is ever written anywhere: a
+client holding the password could still `CONFIG SET dir /dev/shm` and make
+`BGSAVE` succeed there, because `/dev/shm` and `/dev` are writable tmpfs
+even with the rest of the filesystem read-only — but that write is memory,
+dies with the pod exactly like the keyspace itself, and does not reopen the
+durability question. A restart — deliberate, OOM, node reboot, whatever —
+throws the whole keyspace away and starts empty. That is the design, not a
+gap: nothing in this cluster yet depends on Redis holding anything across a
+restart, and the moment something does, that is a different phase with a
+different Deployment, most likely PostgreSQL's branch of the same roadmap
+fork (a StatefulSet with a PVC) rather than this one grown a persistence
+flag.
 
 Because of that, this file documents no backup procedure. There is nothing
 to back up by design, and writing a procedure anyway would imply a
@@ -32,21 +38,33 @@ the password for exactly that user, so a client URL looks like
 `redis://:PASSWORD@redis.databases.svc:6379` with the username left out
 (or `default` if the client insists on one).
 
-From a separate pod, `REDISCLI_AUTH` is the form to use — never `-a`,
-which puts the password on the command line, visible to anything that can
-read `ps` on the node for as long as the process runs:
+From a separate pod, never use `-a` — it puts the password on the command
+line, visible to anything that can read `ps` on the node for as long as the
+process runs. But `REDISCLI_AUTH` set from a local `kubectl get secret ...`
+substitution is **not** the safe alternative it looks like: that resolves
+the password on this host, as argv of the local `kubectl` process (visible
+to `ps` here), and hands it to `kubectl run` as a literal value, which lands
+in the created Pod's `spec.containers[].env` — readable from etcd, from
+`kubectl get pod -o yaml`, from the Argo CD resource view, and from the
+audit log. That is strictly worse than the `-a` flag it was meant to avoid:
+`-a` at least confines the leak to this node's `ps`.
+
+The actual safe form uses `--overrides` with `valueFrom.secretKeyRef`, so
+the kubelet resolves the password from the Secret when the container
+starts and it never passes through this host or through the Pod spec as a
+plain value:
 
     cat > /tmp/redis-ping.sh <<'EOF'
-    kubectl -n databases run redis-client --rm -i --restart=Never --image=redis:8.2-alpine --env="REDISCLI_AUTH=$(kubectl -n databases get secret redis-credentials -o jsonpath='{.data.password}' | base64 -d)" -- redis-cli -h redis.databases.svc -p 6379 ping
+    kubectl -n databases run redis-client --rm -i --restart=Never --image=redis:8.2-alpine --overrides='{"spec":{"containers":[{"name":"redis-client","image":"redis:8.2-alpine","stdin":true,"command":["redis-cli","-h","redis.databases.svc","-p","6379","ping"],"env":[{"name":"REDISCLI_AUTH","valueFrom":{"secretKeyRef":{"name":"redis-credentials","key":"password"}}}]}]}}'
     EOF
     sg k3s-admin -c 'sh /tmp/redis-ping.sh'
 
-The inner `$(...)` needs its own single-quoted `jsonpath='{.data.password}'`,
-which collides with `sg k3s-admin -c '...'`'s own single quotes — the two
-cannot simply nest. Writing the command to a file first and having `sg` run
-the file sidesteps the collision entirely; the heredoc body above is
+Writing the command to a file first and having `sg` run the file sidesteps
+the quoting collision between the outer `sg k3s-admin -c '...'` and the
+JSON `--overrides` value's own quotes; the heredoc body above is
 deliberately one long line, not wrapped, because a line a human is meant to
-copy must never depend on a trailing backslash surviving the paste.
+copy must never depend on a trailing backslash surviving the paste. Verified
+2026-09-16: this returns `PONG`.
 
 **`requirepass` applies to loopback as well.** Unlike PostgreSQL, which
 trusts its own Unix socket unconditionally (see
@@ -108,9 +126,10 @@ own Dockerfile declares `VOLUME /data`, and containerd honours that
 declaration by creating an anonymous **writable** volume at `/data` —
 invisible in the pod spec, in `kubectl get pod -o yaml`, and in a
 `docker run` test of the image alone. The first Redis deployed here
-answered `BGSAVE` by actually writing an 88-byte `/data/dump.rdb`, quietly
-defeating the "nothing is written to disk" design while the manifest
-looked correct end to end.
+answered `BGSAVE` by actually writing an 88-byte `/data/dump.rdb` — a file
+that would have outlived the pod's own restart, quietly defeating the
+"nothing outlives the pod" guarantee while the manifest looked correct end
+to end.
 
 The fix is the explicit `nodata` volume in `config/redis.yaml`: an
 `emptyDir` mounted `readOnly: true` at `/data`, which shadows the implicit
@@ -179,21 +198,31 @@ consumers, not one" section for why that is allowed even though the
 `redis-cli ping` against a server with `requirepass` set prints
 `NOAUTH Authentication required.` and **still exits 0** — measured on this
 image, 2026-09-16. A probe built on the bare command can therefore never
-fail: Kubernetes marks the pod Ready and keeps restarting nothing, no
-matter what is actually wrong with authentication or the config-file
-`include`. Both probes in `config/redis.yaml` instead match the response
-text directly:
+fail: Kubernetes marks the pod Ready and keeps restarting nothing, even
+against a server that answers but does not speak RESP correctly. Both
+probes in `config/redis.yaml` instead match the response text directly:
 
     redis-cli ping 2>&1 | grep -qE 'PONG|NOAUTH'
 
-`NOAUTH` is treated as success here on purpose — it proves the server is
-up, speaking the protocol, and enforcing auth, all without the probe
-needing the password itself. Only a dead port or a wedged process fails to
-match either string. Someone will eventually look at this and want to
-"simplify" it back to a bare `redis-cli ping`; this paragraph, and the
-probe comment in `config/redis.yaml`, are what should stop them — that
-change would produce a probe that reports Ready regardless of whether
-Redis is actually answering.
+Be precise about what this buys and what it does not. `NOAUTH` is treated
+as success here so the probe can tell a live, responding server from a
+dead port or a wedged process **without needing the password itself** —
+that is a liveness signal, not an auth-correctness one. If the config-file
+`include` silently failed and the server holds no password at all, it
+answers plain `PONG`, and this probe passes exactly as it would with auth
+correctly enforced — it cannot tell the two apart, because it never
+authenticates. Whether auth is genuinely enforced is a question for a
+manual check, not for this probe: run `redis-cli -e -h redis.databases.svc
+-p 6379 ping` from a separate pod, with no `REDISCLI_AUTH` set (`-e` is
+required — without it `redis-cli` exits 0 even on `NOAUTH`, the same trap
+this whole section is about). Expect `NOAUTH Authentication required.` and
+a **non-zero** exit; a `PONG` means auth is not actually enforced no matter
+what this probe reports. `docs/superpowers/plans/2026-09-16-redis.md`'s
+Task 3 Step 2 runs exactly this check. Someone will eventually look at this
+and want to "simplify" it back to a bare `redis-cli ping`; this paragraph,
+and the probe comment in `config/redis.yaml`, are what should stop them —
+that change would produce a probe that reports Ready regardless of whether
+Redis is actually answering at all.
 
 ## Measured resource usage
 
@@ -204,9 +233,9 @@ Measured 2026-09-16, minutes after first start:
 | `redis-*` | 10m | ~22MiB |
 
 That RSS is higher than the ~1MiB of actual keyspace at the time because
-Redis 8 auto-loads four modules (search, bloom, timeseries, ReJSON) on
-startup regardless of whether anything uses them — allocator and module
-overhead, not a growing dataset. `maxmemory` is set to `134217728` (128MiB)
+Redis 8 auto-loads five modules (`bf`, `timeseries`, `vectorset`, `search`,
+`ReJSON`) on startup regardless of whether anything uses them — allocator
+and module overhead, not a growing dataset. `maxmemory` is set to `134217728` (128MiB)
 and bounds the dataset; the container's `256Mi` limit leaves headroom above
 that so eviction (`allkeys-lru`), not the OOM killer, is what reacts first
 as the cache fills. Requests are `64Mi` / `25m`.

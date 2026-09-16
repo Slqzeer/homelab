@@ -31,7 +31,8 @@ data:
     # same trajectory. allkeys-lru is what turns that loop into eviction.
     # 128mb sits at half the 256Mi container limit on purpose: maxmemory bounds
     # the DATASET, while RSS runs higher from allocator fragmentation and from
-    # the four modules Redis 8 auto-loads (~22MiB at idle, measured).
+    # the five modules Redis 8 auto-loads (bf, timeseries, vectorset,
+    # search, ReJSON; ~22MiB at idle, measured).
     maxmemory 128mb
     maxmemory-policy allkeys-lru
 
@@ -144,15 +145,23 @@ spec:
               # "NOAUTH Authentication required." and STILL EXITS 0 -- measured
               # 2026-09-16 -- so it is a probe that can never fail. Matching
               # the response text instead needs no password: NOAUTH is a
-              # SUCCESS condition here, proving the server is listening,
-              # speaking the protocol, and enforcing auth. Against a dead port
-              # redis-cli prints "Connection refused" and matches neither.
+              # SUCCESS condition here, proving the server is listening and
+              # speaking the protocol. This is a LIVENESS signal only -- it
+              # cannot tell an enforced password from a broken `include` that
+              # left none set, since an unauthenticated server also answers
+              # PONG. See platform/databases/redis/README.md. Against a dead
+              # port redis-cli prints "Connection refused" and matches neither.
               command:
                 - sh
                 - -c
                 - redis-cli ping 2>&1 | grep -qE 'PONG|NOAUTH'
             initialDelaySeconds: 5
             periodSeconds: 10
+            # Matches liveness below: this host has a recorded history of
+            # probe timeouts under memory pressure, and readiness would
+            # otherwise flap first (default 1s) and drop the pod from the
+            # Service's endpoints before liveness ever notices.
+            timeoutSeconds: 5
           livenessProbe:
             exec:
               command:
@@ -188,7 +197,7 @@ spec:
           # it by creating an anonymous WRITABLE volume there -- even with
           # readOnlyRootFilesystem: true, which only covers `/`. Without this
           # mount, BGSAVE genuinely succeeds and writes a dump.rdb, silently
-          # defeating the "nothing is ever written to disk" property. Mounting
+          # defeating the "nothing outlives the pod" property. Mounting
           # an empty volume read-only over that path restores it. Verified
           # 2026-09-16: BGSAVE then leaves rdb_last_bgsave_status:err and logs
           # "Failed opening the temp RDB file ... Read-only file system".

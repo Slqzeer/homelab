@@ -961,9 +961,13 @@ component README's "Why the probe is not `redis-cli ping`" section.
 
 `BGSAVE` replies `Background saving started` even when the write is about
 to be refused — it is asynchronous, and the reply only confirms the fork
-happened. Check the result, not the reply:
+happened. **`rdb_last_bgsave_status` also reads `ok` on a pod that has
+never attempted a save at all** — `ok` is Redis's default value for that
+field, not evidence of anything. Reading it without first triggering a
+`BGSAVE` proves nothing either way. Trigger one, then check the result, not
+the reply:
 
-    sg k3s-admin -c 'kubectl -n databases exec deploy/redis -- sh -c '\''REDISCLI_AUTH=$(sed -n "s/^requirepass //p" /etc/redis/secret/requirepass.conf) redis-cli info persistence'\''' | grep rdb_last_bgsave_status
+    sg k3s-admin -c 'kubectl -n databases exec deploy/redis -- sh -c '\''REDISCLI_AUTH=$(sed -n "s/^requirepass //p" /etc/redis/secret/requirepass.conf) redis-cli bgsave; sleep 1; REDISCLI_AUTH=$(sed -n "s/^requirepass //p" /etc/redis/secret/requirepass.conf) redis-cli info persistence'\''' | grep rdb_last_bgsave_status
 
 A correctly configured cache reads `rdb_last_bgsave_status:err`, and the
 pod log carries the reason:
@@ -971,8 +975,9 @@ pod log carries the reason:
     sg k3s-admin -c 'kubectl -n databases logs deploy/redis --tail=50'
     # Failed opening the temp RDB file temp-NN.rdb (in server root dir /data) for saving: Read-only file system
 
-If instead `rdb_last_bgsave_status` reads `ok`, something has removed or
-broken the `nodata` `emptyDir` mount in `config/redis.yaml` — see the
+If instead `rdb_last_bgsave_status` reads `ok` **after this same `bgsave`
+call**, something has removed or broken the `nodata` `emptyDir` mount in
+`config/redis.yaml` — see the
 component README's "`BGSAVE` writes nothing" section for the full
 mechanism (`readOnlyRootFilesystem` covers `/` only; the image's own
 `VOLUME /data` gets an anonymous writable mount that only an explicit

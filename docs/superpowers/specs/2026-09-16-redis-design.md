@@ -124,7 +124,8 @@ built-in defaults, which include **no password, no `maxmemory`, and RDB
 snapshotting enabled** — every one of which this design overrides.
 
 **Idle RSS is ~22 MiB, not the ~3 MiB Redis is famous for.** Redis 8 auto-loads
-four modules (`search`, `bloom`, `timeseries`, `ReJSON`). They are not needed
+five modules — `MODULE LIST` on the running server returns `bf`,
+`timeseries`, `vectorset`, `search`, `ReJSON`. They are not needed
 here, and the image exposes no surface for switching them off: it contains no
 Redis configuration file at all, and `redis-server --help` offers no module
 flag. The sizing in §7 therefore accounts for them rather than wishing them
@@ -326,7 +327,7 @@ would drift from the mounted file. The pod restart is the documented route.)
 - **Retrofitting `excludeRaw: true` onto the two existing `VaultStaticSecret`s.**
   Redis ships with it (R11), but the existing pair is a separate cross-cutting
   change and folding it in here would mix two concerns in one phase
-- Disabling the four auto-loaded Redis 8 modules — not separately controllable
+- Disabling the five auto-loaded Redis 8 modules — not separately controllable
   in the official image (§6)
 
 ## 13. Risks
@@ -376,5 +377,8 @@ The phase is complete when all hold:
     `rdb_last_bgsave_status:err`. **Do not assert on `BGSAVE`'s reply** — it
     answers `Background saving started` regardless, because it is asynchronous.
 11. `configure-vault.sh` re-run leaves the existing password unchanged.
-12. All Applications Synced/Healthy; both tailnet URLs 200.
+12. All Applications Synced/Healthy; both tailnet URLs reachable — Argo CD
+    answers `200` at its root, Vault answers `307` to `/ui/`, so Vault needs
+    `curl -L` to show `200`. Measured 2026-09-16; an earlier draft expected a
+    bare `200` from both.
 13. Memory measured before and after and recorded, not estimated.

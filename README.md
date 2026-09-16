@@ -30,10 +30,16 @@ Application picks it up; nothing is applied by hand. Order components with the
 (`vault`), apps 20, `ingress-config` and `vso-operator` sharing wave 21
 deliberately (see below for why `vso-operator` is not right after `vault`),
 `vso-config` at 22, and wave 23 last of all, now shared by both `postgres`
-and `redis` — neither can start without a Secret `vso-config` creates one
-wave earlier, so both have to come after it, and sharing the wave rather
-than stacking one behind the other lets them reconcile in parallel since
-neither depends on the other. Nothing in this cluster yet depends on
+and `redis` — **not** because `vso-config` creates a Secret either of them
+consumes (it does not: `postgres-credentials` and `redis-credentials` are
+each created by that component's own `VaultStaticSecret`, shipped in its
+own Application at wave 23), but because both need the VSO **operator**
+(`vso-operator`, wave 21) already running and Vault's configure ceremony
+already run — the same two preconditions `vso-config` itself depends on,
+which is why they naturally land after it rather than because of it.
+Sharing the wave rather than stacking one behind the other lets them
+reconcile in parallel since neither depends on the other. Nothing in this
+cluster yet depends on
 Postgres or on Redis, so nothing is gated by putting them last. The rule
 going forward: a component that does not depend on Postgres (or on
 anything else at wave 23) belongs at or below 23, not above it out of
@@ -282,13 +288,19 @@ once. See `platform/vault/README.md`.
    `vso-operator`, which share wave 21: skipping the configure half leaves
    `vso-config` `Progressing`/unhealthy, but because wave 22 sits after
    every Ingress, that failure does **not** cost any tailnet URL. The
-   ceremony now also seeds PostgreSQL's credential (`homelab/postgres`), so
-   the same skip leaves a second Application unhealthy too: `postgres` at
-   wave 23 cannot start without the Secret `vso-config` creates one wave
-   earlier. Both `vso-config` (22) and `postgres` (23) sit after
-   `ingress-config` (21), so this still costs no tailnet URL — the same
-   reasoning as for `vso-config` alone, just now covering two Applications
-   instead of one. `vso-operator` itself was deliberately moved off wave 11
+   ceremony now also seeds PostgreSQL's and Redis's credentials
+   (`homelab/postgres`, `homelab/redis`), so the same skip leaves two more
+   Applications unhealthy: `postgres` and `redis`, both at wave 23. Neither
+   depends on a Secret `vso-config` creates — each has its own
+   `VaultStaticSecret` that reads its own path in Vault directly — but both
+   depend on the same two things `vso-config` itself depends on: the VSO
+   operator running (wave 21) and this ceremony having populated Vault, so
+   skipping it fails all three Applications for the same underlying reason,
+   not because one creates something the others consume. `vso-config` (22),
+   `postgres` and `redis` (23) all sit after `ingress-config` (21), so this
+   still costs no tailnet URL — the same reasoning as for `vso-config`
+   alone, just now covering three Applications instead of one.
+   `vso-operator` itself was deliberately moved off wave 11
    (right after `vault`) for the same reason `ingress-config` sits at 21 —
    see the design spec's §6 and `environments/homelab/apps/vso-operator.yaml`
    for why a component whose own health says nothing about Vault should
