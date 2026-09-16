@@ -113,4 +113,44 @@ vault write auth/kubernetes/role/vso-postgres \
     token_policies=vso-postgres-read \
     ttl=1h
 
+echo "==> seeding homelab/redis"
+if vault kv get homelab/redis >/dev/null 2>&1; then
+  echo "    already present, leaving the credential alone"
+else
+  # Generated here and never displayed, exactly as the postgres block above.
+  #
+  # Alphanumeric only. Redis stores requirepass verbatim and would accept
+  # anything, but clients build redis://:password@host URLs, where a / or @
+  # breaks parsing in ways that surface far from the cause.
+  #
+  # Written to a file so that only the FILENAME becomes an argument -- a
+  # password on a command line is visible in `ps`.
+  PWFILE=$(mktemp)
+  trap 'rm -f "$PWFILE"' EXIT
+  head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32 > "$PWFILE"
+  vault kv put homelab/redis username=default password=@"$PWFILE" >/dev/null
+  rm -f "$PWFILE"
+  echo "    generated"
+fi
+
+echo "==> policy vso-redis-read"
+# The data/ segment is REQUIRED and is not a typo -- see the note on
+# vso-canary-read above.
+vault policy write vso-redis-read - <<'POLICY'
+path "homelab/data/redis" {
+  capabilities = ["read"]
+}
+POLICY
+
+echo "==> role vso-redis"
+# bound_service_account_names must match the ServiceAccount created in
+# platform/databases/redis/config/vault-secrets.yaml, and audience must match
+# that file's VaultAuth spec.kubernetes.audiences.
+vault write auth/kubernetes/role/vso-redis \
+    bound_service_account_names=redis \
+    bound_service_account_namespaces=databases \
+    audience=vault \
+    token_policies=vso-redis-read \
+    ttl=1h
+
 echo "==> done"

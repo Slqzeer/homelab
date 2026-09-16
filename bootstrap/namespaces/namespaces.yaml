@@ -30,7 +30,10 @@ kind: Namespace
 metadata:
   name: vault-secrets-operator-system
 ---
-# Stateful data services. PostgreSQL (phase 18) is the first.
+# Stateful data services, and the cache that sits beside them. PostgreSQL
+# (phase 18) is the stateful one; Redis (phase 19) is deliberately ephemeral
+# and holds no volume at all. They share this namespace, and therefore share
+# its VaultConnection -- see platform/databases/redis/README.md.
 apiVersion: v1
 kind: Namespace
 metadata:
