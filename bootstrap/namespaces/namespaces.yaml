@@ -51,3 +51,17 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: apps
+---
+# Artifact repositories. Holds Nexus Repository CE (phase 21), which fills the
+# roadmap's "Artifactory" role -- see docs/superpowers/specs/
+# 2026-09-17-nexus-repository-design.md section 2 for why the product differs
+# from the plan's word.
+#
+# Not `databases`: Nexus is not a data service. Not `apps`: that namespace is
+# for workloads this homelab's own CI builds. A separate namespace is also a
+# REQUIREMENT, not a preference -- the VaultAuth CRD states its ServiceAccount
+# "must reside in the consuming secret's namespace".
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: artifacts
