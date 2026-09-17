@@ -237,7 +237,11 @@ Said here as loudly as `infrastructure/networking/README.md` says it for
 the tailnet ACL policy: this script is versioned intent, applied by hand.
 Committing it does not apply it, pushing it does not apply it, and Argo CD
 never runs it. A rebuild that unseals Vault but skips this ceremony leaves
-`vso-config` unhealthy at wave 22 — see `platform/vault/README.md` for the
-ceremony's place in the full unseal-and-configure sequence, and the root
-`README.md`'s "First install / rebuild" section for why that specific
-failure costs no tailnet URL.
+`vso-config`'s credential path dead at wave 22 — but its Application keeps
+reporting `Synced`/`Healthy`: every resource it manages (`ServiceAccount`,
+`VaultConnection`, `VaultAuth`, `VaultStaticSecret`) is a CRD kind Argo CD
+has no health assessment for, so `kubectl -n argocd get applications` shows
+nothing wrong. Check `kubectl -n vault get vaultstaticsecret vault-canary`
+instead. See `platform/vault/README.md` for the ceremony's place in the full
+unseal-and-configure sequence, and the root `README.md`'s "First install /
+rebuild" section for why that specific failure costs no tailnet URL.

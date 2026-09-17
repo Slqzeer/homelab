@@ -354,7 +354,7 @@ one file: `environments/homelab/apps/beacon.yaml`.
 
 The Ingress reuses the existing `homelab` ProxyClass by annotation. That is a
 cross-repository reference to a cluster-scoped object created at wave 21 by
-`ingress-config`, consumed at wave 23 — the ordering is safe, and it is the
+`ingress-config`, consumed at wave 24 — the ordering is safe, and it is the
 same reason the ProxyClass comment gives for not setting
 `proxyConfig.defaultProxyClass`.
 
@@ -434,15 +434,31 @@ gates nothing.
 
 ## 11. New cluster-only state
 
-Two things this phase creates that exist in no repository and that a rebuild
-does not recreate. Both belong in the root README's "First install / rebuild"
-list, beside `operator-oauth` and `vault-unseal-keys`:
+Four things this phase creates that exist in no repository and that a
+rebuild does not recreate. All four belong in the root README's "First
+install / rebuild" list, beside `operator-oauth` and `vault-unseal-keys`:
 
 1. **A `repo-beacon` deploy-key Secret in `argocd`.** Argo CD must clone a
    second private repository, and the existing `repo-homelab` credential does
-   not grant access to it. Without this the `beacon` Application reports a
-   clone failure, which reads as a repository-URL typo.
+   not grant access to it. Without this the `beacon` Application does not
+   fail with anything that names a missing Secret — the observed production
+   error was `failed to list refs: error creating SSH agent: "SSH agent
+   requested but SSH_AUTH_SOCK not-specified"`, a client-side SSH-agent
+   message that names no Secret and no repository.
 2. **The GHCR PAT in Vault at `homelab/ghcr`.** §9.1.
+3. **The GitHub Actions environment `homelab` in the `homelab` repository,
+   and its two Environment secrets, `TS_OAUTH_CLIENT_ID` and
+   `TS_OAUTH_SECRET`.** These are Environment secrets, not repository
+   secrets — both jobs in `tailscale-acl.yaml` must declare
+   `environment: homelab` or `secrets.*` resolves empty even though the
+   values exist.
+4. **`beacon`'s repository-level Actions workflow permission, set to
+   "Read and write permissions."** GitHub's default for a new repository is
+   read-only, which is a ceiling the write-back job's own
+   `permissions: contents: write` cannot elevate past. `homelab` itself is
+   still at the default (it never needs to push to itself); `beacon` was
+   switched to write deliberately, because its CI job commits the
+   `tag@digest` pin back to its own repository.
 
 ## 12. Risks
 
@@ -491,7 +507,7 @@ seen:
    version list.
 5. **The write-back commit exists**, pins `tag@digest`, and **did not trigger
    a second workflow run**.
-6. **Argo CD syncs `beacon` unattended** to `Synced`/`Healthy` at wave 23.
+6. **Argo CD syncs `beacon` unattended** to `Synced`/`Healthy` at wave 24.
 7. **`curl https://beacon.taildf6cd4.ts.net/version` from a tailnet device
    returns the new commit SHA** — the whole chain, end to end, in one command.
 8. **The pull actually used the credential.** This one needs care, because

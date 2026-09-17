@@ -76,6 +76,10 @@ ceremony above (`vault kv put` overwrites), and VSO propagates it within its
 | Scope | `read:packages` |
 | Vault path | `homelab/ghcr` |
 
+**This table is unfilled.** Whoever ran the seeding ceremony above did not
+come back and record the date. Until someone does, the expiry is known only
+to whoever issued the token — not to this file, and not to the cluster.
+
 ## Related
 
 - `platform/registry/config/vault-secrets.yaml` — the VSO wiring

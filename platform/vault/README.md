@@ -63,7 +63,12 @@ Vault comes up sealed and uninitialized. This runs once, by hand.
    engine, no auth method, no policy, no role. Run
    `platform/vault/configure-vault.sh` inside the pod, as described in
    `platform/vault-secrets-operator/README.md`. A rebuild that unseals but
-   does not configure leaves `vso-config` unhealthy at wave 22.
+   does not configure leaves `vso-config`'s credential path dead at wave 22
+   — but not its Application, which reports `Synced`/`Healthy` regardless.
+   Every resource `vso-config` manages is a CRD kind Argo CD has no health
+   assessment for, so this failure is invisible to
+   `kubectl -n argocd get applications`; check
+   `kubectl -n vault get vaultstaticsecret vault-canary` instead.
 
 Five shares with a threshold of three buys nothing today, since the cluster
 holds a full quorum. It costs nothing either, and it keeps the option of

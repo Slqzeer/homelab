@@ -13,7 +13,8 @@ workflow in `test` mode only. Tasks 3–4 build `beacon` in its own repository a
 publish it to GHCR, with CI writing the resulting `tag@digest` back into
 beacon's own deploy manifests. Tasks 5–6 wire the cluster: a `read:packages`
 PAT in Vault, delivered by VSO as a `dockerconfigjson` pull Secret. Task 7
-corrects the documentation this phase invalidates. Task 8 flips the ACL job to
+proves the whole chain end to end against the live cluster. Task 8 corrects
+the documentation this phase invalidates. Task 9 flips the ACL job to
 `apply`, last, with evidence.
 
 **Tech Stack:** GitHub Actions (GitHub-hosted runners), GHCR, kubeconform 0.8.0,
@@ -61,7 +62,7 @@ Vault 2.0.4, VSO 1.5.1, Tailscale operator.
   under `resources:`, where it then described the wrong line. Header comments at
   the top of the file survive in place. In `beacon/deploy/kustomization.yaml`,
   put explanation in the header block only.
-- **The ACL job ships `action: test` and stays there until Task 8.** Do not
+- **The ACL job ships `action: test` and stays there until Task 9.** Do not
   write `apply` into the workflow before then, even as a commented-out line that
   someone could uncomment.
 - **Sync waves after this plan:** `argocd` -1, `namespaces` 0,
@@ -82,13 +83,13 @@ Vault 2.0.4, VSO 1.5.1, Tailscale operator.
 | --- | --- |
 | `.yamllint.yaml` | Create. Lint profile matching the house comment-first style |
 | `.github/workflows/validate.yaml` | Create. yamllint + kubeconform gate |
-| `.github/workflows/tailscale-acl.yaml` | Create. ACL `test` (Task 2), `apply` (Task 8) |
+| `.github/workflows/tailscale-acl.yaml` | Create. ACL `test` (Task 2), `apply` (Task 9) |
 | `bootstrap/namespaces/namespaces.yaml` | Modify. Add namespace `apps` |
 | `platform/registry/config/vault-secrets.yaml` | Create. VaultConnection, SA, VaultAuth, VaultStaticSecret for the pull Secret |
 | `platform/registry/README.md` | Create. PAT issuance, seeding, rotation, expiry |
 | `platform/vault/configure-vault.sh` | Modify. Add `vso-ghcr-read` policy and `vso-ghcr` role — **no secret value** |
-| `environments/homelab/apps/registry.yaml` | Create. Application, wave 23, path `platform/registry/config` |
-| `environments/homelab/apps/beacon.yaml` | Create. Application, wave 23, pointing at the beacon repo |
+| `environments/homelab/apps/registry.yaml` | Create. Application, wave 24, path `platform/registry/config` |
+| `environments/homelab/apps/beacon.yaml` | Create. Application, wave 24, pointing at the beacon repo |
 | `README.md` | Modify. Rebuild list, known gaps, layout table |
 | `infrastructure/networking/README.md` | Modify. Authority flips to git |
 
@@ -363,7 +364,7 @@ gate. If `yamllint` fails on `.github/workflows/validate.yaml` itself, the
 ### Task 2: The tailnet ACL workflow, in `test` mode only
 
 Phase 13 deferred this here in writing, twice. It ships in `test` mode and
-**stays there until Task 8** — read §7 of the spec before starting, because the
+**stays there until Task 9** — read §7 of the spec before starting, because the
 reason for that split is not obvious and the failure mode is losing every
 tailnet URL including Argo CD's.
 
@@ -373,7 +374,7 @@ tailnet URL including Argo CD's.
 **Interfaces:**
 - Consumes: the `validate` gate from Task 1 (this file must pass it).
 - Produces: a `tailscale-acl` workflow with one job running `action: test`.
-  Task 8 changes that single input to `apply` and adds a second job.
+  Task 9 changes that single input to `apply` and adds a second job.
 
 - [ ] **Step 1: Hand the OAuth client prerequisite to the user**
 
@@ -385,10 +386,17 @@ This cannot be done from the CLI. Ask the user to do the following, and wait:
    the operator's client has device scopes and no policy access, and widening
    it would give the in-cluster operator the ability to rewrite the tailnet
    policy. The spec's §5 keeps these two credential paths apart deliberately.
-3. Add both halves as repository secrets at
-   <https://github.com/Slqzeer/homelab/settings/secrets/actions>:
+3. Add both halves as **Environment** secrets, not repository secrets, on a
+   GitHub Actions environment named `homelab`:
+   <https://github.com/Slqzeer/homelab/settings/environments> → New
+   environment → `homelab` → add secrets:
    - `TS_OAUTH_CLIENT_ID`
    - `TS_OAUTH_SECRET`
+
+   The job this task writes, and the second job Task 9 adds, must both
+   declare `environment: homelab`, or `secrets.*` resolves empty even though
+   the values exist — an Environment secret is invisible to a job that does
+   not name its environment.
 
 **The secret value must never be pasted into this conversation.**
 
@@ -417,7 +425,7 @@ Create `.github/workflows/tailscale-acl.yaml`:
 #     input to set it.
 #
 # So `apply` overwrites the live policy with this file, every time, with at
-# most a warning that in practice never prints. After Task 8, git is
+# most a warning that in practice never prints. After Task 9, git is
 # authoritative for the tailnet policy and a console edit survives only until
 # the next push that touches this file. infrastructure/networking/README.md
 # says so.
@@ -444,6 +452,11 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # TS_OAUTH_CLIENT_ID and TS_OAUTH_SECRET are Environment secrets on the
+    # `homelab` environment, not repository secrets. `secrets.*` resolves an
+    # environment's secrets ONLY in a job that declares that environment --
+    # remove this line and both values below resolve empty, silently.
+    environment: homelab
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
       - uses: tailscale/gitops-acl-action@5a4a17f5708e9bf96f4ee915a95e9f83c2eebe1a  # v1
@@ -517,12 +530,12 @@ cache:   <same as control, always, for the reason in the file header>
 Record whether `control` and `local` match, verbatim, in the task notes:
 
 - **They match** — the file in git is already exactly what the tailnet is
-  running. Task 8's reconciliation is then a no-op, and `apply` is safe.
-- **They differ** — the file has drifted from the console, and Task 8 **must**
+  running. Task 9's reconciliation is then a no-op, and `apply` is safe.
+- **They differ** — the file has drifted from the console, and Task 9 **must**
   begin by copying the live policy into the file. Applying without that step
   deletes whatever was changed in the console since phase 13.
 
-Do not proceed to Task 8 later without this measurement. It is the only
+Do not proceed to Task 9 later without this measurement. It is the only
 evidence that distinguishes a safe apply from a destructive one.
 
 ---
@@ -1372,7 +1385,7 @@ Then, inside the pod:
     vault login
     umask 077
     TMPF=$(mktemp)
-    stty -echo; printf 'Paste the PAT, then press Enter: '; read -r PAT; stty echo; printf '\n'
+    trap 'stty echo' INT TERM EXIT; stty -echo; printf 'Paste the PAT, then press Enter: '; read -r PAT; stty echo; printf '\n'
     printf '%s' "$PAT" > "$TMPF"
     unset PAT
     wc -c < "$TMPF"
