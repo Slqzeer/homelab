@@ -38,7 +38,7 @@ Then, inside the pod:
     vault login
     umask 077
     TMPF=$(mktemp)
-    stty -echo; printf 'Paste the PAT, then press Enter: '; read -r PAT; stty echo; printf '\n'
+    trap 'stty echo' INT TERM EXIT; stty -echo; printf 'Paste the PAT, then press Enter: '; read -r PAT; stty echo; printf '\n'
     printf '%s' "$PAT" > "$TMPF"
     unset PAT
     wc -c < "$TMPF"
@@ -47,7 +47,9 @@ Then, inside the pod:
     rm -f /home/vault/.vault-token
     exit
 
-`stty -echo` keeps the token off the screen. `printf '%s'` writes it with **no
+The `trap` restores echo even if the paste is interrupted — a Ctrl-C between
+`stty -echo` and `stty echo` would otherwise leave the terminal silently not
+echoing. `stty -echo` keeps the token off the screen. `printf '%s'` writes it with **no
 trailing newline** — a newline inside the token produces a 401 whose message
 says nothing about whitespace. `password=@"$TMPF"` passes only the *filename*
 as an argument, so the token never appears in `ps`; this is the same form the

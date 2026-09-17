@@ -19,7 +19,9 @@ manifest ever applied by hand.
 | `platform/vault-secrets-operator/` | Vault Secrets Operator: Helm values, `VaultConnection`/`VaultAuth`/`VaultStaticSecret` manifests |
 | `platform/databases/postgres/` | PostgreSQL: StatefulSet, PVC, its own Vault-Secrets-Operator wiring, README |
 | `platform/databases/redis/` | Redis: ephemeral cache, its own Vault-Secrets-Operator wiring, README |
+| `platform/registry/` | GHCR pull credential: Vault Secrets Operator wiring, README covering issuing, seeding and rotating the token |
 | `observability/` | Prometheus, Grafana, logging |
+| `apps` namespace | Created by `bootstrap/namespaces/namespaces.yaml`; holds `beacon` and the GHCR pull Secret it consumes — **not** the same thing as the `apps/` directory below, despite the shared name |
 | `apps/` | Currently unused; reserved for per-application values/manifests, not Application objects |
 
 ## Adding a component
@@ -29,21 +31,25 @@ Application picks it up; nothing is applied by hand. Order components with the
 `argocd.argoproj.io/sync-wave` annotation: infrastructure 0-2, platform 10
 (`vault`), apps 20, `ingress-config` and `vso-operator` sharing wave 21
 deliberately (see below for why `vso-operator` is not right after `vault`),
-`vso-config` at 22, and wave 23 last of all, now shared by both `postgres`
-and `redis` — **not** because `vso-config` creates a Secret either of them
-consumes (it does not: `postgres-credentials` and `redis-credentials` are
-each created by that component's own `VaultStaticSecret`, shipped in its
-own Application at wave 23), but because both need the VSO **operator**
-(`vso-operator`, wave 21) already running and Vault's configure ceremony
-already run — the same two preconditions `vso-config` itself depends on,
-which is why they naturally land after it rather than because of it.
-Sharing the wave rather than stacking one behind the other lets them
-reconcile in parallel since neither depends on the other. Nothing in this
-cluster yet depends on
-Postgres or on Redis, so nothing is gated by putting them last. The rule
-going forward: a component that does not depend on Postgres (or on
-anything else at wave 23) belongs at or below 23, not above it out of
-habit. Platform (10) gates apps (20) and wave 21 the same way
+`vso-config` at 22, and wave 23 shared by `postgres`, `redis` and
+`registry` — **not** because `vso-config` creates a Secret any of them
+consumes (it does not: `postgres-credentials`, `redis-credentials` and
+`ghcr-pull` are each created by that component's own `VaultStaticSecret`,
+shipped in its own Application at wave 23), but because all three need the
+VSO **operator** (`vso-operator`, wave 21) already running and Vault's
+configure ceremony already run — the same two preconditions `vso-config`
+itself depends on, which is why they naturally land after it rather than
+because of it. Sharing the wave rather than stacking one behind another
+lets them reconcile in parallel since none of the three depends on
+another. Wave 23 is **not** last of all any more: `beacon` sits alone at
+wave 24, one wave above, because it is the one component in this list with
+a *real* dependency — its pod cannot pull its image until `registry` (23)
+has created the `ghcr-pull` Secret it consumes. That is the exception the
+rule below exists to describe, not a violation of it. The rule going
+forward: a component that does not depend on Postgres, Redis, the
+`ghcr-pull` credential, or anything else at wave 23 belongs at or below
+23, not above it out of habit — `beacon` sits above it precisely because
+it does. Platform (10) gates apps (20) and wave 21 the same way
 infrastructure gates platform — see below for what that means on a rebuild.
 
 Every Application object belongs in `environments/homelab/apps/` — `root.yaml`
@@ -188,6 +194,17 @@ Each application repository must **pin its concrete image tag inside its own
 manifests at that revision**. A revision whose manifests say `:latest` pins the
 manifests but not the image, and the deployment drifts.
 
+The `beacon` repository is the worked example. Its CI publishes to GHCR and
+then rewrites `deploy/kustomization.yaml` with the new `tag@digest` and
+commits that back; Argo CD watches that branch, so the write-back commit *is*
+the deploy. Pinning both tag and digest is deliberate: the tag keeps
+`kubectl get pod` readable while the digest is what containerd resolves, and
+kustomize renders them together as `name:tag@digest`.
+
+Note that `beacon` is a canary, not an application. It exists to keep this
+chain proved. Do not add features to it — build the real thing as its own
+repository and leave the canary boring.
+
 ## Access
 
 Argo CD is at **<https://argocd.taildf6cd4.ts.net>** from any device on
@@ -261,15 +278,32 @@ once. See `platform/vault/README.md`.
    See `docs/superpowers/plans/2026-09-01-k3s-argocd-bootstrap.md`, Task 5,
    for regenerating the key and the exact commands. This Secret exists only
    in the cluster; it is not reproducible from anything in this repository.
-4. `kubectl apply -f environments/homelab/root.yaml` — the one and only
+4. Create the `repo-beacon` deploy-key Secret in the `argocd` namespace.
+   Argo CD clones a **second** private repository — `beacon` — and the
+   `repo-homelab` credential grants no access to it. Without this, the
+   `beacon` Application reports a clone failure that reads like a
+   repository-URL typo. See
+   `docs/superpowers/plans/2026-09-16-github-actions-ghcr.md`, Task 5,
+   for the key generation and the exact commands. Read-only: Argo CD never
+   writes, and a writable key here would let anything that compromised the
+   cluster push to the repository that deploys into it.
+5. Seed the GHCR pull token into Vault at `homelab/ghcr`. This is a classic
+   GitHub PAT with `read:packages` and nothing else. It is **not** created by
+   `configure-vault.sh` like every other credential here — GitHub issues it,
+   so it must be pasted in, and the script is fed to the pod on stdin where an
+   interactive prompt would consume its own remaining lines. Until it exists,
+   the `registry` Application is unhealthy and every pod pulling a private
+   image sits in `ImagePullBackOff` with a 401. See
+   `platform/registry/README.md`.
+6. `kubectl apply -f environments/homelab/root.yaml` — the one and only
    manual apply.
-5. Create the `operator-oauth` Secret in the `tailscale` namespace once
+7. Create the `operator-oauth` Secret in the `tailscale` namespace once
    root has created that namespace at sync-wave 0. Until it exists the
    Tailscale operator stays in `ContainerCreating` and no tailnet
    hostname resolves. See `infrastructure/ingress/README.md`. Argo CD
    itself is reachable by port-forward throughout, so this does not
    block recovery.
-6. Run the Vault init ceremony — see `platform/vault/README.md`. **This is
+8. Run the Vault init ceremony — see `platform/vault/README.md`. **This is
    not optional on a rebuild, and it now has two halves: unseal, then
    configure.** Vault sits at sync-wave 10, and Argo CD does not advance a
    wave whose resources are not `Healthy`. A freshly deployed Vault comes up
@@ -289,17 +323,24 @@ once. See `platform/vault/README.md`.
    `vso-config` `Progressing`/unhealthy, but because wave 22 sits after
    every Ingress, that failure does **not** cost any tailnet URL. The
    ceremony now also seeds PostgreSQL's and Redis's credentials
-   (`homelab/postgres`, `homelab/redis`), so the same skip leaves two more
-   Applications unhealthy: `postgres` and `redis`, both at wave 23. Neither
-   depends on a Secret `vso-config` creates — each has its own
-   `VaultStaticSecret` that reads its own path in Vault directly — but both
-   depend on the same two things `vso-config` itself depends on: the VSO
-   operator running (wave 21) and this ceremony having populated Vault, so
-   skipping it fails all three Applications for the same underlying reason,
-   not because one creates something the others consume. `vso-config` (22),
-   `postgres` and `redis` (23) all sit after `ingress-config` (21), so this
-   still costs no tailnet URL — the same reasoning as for `vso-config`
-   alone, just now covering three Applications instead of one.
+   (`homelab/postgres`, `homelab/redis`) and writes the `vso-ghcr-read`
+   policy and `vso-ghcr` role that `registry`'s `VaultAuth` needs, so the
+   same skip leaves three more Applications unhealthy: `postgres`, `redis`
+   and `registry`, all at wave 23. None of the three depends on a Secret
+   `vso-config` creates — each has its own `VaultStaticSecret` that reads
+   its own path in Vault directly — but all three depend on the same two
+   things `vso-config` itself depends on: the VSO operator running (wave
+   21) and this ceremony having populated Vault, so skipping it fails all
+   four Applications for the same underlying reason, not because one
+   creates something the others consume. `registry` has one further
+   requirement this ceremony does not satisfy: the GHCR token itself,
+   seeded by the separate ceremony in step 5 above, because GitHub issues
+   that token rather than Vault generating it — running
+   `configure-vault.sh` is necessary but not sufficient for `registry` to
+   go `Healthy`. `vso-config` (22), `postgres`, `redis` and `registry` (23)
+   all sit after `ingress-config` (21), so this still costs no tailnet URL
+   — the same reasoning as for `vso-config` alone, just now covering four
+   Applications instead of one.
    `vso-operator` itself was deliberately moved off wave 11
    (right after `vault`) for the same reason `ingress-config` sits at 21 —
    see the design spec's §6 and `environments/homelab/apps/vso-operator.yaml`
@@ -307,16 +348,23 @@ once. See `platform/vault/README.md`.
    still not sit in front of every tailnet URL.
 
 The order matters: step 3 must follow step 2, because the `argocd`
-namespace does not exist until `bootstrap.sh` creates it. The credential
-is needed only before step 4, which is the first thing that clones this
-repository. Step 1 (HTTPS Certificates) has no ordering dependency on the
-others — it is a tailnet setting, not a cluster step — but it must be done
-before anyone relies on TLS working, so do it first and be done with it.
-Step 6's unseal half has no fixed position either — it only needs Vault
-deployed, which happens automatically at wave 10 — but until it runs,
-everything from wave 21 on stays blocked, so do it as soon as `vault-0`
-exists. The configure half can trail behind it without that same urgency,
-precisely because wave 22 already sits after every Ingress.
+namespace does not exist until `bootstrap.sh` creates it. Step 4 has the
+same requirement, for the same reason — it also creates a Secret in that
+namespace. The credential from step 3 is needed only before step 6, which
+is the first thing that clones this repository. Step 1 (HTTPS
+Certificates) has no ordering dependency on the others — it is a tailnet
+setting, not a cluster step — but it must be done before anyone relies on
+TLS working, so do it first and be done with it. Step 5 (the GHCR token)
+has no fixed position either: seeding it needs only `vault-0` running and
+unsealed, which step 8's unseal half provides, though `registry` does not
+go `Healthy` until step 8's configure half has also written the
+`vso-ghcr-read` policy and `vso-ghcr` role — the two halves of step 8 can
+land in either order relative to step 5. Step 8's unseal half itself has
+no fixed position either — it only needs Vault deployed, which happens
+automatically at wave 10 — but until it runs, everything from wave 21 on
+stays blocked, so do it as soon as `vault-0` exists. The configure half
+can trail behind it without that same urgency, precisely because wave 22
+already sits after every Ingress.
 
 ## Known gaps
 
@@ -362,6 +410,29 @@ last thought about it.
   away. Reverting the image tag recovers everything. The full explanation
   is in `platform/databases/postgres/README.md`; the procedure itself
   (`pg_upgrade`, or dump/restore) is unwritten.
+- **CI validates schema, not semantics.** `.github/workflows/validate.yaml`
+  runs `kubeconform -strict` on every push, which catches malformed manifests
+  and unknown fields. It runs on a GitHub-hosted runner, which cannot reach
+  this cluster, so there is no server-side dry-run: a `VaultAuth` naming a
+  Vault role that does not exist is schema-perfect and still fails at runtime.
+  The gate narrows the window between a bad commit and the cluster; it does
+  not close it. Every `role:`/`serviceAccount:`/`audiences:` comment in this
+  repository warning that a mismatch "names neither side" still applies
+  exactly as before.
+- **The four Helm `values.yaml` files are not validated by CI.** They are
+  excluded from `kubeconform` by filename pattern because they are not
+  Kubernetes manifests and have no `apiVersion`/`kind`. They configure Vault,
+  VSO, the Tailscale operator and Argo CD itself — arguably the four most
+  consequential files here. The gate covers the many low-risk files and misses
+  the few high-risk ones. A green check on this repository means less than it
+  looks like it means.
+- **The GHCR token expires, and the failure is delayed and misleading.**
+  Running pods are unaffected; only *new* pulls fail. An expired token
+  therefore surfaces at the next rollout, node restart or eviction —
+  arbitrarily far from the cause — as `ImagePullBackOff` with a 401 that names
+  no expiry. Rotation is a documented manual step with no alarm on it; the
+  expiry date is recorded in `platform/registry/README.md` and nowhere the
+  cluster can see it.
 
 ## Documentation
 

@@ -12,16 +12,47 @@ To apply a change:
 2. Paste the file contents
 3. Save in the console
 
-Until phase 20 wires up `tailscale/gitops-acl-action` in GitHub Actions,
-this file is a record of what should be live, kept under review, and
-applied by hand. It can drift. Treat the console as authoritative and
-this file as the reviewed copy.
+**Git will be authoritative for this file, once `apply` is wired.** Phase 20
+added `tailscale/gitops-acl-action`: `.github/workflows/tailscale-acl.yaml`
+already tests the policy — parses it and runs its ACL tests — on every pull
+request and every push to `main` that touches it. It does **not** apply
+anything yet. Flipping it to `action: apply` is deliberately the phase's
+last, separate step, withheld until this file has been reconciled against
+what is actually live (see below). Until that step lands, applying a change
+is still the manual process above, and the console remains what is actually
+running.
 
-## Applying replaces everything
+### A console edit will be silently reverted, once `apply` lands
 
-The policy file is not merged into the live policy — it **replaces** it.
-Before editing, copy the live policy into this file first, so an apply
-cannot delete rules that were added in the console.
+Not "may" — will, at the first push after that switch that touches this
+file, with no warning that survives to anyone who would act on it.
+`gitops-pusher` has a drift guard and **it cannot fire in CI**:
+
+- It compares a cached etag against the control plane's, but the cache file
+  (`./version-cache.json`) does not survive a runner. `PrevETag` is therefore
+  always empty on entry, and the code fills it with the *current* control
+  etag — so the comparison it guards with can never be true.
+- Even if it could be, `--fail-on-manual-edits` defaults to false (a printed
+  warning, not a failure) and the composite action exposes no input to set
+  it.
+
+So the rule below is not a nicety to adopt later. It is the only thing that
+will stand between a console edit and its deletion once `apply` is wired, and
+adopting it now means it is already habit by then.
+
+### Before editing this file, copy the live policy into it first
+
+The policy file is not merged into the live policy — it **replaces** it. Open
+<https://login.tailscale.com/admin/acls>, copy what is actually live into
+this file, and make your change on top of that. Skipping this deletes any
+rule added in the console since this file was last reconciled against it.
+
+If console drift becomes a recurring problem rather than an occasional one,
+the escape hatch is to abandon the composite action and invoke
+`gitops-pusher` directly with `--fail-on-manual-edits` and a committed
+`version-cache.json`. That was considered and rejected for this phase — see
+the phase-20 spec, §7.3 — but the reasoning is recorded so it need not be
+rediscovered.
 
 ## What the cluster depends on
 
@@ -66,5 +97,12 @@ it is harmless and would be required again if ProxyGroups are ever
 revisited — do not remove it thinking it is dead config, and do not
 assume it is doing anything for the cluster right now.
 
-Automating this in phase 20 needs a second OAuth client with `policy_file`
-write scope, separate from the operator's.
+Automating this uses a second OAuth client, held as the repository secrets
+`TS_OAUTH_CLIENT_ID` and `TS_OAUTH_SECRET`
+(<https://github.com/Slqzeer/homelab/settings/secrets/actions>), consumed by
+`.github/workflows/tailscale-acl.yaml`. It is deliberately separate from the
+Tailscale Kubernetes operator's OAuth client: the operator's client carries
+device scopes and no policy access, and widening it would let the in-cluster
+operator rewrite the tailnet policy. Neither secret value exists in any
+repository — GitHub stores them encrypted and exposes them only to workflow
+runs.

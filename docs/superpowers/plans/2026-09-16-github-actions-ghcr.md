@@ -1257,9 +1257,9 @@ grep -c '^echo "==>' platform/vault/configure-vault.sh
 tail -20 platform/vault/configure-vault.sh
 ```
 
-Expected: `13` step markers, ending with the `vso-redis` role and
-`echo "==> done"`. If the count differs, someone has edited the script since
-phase 19 — read it fully before appending.
+Expected: `14` step markers, ending with the `vso-redis` role and
+`echo "==> done"`. If the count differs, the script has genuinely changed
+since this count was recorded — read it fully before appending.
 
 - [ ] **Step 2: Append the policy and role, and nothing else**
 
@@ -1311,7 +1311,7 @@ grep -c '^echo "==>' platform/vault/configure-vault.sh
 grep -n 'homelab/data/ghcr\|vso-ghcr' platform/vault/configure-vault.sh
 ```
 
-Expected: `PARSES OK`, a step count of `15`, and the policy path showing
+Expected: `PARSES OK`, a step count of `16`, and the policy path showing
 `homelab/data/ghcr` — **with the `data/` segment**. Without it the policy
 matches nothing and produces a permission denial that reads exactly like a
 wrong path. This has bitten three previous phases; it is the single most
