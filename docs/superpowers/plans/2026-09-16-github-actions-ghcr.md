@@ -88,7 +88,7 @@ Vault 2.0.4, VSO 1.5.1, Tailscale operator.
 | `platform/registry/config/vault-secrets.yaml` | Create. VaultConnection, SA, VaultAuth, VaultStaticSecret for the pull Secret |
 | `platform/registry/README.md` | Create. PAT issuance, seeding, rotation, expiry |
 | `platform/vault/configure-vault.sh` | Modify. Add `vso-ghcr-read` policy and `vso-ghcr` role — **no secret value** |
-| `environments/homelab/apps/registry.yaml` | Create. Application, wave 24, path `platform/registry/config` |
+| `environments/homelab/apps/registry.yaml` | Create. Application, wave 23, path `platform/registry/config` |
 | `environments/homelab/apps/beacon.yaml` | Create. Application, wave 24, pointing at the beacon repo |
 | `README.md` | Modify. Rebuild list, known gaps, layout table |
 | `infrastructure/networking/README.md` | Modify. Authority flips to git |
@@ -2101,7 +2101,9 @@ Also update the sentence at the end of the file that reads
 `Automating this in phase 20 needs a second OAuth client with policy_file write
 scope, separate from the operator's.` — that is now done, not pending. Replace
 it with a statement of what exists: the `TS_OAUTH_CLIENT_ID` and
-`TS_OAUTH_SECRET` repository secrets, why the client is separate from the
+`TS_OAUTH_SECRET` **Environment** secrets on the `homelab` environment (not
+repository secrets — a job that does not declare `environment: homelab`
+resolves them to empty strings), why the client is separate from the
 operator's, and that neither value exists in any repository.
 
 - [ ] **Step 2: Add both new pieces of cluster-only state to the rebuild list**
