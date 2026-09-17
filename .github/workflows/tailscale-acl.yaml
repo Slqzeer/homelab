@@ -1,12 +1,18 @@
-# Validates infrastructure/networking/policy.hujson against the live tailnet.
+# Validates infrastructure/networking/policy.hujson against the live tailnet,
+# and applies it on push to main.
 #
-# THIS JOB DOES NOT APPLY ANYTHING YET. It runs `action: test`, which checks
-# the policy parses and its ACL tests pass, and reports how the file differs
-# from what the control plane currently holds. The switch to `apply` is a
-# deliberate, separate step -- see the phase-20 spec, section 7.
+# `test` runs `action: test`, which checks the policy parses and its ACL
+# tests pass, and reports how the file differs from what the control plane
+# currently holds. It runs on every pull request that touches the policy or
+# this workflow.
 #
-# Why that split matters. Reading gitops-pusher at the commit this action
-# pins, `apply` CANNOT preserve a change made in the admin console:
+# `apply` runs `action: apply` on every push to main that touches the policy
+# or this workflow. It replaces the live tailnet policy wholesale with this
+# file's contents -- see the phase-20 spec, section 7.
+#
+# Why the split matters, and why the drift guard below cannot save you.
+# Reading gitops-pusher at the commit this action pins, `apply` CANNOT
+# preserve a change made in the admin console:
 #
 #   * its drift guard compares a cached etag against the control plane's, but
 #     the cache file defaults to ./version-cache.json, which does not survive
@@ -18,10 +24,9 @@
 #     input to set it.
 #
 # So `apply` overwrites the live policy with this file, every time, with at
-# most a warning that in practice never prints. After Task 8, git is
-# authoritative for the tailnet policy and a console edit survives only until
-# the next push that touches this file. infrastructure/networking/README.md
-# says so.
+# most a warning that in practice never prints. Git is authoritative for the
+# tailnet policy and a console edit survives only until the next push that
+# touches this file. infrastructure/networking/README.md says so.
 #
 # This file also holds the stanzas the cluster depends on: tagOwners for
 # tag:k8s-operator and tag:k8s, and autoApprovers.services. Removing either
@@ -44,6 +49,7 @@ permissions:
 
 jobs:
   test:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     # NOT decorative, and NOT safe to delete. TS_OAUTH_CLIENT_ID and
     # TS_OAUTH_SECRET are Environment secrets on the `homelab` environment,
@@ -69,3 +75,31 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           policy-file: ./infrastructure/networking/policy.hujson
           action: test
+
+  apply:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # NOT decorative, and NOT safe to delete. TS_OAUTH_CLIENT_ID and
+    # TS_OAUTH_SECRET are Environment secrets on the `homelab` environment,
+    # not repository secrets. `secrets.*` resolves an environment's secrets
+    # ONLY in a job that declares that environment -- remove this line and
+    # both values silently become empty strings, and the action fails with
+    # "API Key, OAuth secret, or OAuth client ID and audience must be
+    # specified", which reads like the credential was never created.
+    #
+    # Any job added to this workflow that touches those secrets needs this
+    # same line.
+    environment: homelab
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+      - uses: tailscale/gitops-acl-action@5a4a17f5708e9bf96f4ee915a95e9f83c2eebe1a  # v1
+        with:
+          # `-` means "the default tailnet of the authenticated client" in
+          # the Tailscale API. It avoids hardcoding taildf6cd4.ts.net, which
+          # changes if the tailnet is ever renamed. If the run fails
+          # resolving the tailnet, substitute taildf6cd4.ts.net here.
+          tailnet: "-"
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          policy-file: ./infrastructure/networking/policy.hujson
+          action: apply

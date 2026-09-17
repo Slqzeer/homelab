@@ -4,29 +4,31 @@
 
 This is the only file in this repository that Argo CD does not apply and
 cannot apply. It targets Tailscale's control plane, not the Kubernetes
-API. **Committing and pushing it changes nothing.**
+API, and Argo CD has no way to reconcile it.
 
-To apply a change:
+**Git is authoritative for this file.** Phase 20 added
+`tailscale/gitops-acl-action`: `.github/workflows/tailscale-acl.yaml` tests
+the policy — parses it and runs its ACL tests — on every pull request that
+touches it, and applies it (`action: apply`) on every push to `main` that
+touches it. **Committing and pushing a change to `main` applies it to the
+live tailnet policy**, wholesale, through that workflow — not through Argo
+CD. This is now the normal way to apply a change: edit the file, commit,
+push.
+
+A manual path still exists, for recovery when the tailnet itself is down or
+console access is the only thing available:
 
 1. Open <https://login.tailscale.com/admin/acls>
 2. Paste the file contents
 3. Save in the console
 
-**Git will be authoritative for this file, once `apply` is wired.** Phase 20
-added `tailscale/gitops-acl-action`: `.github/workflows/tailscale-acl.yaml`
-already tests the policy — parses it and runs its ACL tests — on every pull
-request and every push to `main` that touches it. It does **not** apply
-anything yet. Flipping it to `action: apply` is deliberately the phase's
-last, separate step, withheld until this file has been reconciled against
-what is actually live (see below). Until that step lands, applying a change
-is still the manual process above, and the console remains what is actually
-running.
+A change made this way is not permanent — see the next section.
 
-### A console edit will be silently reverted, once `apply` lands
+### A console edit is silently reverted
 
-Not "may" — will, at the first push after that switch that touches this
-file, with no warning that survives to anyone who would act on it.
-`gitops-pusher` has a drift guard and **it cannot fire in CI**:
+Not "may" — will, at the next push that touches this file, with no warning
+that survives to anyone who would act on it. `gitops-pusher` has a drift
+guard and **it cannot fire in CI**:
 
 - It compares a cached etag against the control plane's, but the cache file
   (`./version-cache.json`) does not survive a runner. `PrevETag` is therefore
@@ -36,9 +38,8 @@ file, with no warning that survives to anyone who would act on it.
   warning, not a failure) and the composite action exposes no input to set
   it.
 
-So the rule below is not a nicety to adopt later. It is the only thing that
-will stand between a console edit and its deletion once `apply` is wired, and
-adopting it now means it is already habit by then.
+So the rule below is not a nicety. It is the only thing that stands between
+a console edit and its deletion, and it needs to already be habit.
 
 ### Before editing this file, copy the live policy into it first
 
@@ -83,9 +84,10 @@ Without it, the Ingress hostname still resolves via MagicDNS but nothing
 answers on it — the Service was advertised and never approved, so it
 routes nowhere.
 
-Like the tag owners above, this stanza only takes effect once applied by
-hand in the admin console (see "`policy.hujson` is NOT reconciled by Argo
-CD" above) — Argo CD has no way to apply a Tailscale policy file.
+Like the tag owners above, this stanza only takes effect once applied —
+via a push to `main` that triggers `tailscale-acl`'s `apply` job, or by hand
+in the admin console (see "`policy.hujson` is NOT reconciled by Argo CD"
+above) — Argo CD has no way to apply a Tailscale policy file.
 
 **Status: applied, but not load-bearing for the current design.** After
 this stanza was applied, the Tailscale Service mechanism it approves
@@ -97,10 +99,14 @@ it is harmless and would be required again if ProxyGroups are ever
 revisited — do not remove it thinking it is dead config, and do not
 assume it is doing anything for the cluster right now.
 
-Automating this uses a second OAuth client, held as the repository secrets
-`TS_OAUTH_CLIENT_ID` and `TS_OAUTH_SECRET`
-(<https://github.com/Slqzeer/homelab/settings/secrets/actions>), consumed by
-`.github/workflows/tailscale-acl.yaml`. It is deliberately separate from the
+Automating this uses a second OAuth client, held as `TS_OAUTH_CLIENT_ID` and
+`TS_OAUTH_SECRET` — Environment secrets on the `homelab` GitHub Actions
+environment, not repository secrets
+(<https://github.com/Slqzeer/homelab/settings/environments>), consumed by
+`.github/workflows/tailscale-acl.yaml`. Both jobs in that workflow declare
+`environment: homelab` for exactly this reason: `secrets.*` resolves an
+environment's secrets only inside a job that declares that environment. It
+is deliberately separate from the
 Tailscale Kubernetes operator's OAuth client: the operator's client carries
 device scopes and no policy access, and widening it would let the in-cluster
 operator rewrite the tailnet policy. Neither secret value exists in any
