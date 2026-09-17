@@ -1,0 +1,43 @@
+# yamllint profile for this repository.
+#
+# Stock yamllint fails every file here. Measured 2026-09-16, before this file
+# existed: 23 violations across 24 files, essentially all `document-start`,
+# because every manifest in this repository opens with an explanatory comment
+# block instead of `---`. Those comment blocks carry a large share of this
+# repository's reasoning -- several phases invested in them deliberately. The
+# linter adapts to the house style; the house style does not adapt to the
+# linter.
+#
+# The workflow runs yamllint with --strict, so warnings fail too. That is the
+# point: a gate that tolerates warnings accumulates them until nobody reads the
+# output. Every relaxation below is therefore explicit and argued.
+extends: default
+
+rules:
+  # See above. Comment-first headers are the convention, not a defect.
+  document-start: disable
+
+  # The longest line in the repository is 93 characters
+  # (platform/vault/config/unsealer.yaml). 100 leaves headroom without
+  # licensing unbounded lines.
+  line-length:
+    max: 100
+    # Workflow files carry unbreakable CDN and schema URLs inside run: blocks
+    # (151, 121, 155 characters). Exempting .github from THIS RULE ONLY keeps
+    # the 100-column limit meaningful for manifests, which is where it earns
+    # its keep, while not making the gate red on its own workflow files.
+    # Every other rule still applies to .github.
+    ignore: |
+      .github/
+
+  # `on:` in a GitHub Actions workflow is a mapping key, not the boolean
+  # `on`. Without this, every workflow file this phase adds fails the gate
+  # that this phase also adds.
+  truthy:
+    check-keys: false
+
+  # One space before an inline comment, not two. Relaxed for a single
+  # existing occurrence in platform/databases/postgres/config/postgres.yaml
+  # rather than reformatting a file this phase has no other reason to touch.
+  comments:
+    min-spaces-from-content: 1

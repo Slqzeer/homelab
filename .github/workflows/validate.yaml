@@ -1,0 +1,76 @@
+# Validates every manifest before Argo CD can apply it.
+#
+# This repository is reconciled into the cluster from `main` with
+# selfHeal: true. Before this workflow existed there was nothing at all
+# between `git push` and the cluster. This narrows that window; it does not close it. CI runs on a
+# GitHub-hosted runner that cannot reach the cluster, so this validates
+# schema, not semantics -- see the known gaps in the root README.
+name: validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  yamllint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+      - name: Install yamllint
+        run: pip install --quiet yamllint==1.38.0
+      - name: Lint
+        # --strict makes warnings fail. .yamllint.yaml is tuned so the tree
+        # is clean under it; see the argument in that file's header.
+        run: yamllint --strict -c .yamllint.yaml bootstrap environments infrastructure platform .github
+
+  kubeconform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+
+      - name: Install kubeconform
+        # Pinned by version AND checksum. An unpinned linter is a supply-chain
+        # hole in the very job whose purpose is to be trusted.
+        run: |
+          curl -sL https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz -o kc.tgz
+          echo "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883  kc.tgz" | sha256sum -c -
+          tar xzf kc.tgz kubeconform
+
+      - name: Validate manifests
+        # -strict rejects unknown fields. Without it a typo like `replicaz:`
+        # is accepted and this job is decorative.
+        #
+        # -ignore-filename-pattern excludes Helm values files, which are not
+        # manifests and have no apiVersion/kind. The rule is by FILENAME
+        # rather than by directory because every values file here is named
+        # values.yaml, and a filename rule needs no maintenance as components
+        # are added -- a directory list would need editing every phase and
+        # would fail open when someone forgot.
+        #
+        # The second -schema-location supplies CRD schemas. All five CRDs
+        # this repository uses (Application, VaultAuth, VaultConnection,
+        # VaultStaticSecret, ProxyClass) are in the datreeio catalog.
+        run: |
+          ./kubeconform -strict -summary \
+            -kubernetes-version 1.36.0 \
+            -ignore-filename-pattern 'values\.yaml$' \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            bootstrap environments infrastructure platform
+
+      - name: Fail if any resource was skipped
+        # A skipped resource is an UNVALIDATED resource. kubeconform exits 0
+        # when it skips, so without this check a CRD schema that failed to
+        # fetch would turn this job green while checking nothing.
+        run: |
+          ./kubeconform -summary -kubernetes-version 1.36.0 \
+            -ignore-filename-pattern 'values\.yaml$' \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            bootstrap environments infrastructure platform \
+            | tee summary.txt
+          grep -q 'Skipped: 0' summary.txt
