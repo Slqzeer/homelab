@@ -1,0 +1,42 @@
+# beacon, the phase-20 canary. Its manifests live in ITS OWN repository --
+# this file is the only thing about it in the homelab repo, per the root
+# README's "Application repositories" rule.
+#
+# Wave 24, NOT 23. The root README warns against stacking a wave out of
+# habit, and that warning is about components with no dependency on the wave
+# below. This one has a real dependency: the pod cannot pull its image until
+# `registry` (wave 23) has created the ghcr-pull Secret. Without the ordering
+# the pod would ImagePullBackOff and recover on its own -- correct, but noisy
+# and indistinguishable from a genuinely broken credential.
+#
+# Nothing sits behind wave 24, so an unhealthy canary gates nothing, and it is
+# well after ingress-config (21), so a failure here costs no tailnet URL.
+#
+# targetRevision is `main`: CI commits the new tag@digest into that branch, so
+# following it IS the deploy. The image is pinned by digest inside deploy/, so
+# following a branch here does not mean following a moving image.
+#
+# Requires the `repo-beacon` deploy-key Secret in the argocd namespace. It
+# exists in no repository -- see the root README's rebuild list.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: beacon
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "24"
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:Slqzeer/beacon.git
+    targetRevision: main
+    path: deploy
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: apps
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

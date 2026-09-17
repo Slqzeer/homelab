@@ -38,3 +38,16 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: databases
+---
+# Applications built and published by this homelab's own CI. Holds the
+# GHCR pull credential (platform/registry/) and its consumers.
+#
+# NOTE: this namespace and the top-level `apps/` DIRECTORY in this repository
+# are unrelated. That directory is not watched by anything -- an Application
+# placed there is silently ignored, as the root README explains -- and it stays
+# empty because application manifests live in their own repositories. The
+# shared name is a coincidence worth knowing about, not a connection.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: apps

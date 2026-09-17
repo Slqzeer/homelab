@@ -1,0 +1,31 @@
+# The GHCR pull credential. Phase 20.
+#
+# Wave 23, beside postgres and redis: it needs the VSO operator (21) running
+# and the Vault ceremony already run, which are the same two preconditions
+# those two share. It depends on neither of them, so it shares their wave
+# rather than queueing behind them.
+#
+# `beacon` sits at 24 rather than here, because it genuinely depends on the
+# Secret this Application creates -- see environments/homelab/apps/beacon.yaml.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: registry
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "23"
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:Slqzeer/homelab.git
+    targetRevision: main
+    path: platform/registry/config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: apps
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
