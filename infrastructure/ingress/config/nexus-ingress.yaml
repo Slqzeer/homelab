@@ -1,0 +1,67 @@
+# Nexus on the tailnet: the UI and raw repository at
+# https://nexus.taildf6cd4.ts.net, and the Docker registry at
+# https://nexus-docker.taildf6cd4.ts.net
+#
+# TWO hostnames, one per endpoint, rather than Docker path-based routing.
+# Sonatype warns that a repository context path in a registry URL can break
+# authentication, because Docker clients issue requests against the registry
+# root -- so the registry gets a host of its own where it answers at /v2/
+# exactly as the client expects, with a real Let's Encrypt certificate and no
+# wildcard.
+#
+# These are also NOT redundant with the NodePort in platform/nexus/config/
+# nexus.yaml. That NodePort is plain HTTP, host-local, and exists for
+# containerd, which runs on the host and cannot use cluster DNS. These carry
+# TLS and exist for docker clients on this machine or any other tailnet
+# device, which should not be configured to trust an insecure registry.
+#
+# Both sit at wave 21 with every other Ingress here, so that nothing waits on
+# ingress health. Their backend Service arrives at wave 23 -- the first time
+# that ordering occurs in this repository. It is harmless: this Application
+# goes Healthy when the Tailscale operator populates
+# status.loadBalancer.ingress, which does not depend on the backend existing.
+# The hostnames 502 for the seconds in between.
+#
+# The proxy-class annotation is NOT decorative: it is what bounds each proxy
+# pod's memory. Omitting it leaves the proxy unbounded (chart default is
+# `resources: {}`), which is how this host lost CoreDNS once.
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nexus
+  namespace: artifacts
+  annotations:
+    tailscale.com/proxy-class: homelab
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: nexus
+      port:
+        number: 8081
+  tls:
+    # Short name only. Becomes nexus.taildf6cd4.ts.net via MagicDNS.
+    - hosts:
+        - nexus
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nexus-docker
+  namespace: artifacts
+  annotations:
+    tailscale.com/proxy-class: homelab
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: nexus
+      # The docker-proxy repository's own connector, configured through
+      # docker.httpPort by the bootstrap Job. Nothing answers here until that
+      # Job has run.
+      port:
+        number: 8082
+  tls:
+    - hosts:
+        - nexus-docker
