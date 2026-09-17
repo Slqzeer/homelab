@@ -45,6 +45,17 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # NOT decorative, and NOT safe to delete. TS_OAUTH_CLIENT_ID and
+    # TS_OAUTH_SECRET are Environment secrets on the `homelab` environment,
+    # not repository secrets. `secrets.*` resolves an environment's secrets
+    # ONLY in a job that declares that environment -- remove this line and
+    # both values silently become empty strings, and the action fails with
+    # "API Key, OAuth secret, or OAuth client ID and audience must be
+    # specified", which reads like the credential was never created.
+    #
+    # Any job added to this workflow that touches those secrets needs this
+    # same line.
+    environment: homelab
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
       - uses: tailscale/gitops-acl-action@5a4a17f5708e9bf96f4ee915a95e9f83c2eebe1a  # v1
