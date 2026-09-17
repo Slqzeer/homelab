@@ -86,6 +86,15 @@ spec:
         runAsUser: 200
         runAsGroup: 200
         fsGroup: 200
+        # NOT the default (Always), which makes the kubelet recursively chown
+        # every file under /nexus-data each time this pod starts. That volume
+        # is a 20Gi blob store, and the bootstrap Job mounts the same claim on
+        # every Argo CD sync, so the default would pay for a full-tree walk
+        # over and over. OnRootMismatch checks the top-level directory only
+        # and skips the walk when it already matches, which it does after the
+        # first start. The bootstrap Job carries the identical setting, as its
+        # securityContext must.
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: nexus
           image: sonatype/nexus3:3.96.1

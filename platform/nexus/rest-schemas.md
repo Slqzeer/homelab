@@ -175,6 +175,115 @@ pulled and `/nexus-data` on local disk. `failureThreshold: 8` allows 80 s. On a
 first in-cluster boot against a PVC this is tighter than it looks; if the pod
 ever fails its startup probe, raise `failureThreshold`, not the memory.
 
+### The two status endpoints, and what `/status/writable` actually proves
+
+Added 2026-09-18, after the bootstrap Job's wait loop was written against
+`/service/rest/v1/status/writable` — an endpoint this file had not recorded.
+
+**It exists, it needs no authentication, and it returns 200.** Observed against
+a fresh container on the pinned image, with no credentials supplied:
+
+```
+$ curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18101/service/rest/v1/status
+200
+$ curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18101/service/rest/v1/status/writable
+200
+```
+
+Both return an empty body. Neither call carried `-u` or `-K`.
+
+**But it is a stub, and it is not a writability check.** `StatusResource` is the
+whole implementation, and it can be read without running anything. Pull the
+class out of the fat jar the same way §5 pulls the UI bundle:
+
+```
+CID=$(docker create sonatype/nexus3:3.96.1)
+docker cp "$CID:/opt/sonatype/nexus/bin/sonatype-nexus-repository-3.96.1-01.jar" app.jar
+docker rm -f "$CID"
+python3 -c 'import zipfile,io;z=zipfile.ZipFile("app.jar");i=zipfile.ZipFile(io.BytesIO(z.read("BOOT-INF/lib/nexus-api-rest-common-3.96.1-01.jar")));open("StatusResource.class","wb").write(i.read("org/sonatype/nexus/api/rest/common/status/StatusResource.class"))'
+```
+
+`javap` is not on this host but ships inside the image, so disassemble it there:
+
+```
+$ docker run --rm --entrypoint /bin/sh -v "$PWD/cls:/cls:ro" sonatype/nexus3:3.96.1 \
+    -c 'javap -p -cp /cls org.sonatype.nexus.api.rest.common.status.StatusResource'
+public class org.sonatype.nexus.api.rest.common.status.StatusResource implements org.sonatype.nexus.rest.Resource,org.sonatype.nexus.api.rest.common.status.StatusResourceDoc {
+  protected final org.slf4j.Logger log;
+  public static final java.lang.String RESOURCE_URI;
+  private static org.aspectj.lang.JoinPoint$StaticPart ajc$tjp_0;
+  private static java.lang.annotation.Annotation ajc$anno$0;
+  private static org.aspectj.lang.JoinPoint$StaticPart ajc$tjp_1;
+  private static java.lang.annotation.Annotation ajc$anno$1;
+  public org.sonatype.nexus.api.rest.common.status.StatusResource();
+  public jakarta.ws.rs.core.Response isAvailable();
+  public jakarta.ws.rs.core.Response isWritable();
+  ...
+}
+```
+
+Three things follow, in order of how load-bearing they are.
+
+**1. Neither method consults anything.** The AspectJ weaver moved each body into
+an `_aroundBody` method, and those are the real implementations. They are
+byte-for-byte the same:
+
+```
+  static final ... isAvailable_aroundBody0(...);
+         0: invokestatic  #45   // Method jakarta/ws/rs/core/Response.ok:()...ResponseBuilder;
+         3: invokevirtual #51   // Method ...ResponseBuilder.build:()...Response;
+         6: areturn
+
+  static final ... isWritable_aroundBody2(...);
+         0: invokestatic  #45   // Method jakarta/ws/rs/core/Response.ok:()...ResponseBuilder;
+         3: invokevirtual #51   // Method ...ResponseBuilder.build:()...Response;
+         6: areturn
+```
+
+`Response.ok().build()` and nothing else. The class injects no service — its
+only instance field is `log` — so there is nothing it *could* consult. **200
+from `/status/writable` means "JAX-RS is wired", exactly as `/status` does. It
+does not mean the blob store is writable, and the two endpoints carry identical
+information.**
+
+**2. It requires no authentication.** The only annotations anywhere in the class
+file are JAX-RS ones plus Dropwizard's `@Timed`:
+
+```
+$ grep -oE 'L(jakarta/ws/rs|org/apache/shiro|org/sonatype)[a-zA-Z0-9/$]*;' statusresource.txt | sort -u
+Ljakarta/ws/rs/Consumes;
+Ljakarta/ws/rs/GET;
+Ljakarta/ws/rs/Path;
+Ljakarta/ws/rs/Produces;
+Ljakarta/ws/rs/core/Response;
+Ljakarta/ws/rs/core/Response$ResponseBuilder;
+Lorg/sonatype/nexus/api/rest/common/status/StatusResource;
+Lorg/sonatype/nexus/common/metrics/TimedAspect;
+```
+
+No `org.apache.shiro.authz.annotation.RequiresAuthentication`, no
+`RequiresPermissions`. That is why the unauthenticated curl above returns 200,
+and it is what lets a wait loop probe the endpoint before it holds a credential.
+
+**3. The routing, from the same disassembly.** The class is `@Path("/v1/status")`
+and `isWritable` is `@GET @Path("/writable")`:
+
+```
+RuntimeVisibleAnnotations:            (class)
+  1: jakarta.ws.rs.Path(value="/v1/status")
+
+RuntimeVisibleAnnotations:            (isWritable)
+  0: jakarta.ws.rs.GET
+  1: jakarta.ws.rs.Path(value="/writable")
+```
+
+**Consequence for later tasks.** Use either endpoint as a liveness signal; they
+are interchangeable. Do **not** describe `/status/writable` as proof that Nexus
+will accept writes, and do not add a step that depends on that being true. The
+bootstrap Job probes `/writable` only because it is the more specific of the two
+names, and it falls back to `/status` on a 404 so an endpoint rename in a future
+image cannot be misreported as "Nexus never came up".
+
 ## 4. Repository payloads — verified against 3.96.1
 
 Schemas were read from the running instance's own OpenAPI document
