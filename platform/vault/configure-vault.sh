@@ -153,4 +153,24 @@ vault write auth/kubernetes/role/vso-redis \
     token_policies=vso-redis-read \
     ttl=1h
 
+echo "==> policy vso-ghcr-read"
+# The data/ segment is REQUIRED and is not a typo -- see the note on
+# vso-canary-read above.
+vault policy write vso-ghcr-read - <<'POLICY'
+path "homelab/data/ghcr" {
+  capabilities = ["read"]
+}
+POLICY
+
+echo "==> role vso-ghcr"
+# bound_service_account_names must match the ServiceAccount created in
+# platform/registry/config/vault-secrets.yaml, and audience must match that
+# file's VaultAuth spec.kubernetes.audiences.
+vault write auth/kubernetes/role/vso-ghcr \
+    bound_service_account_names=registry \
+    bound_service_account_namespaces=apps \
+    audience=vault \
+    token_policies=vso-ghcr-read \
+    ttl=1h
+
 echo "==> done"
