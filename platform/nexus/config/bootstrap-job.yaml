@@ -1,0 +1,455 @@
+# Phase 21's configuration, in git rather than in a web UI.
+#
+# Repositories, users, realms and connectors are rows in Nexus's own database,
+# not Kubernetes objects. Configured by hand, the entire substance of phase 21
+# would live inside a PVC where git cannot see it, and a rebuild would be a
+# restore rather than a reconcile.
+#
+# An Argo CD Sync HOOK, not a plain Job. A Job is immutable, so re-applying an
+# unchanged one does nothing at all -- a changed repository definition would
+# never reach the cluster, and the idempotency check in the spec's verification
+# list would be untestable. BeforeHookCreation deletes the previous Job so each
+# sync genuinely re-runs this, and leaves the completed Job in place afterwards
+# so its log can still be read.
+#
+# Re-running is safe because every write below is a reconcile: the script
+# probes for each object and PUTs when it already exists. After the first run
+# /nexus-data/admin.password no longer exists, so the script authenticates with
+# the Vault password instead of the boot-generated one.
+#
+# Every endpoint, body and status code the script uses was observed against
+# sonatype/nexus3:3.96.1 and is recorded in platform/nexus/rest-schemas.md.
+# That file is the authority; do not "correct" a payload here from upstream
+# documentation without re-probing, because several documented endpoints do not
+# exist on this build.
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nexus-bootstrap
+  namespace: artifacts
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  # Two attempts, not the default six. Every failure mode here is either
+  # permanent (a schema mismatch) or slow (Nexus not up yet, which the wait
+  # loop already covers), and six retries only delays the diagnosis.
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: nexus
+      securityContext:
+        # Must match the Deployment's: this Job reads a file the Nexus process
+        # created as uid 200 on the same volume.
+        runAsNonRoot: true
+        runAsUser: 200
+        runAsGroup: 200
+        fsGroup: 200
+      containers:
+        - name: bootstrap
+          # The Nexus image itself, purely because it already carries curl and
+          # the exact version this configuration was validated against. Pinned
+          # to the same tag as the Deployment on purpose -- the REST schema is
+          # version-specific, and rest-schemas.md section 5 documents an
+          # endpoint that exists on this build and not in the vendor's docs.
+          image: sonatype/nexus3:3.96.1
+          # /bin/sh, NOT /bin/bash. The unsuffixed 3.96.1 tag is Alpine and
+          # ships no bash at all -- `docker exec ... bash` exits 127 on it
+          # (rest-schemas.md section 2). The script is POSIX sh for BusyBox
+          # ash: no arrays, no [[ ]], no process substitution, and `set -eu`
+          # without pipefail, which ash does not implement.
+          command: ["/bin/sh", "/script/bootstrap.sh"]
+          env:
+            - name: NEXUS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nexus-admin
+                  key: password
+          volumeMounts:
+            - name: script
+              mountPath: /script
+            - name: data
+              # The SAME ReadWriteOnce claim the Deployment holds. Legal here
+              # because RWO restricts concurrent use to one NODE, not one pod,
+              # and this cluster has one node. Read-only: this Job must never
+              # write to Nexus's state directory.
+              mountPath: /nexus-data
+              readOnly: true
+            - name: tmp
+              # The script's credential scratch files land here rather than in
+              # the image's /tmp, so they live and die with this pod and never
+              # touch the Nexus PVC.
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+      volumes:
+        - name: script
+          configMap:
+            name: nexus-bootstrap-script
+        - name: data
+          persistentVolumeClaim:
+            claimName: nexus-data
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nexus-bootstrap-script
+  namespace: artifacts
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+data:
+  bootstrap.sh: |
+    #!/bin/sh
+    # Configures Nexus over its REST API. Idempotent: safe to re-run on every
+    # Argo CD sync, which is exactly what the Sync hook causes.
+    #
+    # POSIX sh only -- see the command: comment on the Job. `set -eu` without
+    # -o pipefail: BusyBox ash rejects pipefail outright.
+    set -eu
+
+    NEXUS=http://nexus.artifacts.svc:8081
+    BOOTPW=/nexus-data/admin.password
+
+    # Credentials reach curl through --config/-K and request bodies through
+    # --data-binary @file, never as arguments. A password on a command line is
+    # visible in `ps` to anything sharing the pod's PID namespace -- the rule
+    # platform/vault/configure-vault.sh and the Vault unsealer already follow.
+    AUTHFILE=$(mktemp)
+    PWBODY=$(mktemp)
+    BODY=$(mktemp)
+    EULA=$(mktemp)
+    OUT=$(mktemp)
+    chmod 600 "$AUTHFILE" "$PWBODY"
+    trap 'rm -f "$AUTHFILE" "$PWBODY" "$BODY" "$EULA" "$EULA.new" "$OUT"' EXIT
+
+    echo "==> waiting for the REST API"
+    # Ready is not the same as writable. The Deployment's startupProbe already
+    # waits on /status, but this Job can start the moment the pod reports
+    # Ready, and Nexus accepts writes slightly later. Measured cold start is
+    # 38 s (rest-schemas.md section 3), so 60 * 5 s is ample.
+    #
+    # A counted loop rather than `seq`, which is not in the verified tool
+    # inventory for this image.
+    READY=no
+    I=0
+    while [ "$I" -lt 60 ]; do
+      if curl -sf -o /dev/null "$NEXUS/service/rest/v1/status/writable"; then
+        READY=writable
+        break
+      fi
+      I=$((I + 1))
+      sleep 5
+    done
+
+    if [ "$READY" = writable ]; then
+      echo "    REST API is writable"
+    else
+      # Only /service/rest/v1/status was actually observed returning 200 on
+      # this build; /status/writable is inferred. A 404 from the inferred
+      # endpoint must not be read as "Nexus is down", so fall back to the
+      # proven one and fail only if THAT is also unreachable.
+      echo "    /status/writable never answered; falling back to /status"
+      curl -sf -o /dev/null "$NEXUS/service/rest/v1/status"
+      echo "    REST API is up (writability unconfirmed)"
+    fi
+
+    echo "==> selecting credentials"
+    # Setting nexus.security.randompassword=false would make the first-boot
+    # credential the publicly documented admin/admin123. That is what most
+    # automation does, and its failure mode is bad: if this Job never runs,
+    # that known credential stays live indefinitely on a tailnet-published
+    # service. Reading the boot-generated file has no such window, and it
+    # supplies the idempotency signal for free -- Nexus deletes the file when
+    # the password changes, so *file present* means first run and *file
+    # absent* means reconcile. It works only because RWO is a per-NODE
+    # constraint and this is a single-node cluster; spec section 9 records
+    # this as the one element that would break on a second node.
+    if [ -f "$BOOTPW" ]; then
+      echo "    first run: boot password present"
+      printf 'user = "admin:%s"\n' "$(cat "$BOOTPW")" > "$AUTHFILE"
+      ROTATE=yes
+    else
+      echo "    already provisioned: using the Vault password"
+      printf 'user = "admin:%s"\n' "$NEXUS_PASSWORD" > "$AUTHFILE"
+      ROTATE=no
+    fi
+
+    echo "==> accepting the Community Edition EULA"
+    # The disclaimer text must be echoed back EXACTLY as the GET returned it,
+    # so it is read from the instance rather than hardcoded here. That also
+    # makes this survive a version bump that reworded it. Without an accepted
+    # EULA, Community Edition refuses to fetch or upload any component.
+    #
+    # sed, not python3/jq -- neither interpreter exists in this image. sed is
+    # BusyBox, so the pattern uses [[:space:]] and no GNU-only extensions.
+    # The quoted key "accepted" is deliberate: the disclaimer string itself
+    # contains the literal text accepted:false, which this pattern must not
+    # match, and provably does not (rest-schemas.md section 2).
+    curl -sf -K "$AUTHFILE" "$NEXUS/service/rest/v1/system/eula" > "$EULA"
+    if grep -q '"accepted"[[:space:]]*:[[:space:]]*false' "$EULA"; then
+      FIRST_ACCEPT=yes
+    else
+      FIRST_ACCEPT=no
+    fi
+    sed 's/"accepted"[[:space:]]*:[[:space:]]*false/"accepted" : true/' \
+      "$EULA" > "$EULA.new"
+    CODE=$(curl -s -o "$OUT" -w '%{http_code}' -K "$AUTHFILE" -X POST \
+      -H 'Content-Type: application/json' --data-binary @"$EULA.new" \
+      "$NEXUS/service/rest/v1/system/eula")
+    if [ "$CODE" = 204 ]; then
+      echo "    accepted ($CODE)"
+    elif [ "$FIRST_ACCEPT" = no ]; then
+      # Acceptance is one-way: POSTing the document back with accepted:false
+      # returns 500, so this branch can only ever re-send `true`. That re-POST
+      # was never exercised on the probe, and a no-op re-accept returning
+      # something other than 204 is not a reason to fail a sync.
+      echo "    already accepted; re-POST returned $CODE (tolerated)"
+    else
+      echo "    EULA NOT ACCEPTED ($CODE): $(cat "$OUT")"
+      exit 1
+    fi
+
+    if [ "$ROTATE" = yes ]; then
+      echo "==> rotating the admin password to the Vault value"
+      # text/plain, not JSON: this endpoint takes the bare password as the
+      # body. The body goes through --data-binary @file, never -d "$PASSWORD",
+      # so the credential never becomes an argv entry. After this succeeds
+      # Nexus deletes /nexus-data/admin.password, which is what makes the
+      # branch above a reliable first-run signal.
+      printf '%s' "$NEXUS_PASSWORD" > "$PWBODY"
+      CODE=$(curl -s -o "$OUT" -w '%{http_code}' -K "$AUTHFILE" -X PUT \
+        -H 'Content-Type: text/plain' --data-binary @"$PWBODY" \
+        "$NEXUS/service/rest/v1/security/users/admin/change-password")
+      case "$CODE" in
+        200|204) echo "    rotated ($CODE)" ;;
+        *) echo "    ROTATION FAILED ($CODE): $(cat "$OUT")"; exit 1 ;;
+      esac
+      printf 'user = "admin:%s"\n' "$NEXUS_PASSWORD" > "$AUTHFILE"
+      : > "$PWBODY"
+    fi
+
+    # Helper: GET to probe, then POST if absent and PUT if present.
+    #
+    # It is NOT "POST and treat a conflict as success". Verified on this build
+    # (rest-schemas.md sections 4 and 5), a duplicate create returns 400, not
+    # 409, and 400 is indistinguishable from a genuine schema rejection by
+    # status alone -- so a conflict-tolerant POST either fails every re-run or
+    # swallows real errors. Probing first also makes this a true reconcile: a
+    # changed body in git reaches an existing object through the PUT.
+    #
+    # Success codes are per-endpoint arguments because they genuinely differ:
+    # repositories create with 201 and update with 204, while the cleanup
+    # policy does both with 200.
+    #
+    # $1 label  $2 probe path  $3 create path  $4 update path
+    # $5 create success code  $6 update success code  $7 body file
+    reconcile() {
+      _label=$1
+      _probe=$2
+      _create=$3
+      _update=$4
+      _okc=$5
+      _oku=$6
+      _body=$7
+
+      _code=$(curl -s -o "$OUT" -w '%{http_code}' -K "$AUTHFILE" \
+        "$NEXUS$_probe")
+      if [ "$_code" = 200 ]; then
+        _verb=updated
+        _want=$_oku
+        _code=$(curl -s -o "$OUT" -w '%{http_code}' -K "$AUTHFILE" -X PUT \
+          -H 'Content-Type: application/json' --data-binary @"$_body" \
+          "$NEXUS$_update")
+      else
+        _verb=created
+        _want=$_okc
+        _code=$(curl -s -o "$OUT" -w '%{http_code}' -K "$AUTHFILE" -X POST \
+          -H 'Content-Type: application/json' --data-binary @"$_body" \
+          "$NEXUS$_create")
+        if [ "$_code" = 400 ]; then
+          # The probe said absent and the server says the name is taken. The
+          # probe GET is the less-verified half of this pair, so believe the
+          # server and fall through to the update form rather than failing.
+          echo "    $_label: create refused 400, retrying as an update"
+          _verb=updated
+          _want=$_oku
+          _code=$(curl -s -o "$OUT" -w '%{http_code}' -K "$AUTHFILE" -X PUT \
+            -H 'Content-Type: application/json' --data-binary @"$_body" \
+            "$NEXUS$_update")
+        fi
+      fi
+
+      if [ "$_code" != "$_want" ]; then
+        echo "    $_label: UNEXPECTED $_code, wanted $_want: $(cat "$OUT")"
+        return 1
+      fi
+      echo "    $_label: $_verb ($_code)"
+    }
+
+    echo "==> docker bearer token realm"
+    # A fresh instance carries only ["NexusAuthenticatingRealm"], so this PUT
+    # is required, not optional. The endpoint replaces the whole active list,
+    # which is why the authenticating realm is repeated here.
+    #
+    # NexusAuthorizingRealm is deliberately ABSENT: it is not in
+    # /security/realms/available and including it 400s the entire call with
+    # "Unknown realmIds". Nexus adds it to the active configuration itself.
+    curl -sf -K "$AUTHFILE" -X PUT -H 'Content-Type: application/json' \
+      -d '["NexusAuthenticatingRealm","DockerToken"]' \
+      "$NEXUS/service/rest/v1/security/realms/active"
+    echo "    active realms set"
+
+    echo "==> enabling anonymous access"
+    # Anonymous access is DISABLED on a fresh 3.96.1 instance, so without this
+    # the k3s mirror could never pull. The stock `anonymous` user already
+    # carries nx-repository-view-*-*-read and -browse, so no role editing.
+    #
+    # NexusAuthorizingRealm IS correct here and its absence above is NOT a
+    # contradiction: this field names the anonymous SUBJECT's realm, which is
+    # unrelated to the available-realms list the call above validates against.
+    # Do not "fix" one to match the other.
+    cat > "$BODY" <<'JSON'
+    {
+      "enabled": true,
+      "userId": "anonymous",
+      "realmName": "NexusAuthorizingRealm"
+    }
+    JSON
+    CODE=$(curl -s -o "$OUT" -w '%{http_code}' -K "$AUTHFILE" -X PUT \
+      -H 'Content-Type: application/json' --data-binary @"$BODY" \
+      "$NEXUS/service/rest/v1/security/anonymous")
+    if [ "$CODE" != 200 ]; then
+      echo "    ANONYMOUS ENABLE FAILED ($CODE): $(cat "$OUT")"
+      exit 1
+    fi
+    echo "    anonymous access enabled ($CODE)"
+
+    echo "==> cleanup policy docker-proxy-cleanup"
+    # Created BEFORE the repository that names it: a reference to a policy
+    # that does not exist is rejected. That ordering is the one thing in the
+    # sequence that was proven by rejection rather than inferred.
+    #
+    # This is not housekeeping. Community Edition stops accepting new
+    # components at 40,000 and says nothing -- it PAUSES rather than erroring,
+    # so a proxy that has silently stopped caching looks exactly like one that
+    # is merely slow. A Docker proxy accrues one component per cached tag.
+    # Nexus creates and maintains the task that enforces this policy itself.
+    #
+    # /service/rest/internal/, not /service/rest/v1/. The v1 path the vendor
+    # documents returns 404 on this build and is absent from its own
+    # swagger.json; the internal path is what the product's UI calls. Its
+    # success code is 200 for both create and update, not 201.
+    #
+    # criteriaLastDownloaded is in DAYS. Sending 2592000 would mean ~7000
+    # years and nothing would ever be evicted; the server validates no range.
+    cat > "$BODY" <<'JSON'
+    {
+      "name": "docker-proxy-cleanup",
+      "format": "docker",
+      "notes": "Phase 21: keeps the CE 40000-component cap out of reach.",
+      "criteriaLastDownloaded": 30
+    }
+    JSON
+    reconcile docker-proxy-cleanup \
+      /service/rest/internal/cleanup-policies/docker-proxy-cleanup \
+      /service/rest/internal/cleanup-policies \
+      /service/rest/internal/cleanup-policies/docker-proxy-cleanup \
+      200 200 "$BODY"
+
+    echo "==> repository raw-hosted"
+    cat > "$BODY" <<'JSON'
+    {
+      "name": "raw-hosted",
+      "online": true,
+      "storage": {
+        "blobStoreName": "default",
+        "strictContentTypeValidation": true,
+        "writePolicy": "ALLOW"
+      },
+      "cleanup": {"policyNames": []},
+      "component": {"proprietaryComponents": false},
+      "raw": {"contentDisposition": "ATTACHMENT"}
+    }
+    JSON
+    reconcile raw-hosted \
+      /service/rest/v1/repositories/raw/hosted/raw-hosted \
+      /service/rest/v1/repositories/raw/hosted \
+      /service/rest/v1/repositories/raw/hosted/raw-hosted \
+      201 204 "$BODY"
+
+    echo "==> repository docker-proxy"
+    # docker.httpPort 8082 IS the connector -- there is no separate object to
+    # create, and the Service already publishes that container port on
+    # nodePort 30082 for containerd. forceBasicAuth false routes Docker
+    # clients through the Bearer Token realm instead of HTTP basic auth,
+    # which is what lets containerd pull anonymously.
+    cat > "$BODY" <<'JSON'
+    {
+      "name": "docker-proxy",
+      "online": true,
+      "storage": {
+        "blobStoreName": "default",
+        "strictContentTypeValidation": true
+      },
+      "cleanup": {"policyNames": ["docker-proxy-cleanup"]},
+      "proxy": {
+        "remoteUrl": "https://registry-1.docker.io",
+        "contentMaxAge": 1440,
+        "metadataMaxAge": 1440
+      },
+      "negativeCache": {"enabled": true, "timeToLive": 1440},
+      "httpClient": {"blocked": false, "autoBlock": true},
+      "docker": {
+        "v1Enabled": false,
+        "forceBasicAuth": false,
+        "httpPort": 8082
+      },
+      "dockerProxy": {"indexType": "HUB", "cacheForeignLayers": false}
+    }
+    JSON
+    reconcile docker-proxy \
+      /service/rest/v1/repositories/docker/proxy/docker-proxy \
+      /service/rest/v1/repositories/docker/proxy \
+      /service/rest/v1/repositories/docker/proxy/docker-proxy \
+      201 204 "$BODY"
+
+    echo "==> verifying anonymous docker read"
+    # The question the k3s mirror depends on, asked in a way that has a true
+    # answer. The obvious check -- GET /repository/docker-proxy/v2/ -- returns
+    # 401 BY DESIGN: with forceBasicAuth false the Bearer Token realm answers
+    # the registry ping with a token challenge, exactly as Docker Hub does.
+    # Gating on it would fail a correctly configured system, so /v2/ is not
+    # used as a health or readiness signal anywhere in this phase.
+    #
+    # A manifest fetch is the endpoint that actually carries content, and it
+    # was observed returning 200 to an unauthenticated client. No credentials
+    # here on purpose: that is the whole point of the check.
+    CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+      "$NEXUS/repository/docker-proxy/v2/library/alpine/manifests/3.20")
+    case "$CODE" in
+      200)
+        echo "    anonymous read OK"
+        ;;
+      401|403)
+        echo "    ANONYMOUS READ REFUSED ($CODE) -- the mirror will not work"
+        exit 1
+        ;;
+      *)
+        # Not an authorization answer. The first fetch of this manifest goes
+        # upstream to Docker Hub, so an egress failure lands here; that is a
+        # different fault from the one this check exists to catch, and it must
+        # not fail the sync.
+        echo "    anonymous read inconclusive ($CODE), not an auth refusal"
+        ;;
+    esac
+
+    echo "==> done"
