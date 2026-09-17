@@ -191,11 +191,12 @@ Principe :
 22. Prometheus
 23. Grafana
 24. Logging
-25. Applications personnelles
-26. Serveurs de jeux
-27. Automatisation des sauvegardes
-28. Sauvegarde externe supplémentaire
-29. IA locale plus tard
+25. Keycloak et authentification centralisée
+26. Applications personnelles
+27. Serveurs de jeux
+28. Automatisation des sauvegardes
+29. Sauvegarde externe supplémentaire
+30. IA locale plus tard
 ```
 
 ---
@@ -881,7 +882,82 @@ Grafana    → visualisation
 
 ---
 
-# 28. Phase 25 — Applications personnelles
+# 28. Phase 25 — Keycloak et authentification centralisée
+
+Keycloak devient le fournisseur central d’identité du homelab. Il fournit une
+authentification unique (SSO) basée sur OpenID Connect (OIDC) afin que chaque
+personne dispose d’un seul compte pour accéder aux applications compatibles.
+
+Objectifs :
+
+```text
+un compte utilisateur par personne
+une connexion unique pour toutes les applications
+OIDC comme protocole d’intégration principal
+groupes et rôles centralisés
+désactivation d’un compte depuis un point central
+```
+
+Architecture :
+
+```text
+Utilisateur
+    ↓
+Keycloak
+    ├── authentification
+    ├── utilisateurs et groupes
+    ├── rôles et permissions
+    └── clients OIDC
+          ↓
+    Applications personnelles
+```
+
+Keycloak sera déployé dans Kubernetes et géré via GitOps. Sa base de données
+doit être persistante, idéalement dans PostgreSQL, avec les données stockées
+sur :
+
+```text
+/srv/kubernetes/storage
+```
+
+Pour chaque application compatible, créer un client OIDC dans le realm du
+homelab avec des URL de redirection limitées au domaine de l’application,
+les scopes minimaux nécessaires et un mapping explicite des groupes et rôles.
+
+Les applications ne doivent pas gérer leur propre mot de passe lorsque
+l’authentification OIDC est disponible. Elles délèguent la connexion à
+Keycloak et utilisent les claims OIDC pour identifier l’utilisateur et
+appliquer ses permissions.
+
+Prévoir au minimum :
+
+```text
+realm dédié au homelab
+groupes administrateurs et utilisateurs
+MFA pour les comptes administrateurs
+compte de récupération documenté et protégé
+HTTPS obligatoire via l’Ingress
+```
+
+Les secrets OIDC, les credentials PostgreSQL et les clés de bootstrap ne
+doivent pas être stockés en clair dans Git. Ils doivent être gérés avec Vault
+et Vault Secrets Operator.
+
+Sauvegarder la base de données Keycloak, la configuration des realms, clients,
+groupes et rôles, ainsi que la procédure de récupération des comptes
+administrateurs dans :
+
+```text
+/backups/services/keycloak
+```
+
+Keycloak centralise l’identité, mais ne remplace pas les autorisations propres
+à chaque application. Chaque application doit traduire explicitement les
+groupes ou rôles OIDC en permissions locales.
+
+---
+
+# 29. Phase 26 — Applications personnelles
 
 Une fois la plateforme stable, ajouter :
 
@@ -895,9 +971,12 @@ autres services
 
 Chaque application doit être gérée via GitOps autant que possible.
 
+Lorsqu’elle le permet, elle doit utiliser Keycloak comme fournisseur OIDC afin
+que les utilisateurs se connectent avec leur compte homelab unique.
+
 ---
 
-# 29. Phase 26 — Serveurs de jeux
+# 30. Phase 27 — Serveurs de jeux
 
 Stockage :
 
@@ -919,7 +998,7 @@ Décider au cas par cas.
 
 ---
 
-# 30. Sauvegardes
+# 31. Sauvegardes
 
 Le HDD `/backups` est réservé aux sauvegardes.
 
@@ -940,6 +1019,7 @@ Structure :
 │
 ├── services/
 │   ├── artifactory/
+│   ├── keycloak/
 │   └── autres/
 │
 ├── games/
@@ -952,7 +1032,7 @@ Structure :
 
 ---
 
-# 31. Ce qu’il faut sauvegarder
+# 32. Ce qu’il faut sauvegarder
 
 ## Kubernetes
 
@@ -1039,7 +1119,7 @@ Destination :
 
 ---
 
-# 32. Ce qu’il ne faut généralement pas sauvegarder
+# 33. Ce qu’il ne faut généralement pas sauvegarder
 
 Ne pas sauvegarder inutilement :
 
@@ -1067,7 +1147,7 @@ configurations non reproductibles
 
 ---
 
-# 33. Automatisation des sauvegardes
+# 34. Automatisation des sauvegardes
 
 À terme :
 
@@ -1097,7 +1177,7 @@ Un service compromis ne doit pas pouvoir supprimer simultanément ses données e
 
 ---
 
-# 34. Sauvegarde externe
+# 35. Sauvegarde externe
 
 Le HDD interne n’est qu’une première couche.
 
@@ -1123,7 +1203,7 @@ incident physique
 
 ---
 
-# 35. IA locale
+# 36. IA locale
 
 L’IA locale n’est pas prioritaire.
 
@@ -1140,7 +1220,7 @@ Elle ne doit pas conditionner la mise en place du reste de la plateforme.
 
 ---
 
-# 36. Architecture finale
+# 37. Architecture finale
 
 ```text
 GitHub
@@ -1163,6 +1243,8 @@ GitHub
       ├── Artifactory
       ├── Prometheus
       ├── Grafana
+      ├── Logging (Loki)
+      ├── Keycloak (SSO/OIDC)
       └── applications
 ```
 
@@ -1199,7 +1281,7 @@ HDD 1 To
 
 ---
 
-# 37. Priorité d’installation
+# 38. Priorité d’installation
 
 La priorité immédiate est :
 
@@ -1226,11 +1308,13 @@ La priorité immédiate est :
 20. Ajouter la CI/CD GitHub Actions + GHCR
 21. Ajouter Artifactory si nécessaire
 22. Ajouter Prometheus et Grafana
-23. Ajouter les applications
-24. Automatiser les backups
-25. Ajouter une sauvegarde externe
-26. Ajouter les serveurs de jeux
-27. Ajouter l’IA locale uniquement plus tard
+23. Ajouter le logging
+24. Installer Keycloak et configurer l’authentification OIDC
+25. Intégrer les applications personnelles à Keycloak
+26. Automatiser les backups
+27. Ajouter une sauvegarde externe
+28. Ajouter les serveurs de jeux
+29. Ajouter l’IA locale uniquement plus tard
 ```
 
 Ce document sert de feuille de route générale. Chaque phase doit être validée avant de passer à la suivante.
