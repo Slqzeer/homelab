@@ -1,0 +1,157 @@
+# Nexus Repository Community Edition -- phase 21, filling the roadmap's
+# "Artifactory" role with a different product. Spec section 2 has the argument:
+# no free JFrog edition covers what plan section 24 asks for, because
+# Artifactory OSS has no Docker and JCR has no Maven/npm/PyPI.
+#
+# State is the embedded H2 database, the blob store and the configuration, all
+# three inside the one PVC below. That is deliberate: Community Edition stops
+# accepting components at 40,000, well under H2's own 100,000, so an external
+# PostgreSQL would add a database user, a second credential path and a
+# two-source backup while buying no headroom at all. See spec section 6.2.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexus
+  namespace: artifacts
+spec:
+  # NodePort, not ClusterIP, and only because of the docker port. containerd
+  # runs on the HOST: it does not use cluster DNS, so it cannot resolve
+  # nexus.artifacts.svc, and routing its layer pulls through the tailnet proxy
+  # would make every image pull depend on the Tailscale operator. A NodePort on
+  # 127.0.0.1 needs neither. See spec section 8.
+  type: NodePort
+  selector:
+    app: nexus
+  ports:
+    - name: http
+      port: 8081
+      targetPort: 8081
+    - name: docker
+      port: 8082
+      targetPort: 8082
+      # Pinned, not auto-assigned: /etc/rancher/k3s/registries.yaml names this
+      # number and that file is not reconciled by Argo CD. A reassignment here
+      # would break image pulls silently on the next rebuild.
+      nodePort: 30082
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nexus-data
+  namespace: artifacts
+spec:
+  # A standalone PVC rather than a StatefulSet volumeClaimTemplate. This is a
+  # Deployment (one replica, no stable network identity to preserve), and it
+  # also sidesteps the atomic-list server-side-apply trap documented at length
+  # in platform/databases/postgres/config/postgres.yaml.
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      # local-path does not enforce capacity -- a PV is a directory on /srv,
+      # which has 851G free. Nominal, not a quota. Sized for cached Docker
+      # layers, which are the bulk of what lands here.
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexus
+  namespace: artifacts
+spec:
+  replicas: 1
+  strategy:
+    # Recreate, NOT RollingUpdate. The PVC is ReadWriteOnce, so a rolling
+    # update would start a second pod that blocks forever waiting for a volume
+    # the outgoing pod still holds. The cost is a gap in service on every
+    # image change, which is correct for a single-replica stateful workload.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: nexus
+  template:
+    metadata:
+      labels:
+        app: nexus
+    spec:
+      serviceAccountName: nexus
+      securityContext:
+        # The image runs as uid 200, gid 200, with state at /nexus-data. This
+        # is exactly troubleshooting entry 1's trap: a non-root container
+        # cannot write a local-path volume on /srv unless fsGroup makes it
+        # writable. That mechanism was proven on this cluster in phase 16.
+        runAsNonRoot: true
+        runAsUser: 200
+        runAsGroup: 200
+        fsGroup: 200
+      containers:
+        - name: nexus
+          image: sonatype/nexus3:3.96.1
+          env:
+            # Far below the image's documented default of
+            # -Xms2703m -Xmx2703m -XX:MaxDirectMemorySize=2703m, which reserves
+            # roughly 5.4Gi. This host had 7.7Gi free when the phase was
+            # planned and is also a workstation, a KVM host and a future game
+            # server, with a recorded CoreDNS outage caused by swap exhaustion.
+            # Xms equals Xmx on Sonatype's own advice, to avoid heap resizing.
+            #
+            # These values were MEASURED against this exact tag, not assumed --
+            # see platform/nexus/rest-schemas.md. If this pod is OOM-killed,
+            # raise limits.memory, NOT the heap: heap, direct memory, metaspace,
+            # code cache and thread stacks are all counted by the cgroup, so a
+            # bigger heap under an unchanged limit moves the cliff closer.
+            - name: INSTALL4J_ADD_VM_PARAMS
+              value: "-Xms1024m -Xmx1024m -XX:MaxDirectMemorySize=768m"
+          ports:
+            - name: http
+              containerPort: 8081
+            - name: docker
+              # Served by the docker-proxy repository's own connector, which
+              # Task 4 configures through docker.httpPort. Nothing listens here
+              # until that repository exists.
+              containerPort: 8082
+          resources:
+            requests:
+              cpu: 200m
+              memory: 1.5Gi
+            limits:
+              # Memory only, no CPU limit -- the shape postgres.yaml uses.
+              memory: 2.5Gi
+          volumeMounts:
+            - name: data
+              mountPath: /nexus-data
+          startupProbe:
+            # Nexus is a JVM application that takes minutes to come up on this
+            # host, and it answers this endpoint only once the REST API is
+            # live. The threshold below is the measured startup time doubled --
+            # see rest-schemas.md. A startupProbe rather than a long
+            # initialDelaySeconds on readiness, so that a genuinely stuck pod
+            # is still caught promptly once started.
+            httpGet:
+              path: /service/rest/v1/status
+              port: 8081
+            periodSeconds: 10
+            failureThreshold: 8
+          readinessProbe:
+            httpGet:
+              path: /service/rest/v1/status
+              port: 8081
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /service/rest/v1/status
+              port: 8081
+            periodSeconds: 30
+            timeoutSeconds: 10
+            # Deliberately tolerant, for the reason postgres.yaml gives: this
+            # host has a recorded history of probe timeouts under memory
+            # pressure. Killing a repository manager because the host was
+            # briefly busy is worse than waiting.
+            failureThreshold: 6
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: nexus-data

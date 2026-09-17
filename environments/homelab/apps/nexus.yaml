@@ -1,0 +1,34 @@
+# Nexus Repository CE, the roadmap's phase 21. Spec section 2 records why the
+# product is not the Artifactory the plan names.
+#
+# Wave 23 -- the SAME wave as postgres, redis and registry, not 24. Nexus
+# depends on vso-config (22) for Secret nexus-admin and on nothing at 23.
+# Both postgres.yaml and redis.yaml warn against stacking a wave "out of
+# habit"; sharing one means these reconcile in parallel and none gates another.
+#
+# Nothing sits behind wave 23 that depends on Nexus, so an unhealthy repository
+# manager gates nothing in Argo CD. Image pulls keep working regardless --
+# containerd always tries the upstream registry as a last resort, which is what
+# makes a cold rebuild possible at all. See spec section 6.4.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nexus
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "23"
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:Slqzeer/homelab.git
+    targetRevision: main
+    path: platform/nexus/config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: artifacts
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
