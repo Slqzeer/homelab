@@ -61,6 +61,22 @@ Two things guard against that:
   — the unit is days, established from the shipped UI code, see
   `rest-schemas.md` §5). Docker layers are the bulk of what lands here, so
   keeping the cache pruned is what keeps the 40,000 figure out of reach.
+- **The task that enforces that policy is the product's own, and it is
+  running.** A policy on its own evicts nothing; something has to execute it.
+  Nexus creates that something itself — verified on this build, not assumed:
+  `GET /service/rest/v1/tasks` on the live instance returns a task named
+  `Cleanup service`, type `repository.cleanup`, enabled, on cron
+  `0 0 1 * * ?` (01:00 UTC daily); the pod logs it as
+  `Task 'Cleanup service' [repository.cleanup] : state=WAITING` at every
+  startup; and `CleanupBootService.doStart()` in the shipped
+  `nexus-cleanup-config` jar creates it when absent and *deletes duplicates of
+  it*. The bootstrap Job therefore creates no task, and must not be given one —
+  a second copy would be removed by Nexus at the next restart. The full
+  evidence, with the commands that produced it, is in `rest-schemas.md` §5
+  ("The scheduled task that enforces the policy is built into the product").
+  The one caveat is the schedule, not the mechanism: eviction runs once a day,
+  so a burst that adds tens of thousands of components inside a single day is
+  not held back by it.
 
 Sonatype also documents that CE refuses to fetch or upload any component until
 its EULA is accepted. The Job accepts it over REST on every run (`204`), so it
@@ -69,13 +85,19 @@ is not a human step and not a browser wizard.
 ## What the bootstrap Job configures, and the seven repositories it did not create
 
 `nexus-bootstrap` is an Argo CD `Sync` hook with
-`hook-delete-policy: BeforeHookCreation`, so every sync deletes the previous
-Job and genuinely re-runs it, leaving the completed Job behind so its log can
-be read. It accepts the EULA, rotates the admin password to the Vault value on
-first run, activates the `DockerToken` realm, enables anonymous access, and
-reconciles the cleanup policy and both repositories — probing each object with
-a GET and then POSTing or PUTing, so a second run updates rather than
-duplicating.
+`hook-delete-policy: BeforeHookCreation`, so a sync that reaches the hook
+deletes the previous Job and creates a fresh one instead of failing on the
+immutable object already there, and leaves the completed Job behind so its log
+can be read. That is what the policy guarantees — *not* that every sync
+re-executes the script: a sync can skip the hook entirely and still report
+`Synced`, which is the trap the "Re-running the bootstrap Job" section below
+covers.
+
+When it does run, the Job accepts the EULA, rotates the admin password to the
+Vault value on first run, activates the `DockerToken` realm, enables anonymous
+access, and reconciles the cleanup policy and both repositories — probing each
+object with a GET and then POSTing or PUTing, so a second run updates rather
+than duplicating.
 
 `raw-hosted` and `docker-proxy` sit alongside **seven stock repositories that
 Nexus 3 ships with**, which this phase neither created nor removed:
@@ -102,7 +124,10 @@ PUT .../repository/raw-hosted/probe/1.0.0/probe.bin
 bytes sent as `probe2.bin` with `Content-Type: application/octet-stream` were
 rejected identically; the same bytes as `probe.gz` returned **201** and read
 back byte-for-byte (1,048,754 bytes out, 1,048,754 back, md5 identical).
-Extensionless files are refused for the same reason.
+A filename with no extension leaves the same derivation with nothing to work
+from, so it must be refused by the same mechanism — that is a consequence of
+how the check works, not something that was PUT and observed: the only rejected
+uploads on record are the two `.bin` ones above.
 
 What to do about it:
 
@@ -174,7 +199,11 @@ Rotate in this order:
 **Do not discard the old password until step 3 has demonstrably run.** If the
 account is ever stranded, recovery is not from Vault: it is Nexus's own reset
 path against the H2 store in the PVC, which this phase has not written or
-rehearsed.
+rehearsed. Be clear about what that path costs before relying on it as a safety
+net: Nexus holds the credential in an embedded H2 database it keeps open, so a
+reset means **stopping Nexus and editing that store inside the PVC** — see
+"Taking Nexus down" for why even stopping it is not a `--replicas=0` away. It
+is not a live operation, and it is not a `kubectl exec` one-liner.
 
 Nothing about this rotation is automated, and nothing alarms on it. The
 credential exists only in Vault, in the Secret VSO derives from it, and inside
@@ -235,8 +264,10 @@ that makes the result trustworthy.
 A clean re-run reads `already provisioned: using the Vault password`, has no
 `==> rotating` section at all, and turns all three creates into updates —
 cleanup policy `updated (200)`, `raw-hosted: updated (204)`,
-`docker-proxy: updated (204)`. Verified: two runs, no duplicate repository,
-connector or task.
+`docker-proxy: updated (204)`. Verified: two runs, no duplicate repository and
+no duplicate connector. Tasks are not in that list because the Job creates
+none — the only cleanup task is the product's own (see "Community Edition's
+limits"), so there was never a task for a re-run to duplicate.
 
 ## Taking Nexus down — `--replicas=0` does not work
 
@@ -381,7 +412,9 @@ The correct procedure:
 1. **Run Nexus's "Export databases for backup" task** — one of its own task
    types, run on demand or scheduled from the admin UI. It writes a consistent
    export into `/nexus-data/backup/`.
-2. **Copy both `/nexus-data/backup/` and `/nexus-data/blobs/`** to `/backups/`.
+2. **Copy both `/nexus-data/backup/` and `/nexus-data/blobs/`** to
+   `/backups/services/nexus` — the path the plan's own backup tree names
+   (`docs/workstation-plan.md` §32), not the top of `/backups/`.
 
 Both halves are required. The export without the blobs restores an index
 pointing at nothing.
@@ -440,13 +473,19 @@ are from the deployed pod (2026-09-18).
 | | Value |
 | --- | --- |
 | Cold start to REST 200 (probe) | 38 s |
-| Peak cgroup memory (probe) | 1.24 GiB against a 2500m ceiling, never OOM-killed |
+| Peak cgroup memory (probe) | 1.24 GiB against a **2.44 GiB** ceiling, never OOM-killed |
 | `startupProbe` | `failureThreshold: 8`, `periodSeconds: 10` — the measured 38 s doubled |
 | Pod Ready (live, first boot on the PVC) | 60 s |
 | Bootstrap Job completion (live, first run) | 75 s after the sync started; the Job's own `DURATION` 73 s |
 | Bootstrap Job completion (re-run) | 4 s |
 | Steady-state memory (live) | ~1249Mi against the 2.5Gi limit, CPU 8m idle |
 | Endpoint-dead window on pod deletion | 61-63 s across four trials |
+
+That 2.44 GiB probe ceiling was `docker run --memory=2500m`, where docker reads
+`m` as mebibytes: 2500 MiB = 2.44 GiB. **It is not a Kubernetes quantity** — in
+a manifest `2500m` means 2.5 of a unit, which is why it is written out here in
+GiB rather than copied across. The pod's own limit is the `2.5Gi` in the
+steady-state row, set independently.
 
 The probe's memory figures are **cgroup accounting** (`memory.current` and
 `memory.peak`), which include page cache attributable to the container. They are
@@ -479,6 +518,13 @@ Also verified live, each with its own evidence rather than an assertion:
   are steady state, plus a probe peak that included one real image pull through
   the proxy. There is no measurement of the pod while several images are pulled
   and an artifact is uploaded concurrently.
+- **A second admin-password rotation has never been performed.** Only the
+  first-run rotation has (boot-generated value → Vault value, proven by the
+  disappearance of `/nexus-data/admin.password`). The procedure in "Rotating
+  the admin password" is assembled from individually proven parts, not from a
+  rehearsed end-to-end run, and neither is the stranded-account recovery path
+  it points at. Stated here as well as there because this is the section a
+  sceptical reader checks.
 - **There has been no formal state-survives-restart measurement (spec §17.10).**
   What can be said is that the pod has been deleted and recovered repeatedly —
   four deliberate deletions, plus the replacements around them — and came back
@@ -507,8 +553,10 @@ Also verified live, each with its own evidence rather than an assertion:
   than silently relied upon.
 - **Backups are not automated and no restore has been drilled** — see "Backups,
   and the trap". Phase 34.
-- **Nothing alarms on the CE component cap.** The cleanup policy keeps it out of
-  reach; reading the counter is a manual visit to the Usage Center.
+- **Nothing alarms on the CE component cap.** The cleanup policy and the
+  product's own daily `Cleanup service` task keep it out of reach, but nothing
+  watches the counter — reading it is a manual visit to the Usage Center, and
+  eviction only runs at 01:00 UTC.
 
 ## Related
 

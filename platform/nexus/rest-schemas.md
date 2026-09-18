@@ -515,6 +515,133 @@ Server read-back after creating the real policy:
 **Send `30`.** Sending `2592000` would mean 2,592,000 days (~7,000 years) and the
 proxy would never evict anything.
 
+### The scheduled task that enforces the policy is built into the product
+
+Added 2026-09-18, to settle decision N20. A cleanup *policy* is inert on its
+own: something has to run it. The spec asked the bootstrap Job to create a
+scheduled cleanup task, the Job creates only the policy, and the manifest
+justified the omission with an unattributed claim that "Nexus creates and
+maintains the task itself". **That claim is correct on this build**, and the
+evidence is below rather than asserted. The Job is deliberately left alone.
+
+**1. The live instance already has the task, and nothing in this repository
+created it.** `grep -c tasks platform/nexus/config/bootstrap-job.yaml` is `0`.
+`GET /service/rest/v1/tasks` returns `403` to an anonymous caller, so this was
+read with the `admin` credential from Secret `nexus-admin`, delivered to `curl`
+through a `chmod 600` `--config` file from a throwaway pod on the pinned image:
+
+```
+$ curl -s -K /tmp/auth http://nexus.artifacts.svc:8081/service/rest/v1/tasks   -> 200
+$ curl -s     http://nexus.artifacts.svc:8081/service/rest/v1/tasks           -> 403
+```
+
+The item that matters, verbatim from the `200` body:
+
+```json
+{
+  "id" : "aec7e567-546b-4e74-9601-f6dc9c7a3c49",
+  "name" : "Cleanup service",
+  "type" : "repository.cleanup",
+  "typeName" : "Admin - Cleanup repositories using their associated policies",
+  "currentState" : "WAITING",
+  "lastRunResult" : null,
+  "nextRun" : "2026-09-19T01:00:00.000+00:00",
+  "lastRun" : null,
+  "schedule" : "advanced",
+  "enabled" : true,
+  "cronExpression" : "0 0 1 * * ?",
+  "timeZoneOffset" : "Z",
+  "startDate" : "2026-09-18T09:41:26.060+00:00"
+}
+```
+
+So: **type `repository.cleanup`, name `Cleanup service`, enabled, cron
+`0 0 1 * * ?` — 01:00 UTC daily.** `startDate` is Nexus's own first boot on this
+PVC (09:41:26), which is **before** the bootstrap Job completed (`09:50:11Z`),
+and the Job never touches `/service/rest/v1/tasks` at all.
+
+`lastRun` is `null` only because the instance's H2 store was created the same
+day at 09:41 and 01:00 UTC has not come round since. Do **not** read that as
+"the task never runs": of the eight tasks the same call returns, the other
+seven all carry `"lastRunResult" : "OK"`, among them two `assetBlob.cleanup`
+tasks on `0 */30 * * * ?` that had run 16 minutes earlier. The scheduler is
+working; this task's turn simply had not come.
+
+**2. The running instance registers it at every boot.** From
+`kubectl -n artifacts logs` on the live pod, 31 seconds after its first log
+line (13:33:24):
+
+```
+2026-09-18 13:33:54,960+0000 INFO  [jetty-main-1] *SYSTEM org.sonatype.nexus.quartz.internal.task.QuartzTaskInfo - Task 'Cleanup service' [repository.cleanup] : state=WAITING
+```
+
+**3. The shipped code creates it, re-creates it, and deletes duplicates of it.**
+Read out of the fat jar without booting anything, the same way §2 read
+`StatusResource`:
+
+```
+CID=$(docker create sonatype/nexus3:3.96.1)
+docker cp "$CID:/opt/sonatype/nexus/bin/sonatype-nexus-repository-3.96.1-01.jar" app.jar
+docker rm -f "$CID"
+
+python3 - <<'EOF'
+import zipfile, io, os
+z = zipfile.ZipFile("app.jar")
+lib = "BOOT-INF/lib/nexus-cleanup-config-3.96.1-01.jar"
+i = zipfile.ZipFile(io.BytesIO(z.read(lib)))
+for n in i.namelist():
+    if n.startswith("org/sonatype/nexus/cleanup/internal/task/") and n.endswith(".class"):
+        os.makedirs("cls/" + os.path.dirname(n), exist_ok=True)
+        open("cls/" + n, "wb").write(i.read(n))
+EOF
+
+docker run --rm --entrypoint /bin/sh -v "$PWD/cls:/cls:ro" \
+  sonatype/nexus3:3.96.1 \
+  -c 'javap -p -c -cp /cls org.sonatype.nexus.cleanup.internal.task.CleanupBootService'
+```
+
+`CleanupBootService` extends `LifecycleSupport`, and its `doStart()` is one
+call to `createCleanupTask()`. The disassembly of that method, trimmed to the
+constants:
+
+```
+  private void createCleanupTask();
+       0: aload_0
+       1: invokevirtual #44    // Method doesTaskExist:()Z
+       4: ifne          77
+      11: ldc           #50    // String repository.cleanup
+      13: invokeinterface       // TaskScheduler.createTaskConfigurationInstance
+      20: ldc           #13    // String Cleanup service
+      22: invokevirtual         // TaskConfiguration.setName
+      41: ldc           #8     // String 0 0 1 * * ?
+      43: invokeinterface       // ScheduleFactory.cron
+      55: invokeinterface       // TaskScheduler.scheduleTask
+      69: ldc           #83    // String Problem scheduling cleanup task   (catch)
+      78: invokevirtual #91    // Method removeDuplicates:()V
+```
+
+Three facts fall out of it, and together they decide N20:
+
+- **The product creates the task at every startup if it is absent**
+  (`doesTaskExist()` → `TaskScheduler.scheduleTask`), with exactly the name,
+  type and cron the live instance reports. Nothing external is needed.
+- **The task enforces the policies.** `CleanupTask` holds a
+  `org.sonatype.nexus.cleanup.service.CleanupService` and its `execute()`
+  delegates to it; the product's own `typeName` for the type is "Admin -
+  Cleanup repositories using their associated policies".
+- **`removeDuplicates()` runs unconditionally afterwards** — it lists tasks,
+  keeps the first whose name is `Cleanup service`, type is `repository.cleanup`
+  and schedule matches `0 0 1 * * ?`, and removes the rest. A second copy
+  created by a bootstrap Job would therefore be *deleted by Nexus at the next
+  restart*, which is a second, independent reason not to add one.
+
+**Consequence for the bootstrap Job: none. Do not add a task to it.** N20 is
+satisfied by the product, not by the Job, and the `docker-proxy-cleanup` policy
+the Job does create is the only part that was ever missing from a fresh
+instance. The one operational caveat is a schedule, not a gap: eviction happens
+once a day at 01:00 UTC, so a burst that adds tens of thousands of components
+inside one day is not protected by it — the Usage Center counters are.
+
 ## 6. Security realms
 
 Active realms on a fresh instance are **only** `["NexusAuthenticatingRealm"]`,

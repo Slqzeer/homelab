@@ -801,14 +801,14 @@ Cela évite d’installer immédiatement un registry interne.
 
 **Réalisé avec Sonatype Nexus Repository Community Edition, pas avec
 Artifactory.** Aucune édition gratuite de JFrog ne couvre la liste ci-dessous :
-Artifactory OSS n'a pas Docker, et JCR n'a ni Maven, ni npm, ni PyPI. Nexus CE
+Artifactory OSS n’a pas Docker, et JCR n’a ni Maven, ni npm, ni PyPI. Nexus CE
 couvre les deux rôles dans un seul déploiement. Voir
 `docs/superpowers/specs/2026-09-17-nexus-repository-design.md`.
 
 Périmètre livré : `raw-hosted` pour les artefacts de build versionnés, et
 `docker-proxy` comme cache pull-through de Docker Hub que k3s utilise en
 miroir. Les proxys Maven/npm/PyPI sont reportés — aucun consommateur
-aujourd'hui. Les images de ce homelab restent sur GHCR (phase 20).
+aujourd’hui. Les images de ce homelab restent sur GHCR (phase 20).
 
 Artifactory est optionnel au début.
 
@@ -842,11 +842,11 @@ Nexus Repository CE (namespace artifacts)
                                     containerd
 ```
 
-Pas de PostgreSQL : Community Edition s'arrête à 40 000 composants, bien en
-dessous des 100 000 de H2, donc une base externe n'apporterait aucune marge.
+Pas de PostgreSQL : Community Edition s’arrête à 40 000 composants, bien en
+dessous des 100 000 de H2, donc une base externe n’apporterait aucune marge.
 Voir la spec, section 6.2.
 
-Nexus reste relativement lourd — environ 1,25 Gio mesurés en régime établi,
+Nexus reste relativement lourd — environ 1,22 Gio mesurés en régime établi,
 pour une limite de 2,5 Gio — et doit être ajouté après les fondations.
 Documentation opérationnelle : `platform/nexus/README.md`.
 
@@ -1126,11 +1126,11 @@ Destination :
 /backups/services/nexus
 ```
 
-**Copier la base H2 à chaud n'est pas une sauvegarde : elle se restaure
-corrompue.** Il faut d'abord lancer la tâche d'export de Nexus, puis copier
-`/nexus-data/backup/` **et** `/nexus-data/blobs/` — l'export sans les blobs
-restaure un index qui ne pointe sur rien. La phase 21 n'automatise rien de
-tout cela et n'a effectué aucun test de restauration ; c'est le travail de la
+**Copier la base H2 à chaud n’est pas une sauvegarde : elle se restaure
+corrompue.** Il faut d’abord lancer la tâche d’export de Nexus, puis copier
+`/nexus-data/backup/` **et** `/nexus-data/blobs/` — l’export sans les blobs
+restaure un index qui ne pointe sur rien. La phase 21 n’automatise rien de
+tout cela et n’a effectué aucun test de restauration ; c’est le travail de la
 phase 34. Procédure détaillée : `platform/nexus/README.md`.
 
 ---

@@ -448,16 +448,20 @@ last thought about it.
   policy could usefully deny. It stops being acceptable the moment the
   first consumer arrives, which is also the moment you learn what the
   policy should say. Pick it up in that phase, not before.
-- **Two of three `VaultStaticSecret` destinations still keep VSO's `_raw`
+- **Two of five `VaultStaticSecret` destinations still keep VSO's `_raw`
   key**, so each derived Secret carries its credential twice: once parsed,
   once in the verbatim KV JSON. `spec.destination.transformation.excludeRaw:
-  true` removes the duplicate. This affects the phase-17 canary in `vault`
-  and `postgres` in `databases`; `redis`, added in phase 19, ships with
-  `excludeRaw: true` from the start and does not carry the duplicate. The
-  gap is therefore two Secrets, not three, and the fix for those two
-  remains outstanding — one small cross-cutting change rather than a
-  component fix. Every extra copy widens what a `kubectl get secret -o
-  yaml`, an Argo CD resource view, or an etcd backup exposes.
+  true` removes the duplicate. The two affected are the phase-17 canary
+  `vault-canary` in `vault`
+  (`platform/vault-secrets-operator/config/vault-secrets.yaml`) and
+  `postgres-credentials` in `databases`. The three that already carry
+  `excludeRaw: true` are `redis-credentials` (phase 19),
+  `ghcr-pull` (phase 20, `platform/registry/`) and `nexus-admin`
+  (phase 21, `platform/nexus/`). The gap is therefore two Secrets, not
+  five, and the fix for those two remains outstanding — one small
+  cross-cutting change rather than a component fix. Every extra copy
+  widens what a `kubectl get secret -o yaml`, an Argo CD resource view, or
+  an etcd backup exposes.
 - **PostgreSQL has no `startupProbe`.** `pg_isready` reports "rejecting"
   during crash recovery, and the liveness probe allows 30s plus six
   20s-spaced failures — so 150 seconds is the longest WAL replay the pod
