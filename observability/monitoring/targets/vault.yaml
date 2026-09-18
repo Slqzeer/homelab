@@ -1,0 +1,22 @@
+# Vault's telemetry. Phase 22.
+#
+# Unauthenticated because platform/vault/values.yaml enables
+# unauthenticated_metrics_access on the listener -- see the argument there.
+# The path and params below are Vault's, not the operator's default /metrics.
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: vault
+  namespace: vault
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vault
+      vault-active: "true"
+  endpoints:
+    - port: http
+      path: /v1/sys/metrics
+      params:
+        format:
+          - prometheus

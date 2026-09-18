@@ -30,6 +30,47 @@ server:
     raft:
       enabled: true
       setNodeId: true
+      # Phase 22. Vault's /v1/sys/metrics requires a token unless the
+      # listener says otherwise, and the alternative to this stanza is a
+      # Prometheus token whose renewal is a new failure mode -- to protect
+      # an endpoint that exposes operational counters and seal status, not
+      # secrets, on a ClusterIP reachable only from inside this cluster.
+      # Decision P16 in the phase-22 spec.
+      #
+      # THIS IS chart 0.34.1's default config with three changes: the
+      # telemetry stanza in the listener block uncommented, a top-level
+      # telemetry block added, and the commented Vault Enterprise
+      # redundancy-zone lines under storage "raft" omitted (irrelevant to
+      # this single-node OSS deployment).
+      # Overriding this key means OWNING the whole HCL: when the chart is
+      # bumped, diff this against the new default before assuming it still
+      # matches. `helm show values hashicorp/vault --version <v>` prints it.
+      #
+      # Changing this restarts Vault, which reseals it. That is safe here
+      # and only here, because platform/vault/config/unsealer.yaml unseals
+      # it automatically from the in-cluster key Secret.
+      config: |
+        ui = true
+
+        listener "tcp" {
+          tls_disable = 1
+          address = "[::]:8200"
+          cluster_address = "[::]:8201"
+          telemetry {
+            unauthenticated_metrics_access = "true"
+          }
+        }
+
+        storage "raft" {
+          path = "/vault/data"
+        }
+
+        service_registration "kubernetes" {}
+
+        telemetry {
+          prometheus_retention_time = "30s"
+          disable_hostname = true
+        }
 
   dataStorage:
     enabled: true
