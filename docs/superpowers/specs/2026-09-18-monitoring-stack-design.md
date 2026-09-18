@@ -189,8 +189,9 @@ The obvious assumption is that Argo CD needs no work because it already serves
 Prometheus endpoints. **It does not.** Measured on 2026-09-18, the `argocd`
 namespace holds exactly four Services — `argocd-applicationset-controller`,
 `argocd-redis`, `argocd-repo-server`, `argocd-server` — and none of them is a
-metrics Service. The argo-cd chart creates `argocd-metrics`,
-`argocd-server-metrics` and `argocd-repo-server-metrics` only when
+metrics Service. The argo-cd chart (10.5.0, verified) creates
+`argocd-application-controller-metrics`, `argocd-server-metrics` and
+`argocd-repo-server-metrics` only when
 `controller.metrics.enabled`, `server.metrics.enabled` and
 `repoServer.metrics.enabled` are set, and `bootstrap/argocd/values.yaml` — 83
 lines — sets none of them.
@@ -294,10 +295,12 @@ an operator hand-off rather than something Argo CD can apply. The value on a
 single-node homelab — scheduler queue depth, controller work queues, etcd
 latency on a cluster with one etcd member — does not justify it.
 
-P6 disables the four scrapers **and** their rules. The `defaultRules` block
-must turn off `kubeScheduler`, `kubeControllerManager`, `kubeProxy`, `etcd`
-and `kubernetesSystemControllerManager`/`kubernetesSystemScheduler`; disabling
-the scrapers alone leaves rules that reference series nothing produces.
+P6 disables the four scrapers **and** their rules. Verified against chart
+91.4.1, the `defaultRules.rules` keys that must be set false are exactly
+`etcd`, `kubeControllerManager`, `kubeProxy`, `kubeSchedulerAlerting` and
+`kubeSchedulerRecording` — scheduler rules are split across two keys in this
+chart, and there is no `kubernetesSystemScheduler` key. Disabling the scrapers
+alone leaves rules that reference series nothing produces.
 
 ## 8. Grafana
 
@@ -357,14 +360,13 @@ This phase introduces three new kinds:
 | --- | --- | --- |
 | `ServiceMonitor` | `monitoring.coreos.com` | Present in the datreeio catalog |
 | `PrometheusRule` | `monitoring.coreos.com` | Present in the datreeio catalog |
-| `HelmChartConfig` | `helm.cattle.io` | **Doubtful** |
+| `HelmChartConfig` | `helm.cattle.io` | Present — **verified 2026-09-18** |
 
-The implementation checks the catalog for all three **before** writing
-manifests, and does not assume. If `HelmChartConfig` is absent, the fix is a
-**path-scoped** `-ignore-filename-pattern` carrying the same written
-justification `platform/nexus/registries.yaml` already has in that workflow —
-never a bare filename rule, which would silently exempt any future file of
-that name anywhere in the tree.
+All three were checked against the catalog on 2026-09-18 and all three return
+HTTP 200, `helm.cattle.io/helmchartconfig_v1.json` included. It was the one
+this design expected to be missing; it is not. **No `-ignore-filename-pattern`
+exemption is needed and none should be added** — an exemption written "just in
+case" would silently un-validate a real manifest later.
 
 Local kubeconform is not evidence here. It skips CRDs silently unless given
 the same two `-schema-location` flags, and that gap has already hidden a
