@@ -25,7 +25,7 @@ jobs:
       - name: Lint
         # --strict makes warnings fail. .yamllint.yaml is tuned so the tree
         # is clean under it; see the argument in that file's header.
-        run: yamllint --strict -c .yamllint.yaml bootstrap environments infrastructure platform .github
+        run: yamllint --strict -c .yamllint.yaml bootstrap environments infrastructure observability platform .github
 
   kubeconform:
     runs-on: ubuntu-latest
@@ -60,9 +60,13 @@ jobs:
         # `registries\.yaml$` would also silently exempt any future file of
         # that name anywhere in the tree, including a real manifest.
         #
-        # The second -schema-location supplies CRD schemas. All five CRDs
-        # this repository uses (Application, VaultAuth, VaultConnection,
-        # VaultStaticSecret, ProxyClass) are in the datreeio catalog.
+        # The second -schema-location supplies CRD schemas. The CRDs this
+        # repository uses are all in the datreeio catalog: Application,
+        # VaultAuth, VaultConnection, VaultStaticSecret, ProxyClass, and as
+        # of phase 22 ServiceMonitor, PrometheusRule (monitoring.coreos.com)
+        # and HelmChartConfig (helm.cattle.io). All three of the phase-22
+        # kinds were checked against the catalog before being used; none
+        # needs an exemption, and none should be given one.
         run: |
           ./kubeconform -strict -summary \
             -kubernetes-version 1.36.0 \
@@ -70,7 +74,7 @@ jobs:
             -ignore-filename-pattern 'platform/nexus/registries\.yaml$' \
             -schema-location default \
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
-            bootstrap environments infrastructure platform
+            bootstrap environments infrastructure observability platform
 
       - name: Fail if any resource was skipped
         # A skipped resource is an UNVALIDATED resource. kubeconform exits 0
@@ -82,6 +86,6 @@ jobs:
             -ignore-filename-pattern 'platform/nexus/registries\.yaml$' \
             -schema-location default \
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
-            bootstrap environments infrastructure platform \
+            bootstrap environments infrastructure observability platform \
             | tee summary.txt
           grep -q 'Skipped: 0' summary.txt
