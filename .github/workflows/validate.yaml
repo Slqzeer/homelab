@@ -51,6 +51,11 @@ jobs:
         # are added -- a directory list would need editing every phase and
         # would fail open when someone forgot.
         #
+        # It also excludes registries.yaml: containerd's mirror
+        # configuration, read by k3s from the host at startup. Nothing in
+        # the cluster applies it, so like values.yaml it is not a manifest
+        # and has no kind.
+        #
         # The second -schema-location supplies CRD schemas. All five CRDs
         # this repository uses (Application, VaultAuth, VaultConnection,
         # VaultStaticSecret, ProxyClass) are in the datreeio catalog.
@@ -58,6 +63,7 @@ jobs:
           ./kubeconform -strict -summary \
             -kubernetes-version 1.36.0 \
             -ignore-filename-pattern 'values\.yaml$' \
+            -ignore-filename-pattern 'registries\.yaml$' \
             -schema-location default \
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             bootstrap environments infrastructure platform
@@ -69,6 +75,7 @@ jobs:
         run: |
           ./kubeconform -summary -kubernetes-version 1.36.0 \
             -ignore-filename-pattern 'values\.yaml$' \
+            -ignore-filename-pattern 'registries\.yaml$' \
             -schema-location default \
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             bootstrap environments infrastructure platform \
