@@ -129,6 +129,30 @@ roughly 5.4Gi — see §7.
 | N21 | `excludeRaw: true` on the `VaultStaticSecret` | Same reasoning as phase 19's R11: do not add a fourth instance of a known gap |
 | N22 | Backups documented, **not automated** | §13. Automation is phase 34. Stating the gap beats implying coverage |
 
+### 4.1 Post-implementation finding on N20
+
+Added 2026-09-18, after implementation. N20 was a reasonable requirement when
+written — CE's silent pause at 40,000 components needed *some* mitigation.
+Implementation found the product already provides it: `sonatype/nexus3:3.96.1`
+creates a scheduled cleanup task itself, at every boot, with the name
+**`Cleanup service`**, type **`repository.cleanup`**, cron **`0 0 1 * * ?`**
+(01:00 UTC daily). Three independent checks confirm this — the live `GET
+/service/rest/v1/tasks`, the pod's own startup log line, and disassembly of
+the shipped `CleanupBootService.doStart()` — recorded in
+`platform/nexus/rest-schemas.md` (its cleanup-policy section, §5).
+
+**The bootstrap Job must not create this task.** That same disassembly shows
+`createCleanupTask()` calling `removeDuplicates()` unconditionally: a second
+copy made by the Job would be deleted by Nexus at the next restart, so an
+implementer who follows N20 literally produces a task that silently
+disappears. N20 is satisfied by the product, not by the Job; the Job's actual
+contribution is the cleanup *policy* (§9 step 6, revised below), which is the
+one piece a fresh instance did not already have.
+
+One consequence carries into §16's risk table: eviction runs once a day at
+01:00 UTC, which bounds how fast the policy can hold the cap back — a burst
+inside a single day is not caught by it.
+
 ## 5. Architecture
 
 ```
@@ -345,7 +369,10 @@ It runs after the Deployment is Ready and does, in order:
 5. Confirm anonymous read works against the Docker proxy. If it answers 401,
    the fix is enabling Nexus's **Docker Bearer Token realm** — a realm change,
    not a repository setting, and easy to misdiagnose as a permissions problem.
-6. Create the scheduled cleanup task purging unused proxy components (N20).
+6. Create the cleanup *policy* purging unused proxy components — **not** a
+   scheduled task. Post-implementation finding, §4.1: Nexus creates and
+   maintains that task itself at every boot, and would delete a second copy
+   at the next restart, so the Job must not attempt one.
 
 ### 9.1 How the Job is sequenced, and how it re-runs
 
@@ -507,7 +534,7 @@ releases.
 | Risk | Severity | Mitigation |
 | --- | --- | --- |
 | **JVM sized by reasoning, not measurement** | **High — and it is the one number that can take the host down** | §7: conservative starting point, `limits.memory` well above heap+direct, and §16.9 measures it. If it OOM-kills, raise the limit, not the heap |
-| **CE's 40,000-component cap pauses caching silently** | **Medium, and invisible** | N20/§6.2: scheduled cleanup task from day one; Usage Center shows the counters |
+| **CE's 40,000-component cap pauses caching silently** | **Medium, and invisible** | N20/§6.2: cleanup policy from day one, enforced by the product's own daily `Cleanup service` task rather than one the Job creates (§4.1); Usage Center shows the counters |
 | `registries.yaml` makes every pull depend on Nexus | Medium | §6.4: containerd's default-endpoint fallback, tested directly in §16.6. Cost is latency, not failure |
 | Wildcard mirror or rewrite silently breaks fallback | **High — turns a slow pull into a failed one** | N18/§6.4: explicit `docker.io`, no rewrites. Both are documented k3s bugs against containerd 2.x, which this host runs |
 | k3s restart disrupts the whole node | Medium, one-off | §8: a deliberate, scheduled step, never a side effect |
