@@ -1,0 +1,37 @@
+# Grafana on the tailnet at https://grafana.taildf6cd4.ts.net
+#
+# In infrastructure/ingress/config, at wave 21, AHEAD of the Grafana it
+# points at (wave 23). Every Ingress in this repository lives here for the
+# reason argocd-ingress.yaml sets out: nothing should ever wait on ingress
+# health to sync. An Ingress whose backend does not exist yet is valid and
+# harmless -- it simply has nothing to route to until wave 23 lands.
+#
+# A dedicated proxy rather than the shared ProxyGroup, for the reason
+# argocd-ingress.yaml records at length: Tailscale Services proved
+# unroutable on this tailnet. It still references the ProxyClass so the pod
+# stays memory-bounded.
+#
+# There is deliberately NO Ingress for Prometheus. Prometheus has no
+# authentication of any kind, and infrastructure/networking/policy.hujson is
+# currently a single {"src": ["*"], "dst": ["*"], "ip": ["*"]} grant -- so
+# publishing it would expose its admin API to every device on the tailnet.
+# Reach it with a port-forward; the command is in
+# observability/monitoring/README.md.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grafana
+  namespace: monitoring
+  annotations:
+    tailscale.com/proxy-class: homelab
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: monitoring-grafana
+      port:
+        number: 80
+  tls:
+    # Short name only. Becomes grafana.taildf6cd4.ts.net via MagicDNS.
+    - hosts:
+        - grafana
