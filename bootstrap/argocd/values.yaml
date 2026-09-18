@@ -29,6 +29,17 @@ controller:
       memory: 256Mi
     limits:
       memory: 1Gi
+  # Phase 22. Creates Service argocd-application-controller-metrics on 8082.
+  #
+  # metrics.serviceMonitor.enabled is deliberately NOT set, here or in the
+  # two blocks below. Argo CD self-manages at sync-wave -1 and the
+  # ServiceMonitor CRD does not arrive until wave 23, so a ServiceMonitor
+  # emitted by this chart would fail to apply on a REBUILT cluster and
+  # break the very Application that installs everything else. The
+  # ServiceMonitors live in observability/monitoring/targets/argocd.yaml,
+  # applied at wave 24 where their CRD already exists.
+  metrics:
+    enabled: true
 
 server:
   resources:
@@ -37,6 +48,10 @@ server:
       memory: 128Mi
     limits:
       memory: 512Mi
+  # Creates Service argocd-server-metrics on 8083. See the controller block
+  # above for why serviceMonitor stays off.
+  metrics:
+    enabled: true
 
 repoServer:
   resources:
@@ -45,6 +60,10 @@ repoServer:
       memory: 128Mi
     limits:
       memory: 512Mi
+  # Creates Service argocd-repo-server-metrics on 8084. See the controller
+  # block above for why serviceMonitor stays off.
+  metrics:
+    enabled: true
   # This node is a workstation, homelab and game host simultaneously, so
   # health endpoints can be slow to answer under load. The upstream probe
   # defaults (timeoutSeconds 1, failureThreshold 3) kill repo-server during

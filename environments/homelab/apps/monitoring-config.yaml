@@ -1,0 +1,38 @@
+# Everything that needs the CRDs the kube-prometheus-stack chart installs:
+# the ServiceMonitors, and the two exporters they point at.
+#
+# Wave 24 -- after monitoring (23), which installs those CRDs. A custom
+# resource applied before its CRD is registered is a failed sync, which is
+# why this cannot share a wave with the chart. Same split, same reason, as
+# vso-operator (21) -> vso-config (22).
+#
+# NOTHING sits behind wave 24. An unhealthy monitoring stack therefore gates
+# nothing at all, which is the correct position for observability: it
+# watches the cluster, and the cluster must never wait on it.
+#
+# The destination namespace is `monitoring`, but most manifests here do NOT
+# land there -- they carry explicit namespaces and write into argocd, vault,
+# kube-system and databases. destination.namespace is only the default for a
+# manifest that omits one, and every manifest here states its own.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring-config
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "24"
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:Slqzeer/homelab.git
+    targetRevision: main
+    path: observability/monitoring/targets
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

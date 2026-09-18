@@ -1,0 +1,48 @@
+# Argo CD's own metrics. Phase 22.
+#
+# These are in monitoring-config at wave 24, NOT in the argo-cd chart's own
+# serviceMonitor toggles -- see the comment in bootstrap/argocd/values.yaml.
+#
+# The selectors match app.kubernetes.io/name, whose value is NOT the Service
+# name: the controller's metrics Service is named
+# argocd-application-controller-metrics but labelled argocd-metrics. Rendered
+# and verified against argo-cd 10.5.0.
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: argocd-application-controller
+  namespace: argocd
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-metrics
+      app.kubernetes.io/part-of: argocd
+  endpoints:
+    - port: http-metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: argocd-server
+  namespace: argocd
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-server-metrics
+      app.kubernetes.io/part-of: argocd
+  endpoints:
+    - port: http-metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: argocd-repo-server
+  namespace: argocd
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-repo-server-metrics
+      app.kubernetes.io/part-of: argocd
+  endpoints:
+    - port: http-metrics
