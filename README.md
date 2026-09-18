@@ -432,8 +432,13 @@ wave 22 already sits after every Ingress. Step 11 is genuinely last and
 genuinely optional: the mirror it configures is a cache, so nothing in the
 cluster waits on it. Install it **after** the cluster is up rather than before
 — a mirror pointing at a Nexus that does not exist yet leans on containerd's
-fallback to the upstream registry, which is documented k3s behaviour but has
-not been measured on this host (see `platform/nexus/README.md`).
+fallback to the upstream registry. That fallback has since been measured on
+this host, once (spec §17.7, 2026-09-18): with the mirror down, an uncached
+image still pulled, in 2.3 s, while the endpoint stayed confirmed dead
+throughout (see `platform/nexus/README.md`). That is exactly what a cold
+rebuild also needs, since Nexus's own image is pulled through containerd —
+but it is a result proven on this host and this containerd version, not a
+general guarantee.
 
 ## Known gaps
 

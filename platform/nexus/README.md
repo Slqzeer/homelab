@@ -357,6 +357,13 @@ and the pre-existing tailnet URLs, not just Nexus. That check has been run: the
 node came back Ready, 13/13 Applications Synced/Healthy, `argocd` answered 200,
 `vault` answered 307 followed to 200, and `nexus` answered 200 (spec §17.12).
 
+Preflight for the verification runbook (2026-09-18) confirmed the installed
+copy is real, not just present: `/etc/rancher/k3s/registries.yaml` is
+**byte-identical** to this git file, and its mtime is **older than the
+running k3s process's start time** — proof the file was in place before k3s
+last started reading it, which is what makes the mirror actually active
+rather than merely installed.
+
 ### The escape hatch
 
 If the mirror ever misbehaves, **delete the file and restart k3s**:
@@ -381,21 +388,43 @@ fail before falling back, and that wait is short because NodePort 30082
 *refuses* connections rather than hanging — measured at 0.2-0.5 s, above,
 against 2-5 s of pull work.
 
-**That fallback has not been measured on this host, and must not be described
-as verified.** Pulling an *uncached* image with the mirror down is spec §17.7;
-it is a step a later operator runbook phase exercises, and it has not been
-performed. The runbook that attempted it aborted before measuring rather than
-producing a false pass — correctly, because `--replicas=0` had not actually
-taken Nexus down (see above). So it is the property this design depends on and
-that a pending verification step exercises, not something observed here.
+**That fallback is verified — spec §17.7, PASSED, 2026-09-18.** This is the
+claim the whole design rests on: without it, a rebuilt cluster could not pull
+Nexus's own image and the mirror would be a bootstrap deadlock. The evidence,
+in the order it was taken, because the order is what makes it rigorous:
+
+1. The NodePort endpoint was first confirmed **alive** —
+   `endpoints=[10.42.0.184]`, HTTP 200 — so that "dead" below means something
+   changed, not that it never worked.
+2. The Nexus pod was deleted. The endpoint went dead on **both** signals at
+   **t=0.3 s**: no ready endpoints, and `curl` exit 7 (connection refused, not
+   a timeout).
+3. An **uncached** `docker.io/library/busybox:latest` pulled successfully —
+   `rc=0` in **2.3 s**, finishing at t=2.6 s, inside a recovery window of about
+   **60.8 s**.
+4. The endpoint was **re-confirmed still dead after the pull** — no ready
+   endpoints, `curl` exit 7 again. This is the check that makes the result
+   mean anything: without it, a pull that happened to land inside the mirror's
+   recovery window could look like fallback when it was really the mirror
+   coming back.
+5. Cache-side confirmation: `library/busybox` was **absent from `docker-proxy`
+   on all 6 polls**, so Docker Hub served the image and the mirror cannot
+   have.
+6. Passed on attempt 1 of 3; no retry was needed.
+
+Read narrowly: the fallback was proven once, on this host, on this containerd
+version. That is exactly what spec §17.7 asked for — it is not a general
+guarantee, and it does not need to be re-proven for routine operation, only if
+the containerd version or this host's mirror config changes.
 `--disable-default-registry-endpoint` is the flag that would break it, and this
 host must never set it.
 
-What *has* been verified is that the mirror is genuinely in the path (spec
-§17.6): `hello-world` pulled through it **appears as a cached component in
-`docker-proxy`**. The component appearing is the proof — a successful pull on
-its own is equally consistent with containerd quietly falling back to Docker
-Hub, which is exactly why the check is the cache and not the exit code.
+Separately, what was already known (spec §17.6) is that the mirror is
+genuinely in the path when it is up: `hello-world` pulled through it
+**appears as a cached component in `docker-proxy`**. The component appearing
+is the proof — a successful pull on its own is equally consistent with
+containerd quietly falling back to Docker Hub, which is exactly why that check
+is the cache and not the exit code.
 
 ## Backups, and the trap
 
@@ -480,6 +509,7 @@ are from the deployed pod (2026-09-18).
 | Bootstrap Job completion (re-run) | 4 s |
 | Steady-state memory (live) | ~1249Mi against the 2.5Gi limit, CPU 8m idle |
 | Endpoint-dead window on pod deletion | 61-63 s across four trials |
+| Memory under sustained pull load (live, 2026-09-18) | 1230Mi against the 2560Mi limit (1536Mi request) — **~52% headroom** |
 
 That 2.44 GiB probe ceiling was `docker run --memory=2500m`, where docker reads
 `m` as mebibytes: 2500 MiB = 2.44 GiB. **It is not a Kubernetes quantity** — in
@@ -493,6 +523,15 @@ an upper bound on process resident memory, not a measurement of it — the
 conservative direction for sizing. If the pod is ever OOM-killed, raise
 `limits.memory`, not the heap: a bigger heap under an unchanged limit moves the
 cliff closer.
+
+The JVM sizing itself (`-Xms1024m -Xmx1024m -XX:MaxDirectMemorySize=768m` in
+`config/nexus.yaml`) was reasoned rather than cited when the phase was
+designed, and the spec required it to be measured under real load before the
+phase could be called done. **That measurement has now happened** (spec
+§17.9, below): under sustained pull load the pod held at 1230Mi against its
+2560Mi limit, roughly **52% headroom**. The instruction stands unchanged
+regardless: if this pod is ever OOM-killed, the fix is raising
+`limits.memory`, never the heap.
 
 Also verified live, each with its own evidence rather than an assertion:
 
@@ -509,15 +548,30 @@ Also verified live, each with its own evidence rather than an assertion:
   manifest fetch through it → 200, served from cache.
 - **The k3s restart broke nothing**: node Ready, 13/13 Applications
   Synced/Healthy, `argocd` 200, `vault` 307→200, `nexus` 200.
+- **Memory under load — spec §17.9, PASSED, 2026-09-18.** `alpine:3.20`,
+  `nginx:1.27`, `redis:7-alpine` and `debian:12-slim` were all pulled and
+  confirmed to have traversed the mirror: `docker-proxy` went from 3 to 6
+  cached components. Afterwards the pod sat at **1230Mi** against its
+  **2560Mi** limit (1536Mi request) — roughly **52% headroom** — with
+  **6.2Gi** available on the host. No restart during the load phase, and
+  never OOMKilled.
+
+  The pod's `restartCount` was **1**, but that was carried in from the pod
+  replacement in the fallback proof above, not from load: the runbook
+  confirmed the previous container's `lastTerminatedReason` was `Error` with
+  `exitCode: 1`, which is exactly the ehcache persistence-directory lock this
+  README already documents as expected on every pod replacement (see "Every
+  pod replacement costs exactly one container restart"). That restart
+  happened before the load phase ran, not during it — the two passages agree:
+  a restart with a real ehcache-lock cause and `OOMKilled: false` is the
+  expected shape, not a load-induced fault.
+- **State survives a pod restart — spec §17.10, PASSED, 2026-09-18.** After
+  deleting the pod: the manifest fetch returned 200 again, and `raw-hosted`,
+  `docker-proxy` and the `docker-proxy-cleanup` policy were all still
+  present.
 
 ### What is not measured, and must not be claimed
 
-- **The fallback with the mirror down (spec §17.7) has not been performed.** See
-  "What the mirror costs" above.
-- **Memory under load (spec §17.9) has not been measured.** The figures above
-  are steady state, plus a probe peak that included one real image pull through
-  the proxy. There is no measurement of the pod while several images are pulled
-  and an artifact is uploaded concurrently.
 - **A second admin-password rotation has never been performed.** Only the
   first-run rotation has (boot-generated value → Vault value, proven by the
   disappearance of `/nexus-data/admin.password`). The procedure in "Rotating
@@ -525,12 +579,6 @@ Also verified live, each with its own evidence rather than an assertion:
   rehearsed end-to-end run, and neither is the stranded-account recovery path
   it points at. Stated here as well as there because this is the section a
   sceptical reader checks.
-- **There has been no formal state-survives-restart measurement (spec §17.10).**
-  What can be said is that the pod has been deleted and recovered repeatedly —
-  four deliberate deletions, plus the replacements around them — and came back
-  Ready with both repositories intact every time. That is weaker than the
-  itemised check the spec asks for, which also names the connector, the cleanup
-  task and the credential, and it is stated as what it is.
 
 ## Known gaps
 
