@@ -14,15 +14,17 @@ manifest ever applied by hand.
 | `infrastructure/networking/` | Tailnet ACL policy — **not** reconciled by Argo CD |
 | `infrastructure/storage/` | PVC storage notes |
 | `infrastructure/cert-manager/` | Empty; deferred, see the 2026-09-02 spec |
-| `platform/` | Vault, databases, registry |
+| `platform/` | Vault, databases, registry, Nexus |
 | `platform/vault/` | HashiCorp Vault: Helm values, unsealer manifest, init/backup docs |
 | `platform/vault-secrets-operator/` | Vault Secrets Operator: Helm values, `VaultConnection`/`VaultAuth`/`VaultStaticSecret` manifests |
 | `platform/databases/postgres/` | PostgreSQL: StatefulSet, PVC, its own Vault-Secrets-Operator wiring, README |
 | `platform/databases/redis/` | Redis: ephemeral cache, its own Vault-Secrets-Operator wiring, README |
 | `platform/registry/` | GHCR pull credential: Vault Secrets Operator wiring, README covering issuing, seeding and rotating the token |
+| `platform/nexus/` | Nexus Repository CE: manifests, the bootstrap Job that configures it over REST, the probed REST schemas, and the k3s `registries.yaml` that is **not** reconciled |
 | `observability/` | Prometheus, Grafana, logging |
 | `apps` namespace | Created by `bootstrap/namespaces/namespaces.yaml`; holds `beacon` and the GHCR pull Secret it consumes — **not** the same thing as the `apps/` directory below, despite the shared name |
 | `apps/` | Currently unused; reserved for per-application values/manifests, not Application objects |
+| `artifacts` namespace | Created by `bootstrap/namespaces/namespaces.yaml`; holds Nexus, its PVC and its admin Secret. See `platform/nexus/README.md` |
 
 ## Adding a component
 
@@ -31,16 +33,17 @@ Application picks it up; nothing is applied by hand. Order components with the
 `argocd.argoproj.io/sync-wave` annotation: infrastructure 0-2, platform 10
 (`vault`), apps 20, `ingress-config` and `vso-operator` sharing wave 21
 deliberately (see below for why `vso-operator` is not right after `vault`),
-`vso-config` at 22, and wave 23 shared by `postgres`, `redis` and
-`registry` — **not** because `vso-config` creates a Secret any of them
-consumes (it does not: `postgres-credentials`, `redis-credentials` and
-`ghcr-pull` are each created by that component's own `VaultStaticSecret`,
-shipped in its own Application at wave 23), but because all three need the
+`vso-config` at 22, and wave 23 shared by `postgres`, `redis`, `registry`
+and `nexus` — **not** because `vso-config` creates a Secret any of them
+consumes (it does not: `postgres-credentials`, `redis-credentials`,
+`ghcr-pull` and `nexus-admin` are each created by that component's own
+`VaultStaticSecret`, shipped in its own Application at wave 23), but because
+all four need the
 VSO **operator** (`vso-operator`, wave 21) already running and Vault's
 configure ceremony already run — the same two preconditions `vso-config`
 itself depends on, which is why they naturally land after it rather than
 because of it. Sharing the wave rather than stacking one behind another
-lets them reconcile in parallel since none of the three depends on
+lets them reconcile in parallel since none of the four depends on
 another. Wave 23 is **not** last of all any more: `beacon` sits alone at
 wave 24, one wave above, because it is the one component in this list with
 a *real* dependency — its pod cannot pull its image until `registry` (23)
@@ -390,6 +393,23 @@ once. See `platform/vault/README.md`.
     `kubectl -n apps get vaultstaticsecret ghcr-pull` (SYNCED/HEALTHY/READY
     columns), not the Application's own status. See
     `platform/registry/README.md`.
+11. Install the k3s registry mirror: copy `platform/nexus/registries.yaml` to
+    `/etc/rancher/k3s/registries.yaml` and `sudo systemctl restart k3s`. **Not
+    reconciled by Argo CD** — k3s reads that path from the host at startup and
+    nothing in the cluster can apply it, so a rebuild does not recreate it. The
+    restart cycles every pod on this node, so do it deliberately and not as a
+    side effect of something else; `sudo` needs a real terminal here, so this
+    cannot be scripted from a non-interactive context. Without the file,
+    everything still works — containerd pulls Docker Hub directly and the
+    `docker-proxy` cache is simply unused. The escape hatch if the mirror ever
+    misbehaves is to delete the file and restart k3s again. See
+    `platform/nexus/README.md`.
+
+    Nexus's admin password needs no step of its own: it is seeded by
+    `platform/vault/configure-vault.sh` (step 9's configure half) and applied
+    to the running server by the `nexus-bootstrap` Job, not by hand. Rotating
+    it later has an ordering trap — `platform/nexus/README.md` has the
+    procedure.
 
 The order matters: step 5 must follow step 4, because the `argocd`
 namespace does not exist until `bootstrap.sh` creates it. Step 6 has the
@@ -408,7 +428,12 @@ list specifically because it needs `vault-0` unsealed first; unlike the
 other steps, doing it in numeric order requires having already done the
 step before it, not just some step before it in the plan. The configure
 half of step 9 can trail behind step 10 without urgency, precisely because
-wave 22 already sits after every Ingress.
+wave 22 already sits after every Ingress. Step 11 is genuinely last and
+genuinely optional: the mirror it configures is a cache, so nothing in the
+cluster waits on it. Install it **after** the cluster is up rather than before
+— a mirror pointing at a Nexus that does not exist yet leans on containerd's
+fallback to the upstream registry, which is documented k3s behaviour but has
+not been measured on this host (see `platform/nexus/README.md`).
 
 ## Known gaps
 

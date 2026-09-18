@@ -561,7 +561,7 @@ homelab/
 ├── platform/
 │   ├── vault/
 │   ├── databases/
-│   ├── artifactory/
+│   ├── nexus/
 │   └── registry/
 │
 ├── observability/
@@ -635,7 +635,7 @@ Exemples :
 ```text
 vault.home.arpa
 grafana.home.arpa
-artifactory.home.arpa
+nexus.home.arpa
 ```
 
 ou utiliser un sous-domaine réel contrôlé par l’utilisateur.
@@ -799,6 +799,17 @@ Cela évite d’installer immédiatement un registry interne.
 
 # 24. Phase 21 — Artifactory
 
+**Réalisé avec Sonatype Nexus Repository Community Edition, pas avec
+Artifactory.** Aucune édition gratuite de JFrog ne couvre la liste ci-dessous :
+Artifactory OSS n'a pas Docker, et JCR n'a ni Maven, ni npm, ni PyPI. Nexus CE
+couvre les deux rôles dans un seul déploiement. Voir
+`docs/superpowers/specs/2026-09-17-nexus-repository-design.md`.
+
+Périmètre livré : `raw-hosted` pour les artefacts de build versionnés, et
+`docker-proxy` comme cache pull-through de Docker Hub que k3s utilise en
+miroir. Les proxys Maven/npm/PyPI sont reportés — aucun consommateur
+aujourd'hui. Les images de ce homelab restent sur GHCR (phase 20).
+
 Artifactory est optionnel au début.
 
 Il devient pertinent pour :
@@ -813,19 +824,31 @@ promotion d’artefacts
 gestion centralisée des dépendances
 ```
 
-Architecture :
+Architecture livrée :
 
 ```text
-Artifactory
-├── PostgreSQL
-└── filestore
-      ↓
-     PVC
-      ↓
-/srv/kubernetes/storage
+Nexus Repository CE (namespace artifacts)
+├── H2 embarqué + blob store + configuration
+│     ↓
+│    PVC nexus-data (local-path)
+│     ↓
+│   /srv/kubernetes/storage
+├── 8081  → UI et raw-hosted        → nexus.taildf6cd4.ts.net
+└── 8082  → connecteur Docker       → nexus-docker.taildf6cd4.ts.net
+                                    → NodePort 30082
+                                         ↑
+                    /etc/rancher/k3s/registries.yaml (hors Argo CD)
+                                         ↑
+                                    containerd
 ```
 
-Artifactory est relativement lourd et doit être ajouté après les fondations.
+Pas de PostgreSQL : Community Edition s'arrête à 40 000 composants, bien en
+dessous des 100 000 de H2, donc une base externe n'apporterait aucune marge.
+Voir la spec, section 6.2.
+
+Nexus reste relativement lourd — environ 1,25 Gio mesurés en régime établi,
+pour une limite de 2,5 Gio — et doit être ajouté après les fondations.
+Documentation opérationnelle : `platform/nexus/README.md`.
 
 ---
 
@@ -1018,7 +1041,7 @@ Structure :
 │   └── autres/
 │
 ├── services/
-│   ├── artifactory/
+│   ├── nexus/
 │   ├── keycloak/
 │   └── autres/
 │
@@ -1088,15 +1111,27 @@ Destination :
 
 ---
 
-## Artifactory
+## Nexus Repository (rôle Artifactory)
 
 Sauvegarder :
 
 ```text
-database
-filestore
-configuration importante
+export de la base (tâche « Export databases for backup »)
+blob store
 ```
+
+Destination :
+
+```text
+/backups/services/nexus
+```
+
+**Copier la base H2 à chaud n'est pas une sauvegarde : elle se restaure
+corrompue.** Il faut d'abord lancer la tâche d'export de Nexus, puis copier
+`/nexus-data/backup/` **et** `/nexus-data/blobs/` — l'export sans les blobs
+restaure un index qui ne pointe sur rien. La phase 21 n'automatise rien de
+tout cela et n'a effectué aucun test de restauration ; c'est le travail de la
+phase 34. Procédure détaillée : `platform/nexus/README.md`.
 
 ---
 
@@ -1240,7 +1275,7 @@ GitHub
       ├── Vault Secrets Operator
       ├── PostgreSQL
       ├── Redis
-      ├── Artifactory
+      ├── Nexus Repository (raw + docker proxy)
       ├── Prometheus
       ├── Grafana
       ├── Logging (Loki)
