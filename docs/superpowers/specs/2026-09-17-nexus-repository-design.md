@@ -200,6 +200,46 @@ The admin credential exists only in Vault, in the Secret VSO derives from it,
 and inside Nexus's own H2 store. It is absent from the pod spec, from the
 process list, and from this repository.
 
+### 5.1 Post-implementation correction: two Services, one NodePort
+
+Added 2026-09-18, after implementation. The diagram above shows a single
+Service with both ports on it and **exactly one NodePort**, on 8082. The
+implementation matched the diagram literally — one Service, `type: NodePort`,
+two ports, `nodePort: 30082` pinned on the docker port only — and that did
+**not** produce what the diagram depicts.
+
+`type: NodePort` applies to **every** port a Service carries, not only the one
+declaring a number. Kubernetes therefore auto-assigned a second node port to
+the 8081 UI/API port. Confirmed live on 2026-09-18: `http://<node>:30708/`
+answered the REST API **anonymously over plaintext HTTP from the LAN**, listed
+all nine repositories, served the admin login form in cleartext, and answered
+on this host's tailnet address as well — bypassing the Tailscale Ingress and
+its TLS entirely. Anonymous read is enabled on purpose (§9, for the mirror), so
+that exposure was not theoretical. Being auto-assigned, the port also changed
+on every Service re-creation and so could not be firewalled deterministically.
+
+**The fix is to split the Service**, not to pin 8081's node port — pinning
+would have made the exposure deterministic rather than removed it:
+
+- `nexus` is **ClusterIP**, carrying port 8081 only. The `nexus` Ingress and
+  the bootstrap Job use it; neither needs a node port.
+- `nexus-docker` is **NodePort**, carrying port 8082 only, with `nodePort:
+  30082` pinned and the same `app: nexus` selector. The `nexus-docker` Ingress
+  points at it.
+
+`registries.yaml` and the mirror are unchanged: `http://127.0.0.1:30082` still
+names the same number and still reaches the same pod. The bootstrap Job's own
+Docker check moves with the port — it now asks
+`nexus-docker.artifacts.svc:8082`, because a ClusterIP Service routes only the
+ports it declares. With the split in place the diagram above is true again in
+the respect that matters: **one NodePort, on 8082, and nothing else published
+to the node.** Read its single `Service nexus` box as two Services, split on
+the line between 8081 and 8082.
+
+One sentence in §6.3 called that NodePort "host-local"; it never was, and it is
+corrected in place below. `127.0.0.1` is the *client* address written in
+`registries.yaml`; the listener binds all interfaces on the node.
+
 ## 6. Facts verified from vendor documentation
 
 Everything in this section was read from vendor docs on 2026-09-17, not
@@ -246,11 +286,17 @@ real Let's Encrypt certificate per hostname, and no wildcard certificate or
 path rewriting is involved. Hence N16.
 
 The tailnet hostname and the NodePort of §8 are not redundant, and neither
-replaces the other: the NodePort is plain HTTP, host-local, and exists for
-containerd, which cannot use cluster DNS; the hostname carries real TLS and
-exists for `docker` clients, on this machine or any other tailnet device, which
-should not be configured to trust an insecure registry. Cutting either one
-costs a consumer.
+replaces the other: the NodePort is plain HTTP and exists for containerd, which
+cannot use cluster DNS; the hostname carries real TLS and exists for `docker`
+clients, on this machine or any other tailnet device, which should not be
+configured to trust an insecure registry. Cutting either one costs a consumer.
+
+**Corrected 2026-09-18:** an earlier revision of this paragraph called the
+NodePort "host-local". It is not. `127.0.0.1` is the *client* address written
+into `registries.yaml`; the listener binds every interface on the node, so the
+docker port is reachable from the LAN and the tailnet too. That is why only
+the docker port may be published this way, and why the UI/API port is not —
+see §5.1.
 
 
 ### 6.4 containerd always falls back — which is what makes a rebuild possible
@@ -587,3 +633,46 @@ than an assertion:
 12. All 13 Applications Synced/Healthy afterwards, and both pre-existing tailnet
     URLs still reachable. A phase that quietly breaks Argo CD's or Vault's
     ingress has not passed.
+
+### Post-implementation amendment to §17.9: restart count
+
+Added 2026-09-18, after implementation. §17.9 was executed expecting a
+**restart count of 0** after the load phase (the plan's Task 6 step 8 states it
+in those words). That is **unachievable on this Deployment**, and the check was
+amended rather than failed.
+
+Every pod replacement here costs **exactly one** container restart — 6 of 6
+observed. Deleting the pod is handled by the ReplicaSet, which creates the
+replacement as soon as the old pod is marked for deletion; both briefly hold
+the ReadWriteOnce PVC (legal on one node), ehcache's persistence-directory lock
+file conflicts, the first start fails with reason `Error`, `exitCode: 1`, and
+the retry succeeds about 20 s later. `strategy: Recreate` does not govern this
+— it governs rollouts, not deletions — and neither a `preStop` hook nor a
+longer grace period would help, for the same reason.
+
+**What §17.9 asserts instead**, all four together:
+
+- **no restart *during* the load phase**, measured against the baseline taken
+  immediately before it;
+- the **same pod throughout**, pinned by name rather than by label;
+- **never `OOMKilled`** — checked separately and unconditionally, because that
+  is the condition §7's sizing actually turns on;
+- a **carried-in** restart count accepted **only** when the previous
+  container's log names the ehcache lock. A count with no such log entry fails
+  the check.
+
+Verified under that wording on 2026-09-18: 1230Mi against a 2560Mi limit, no
+restart during load, never OOMKilled, and the one carried-in restart traced to
+the ehcache lock. `platform/nexus/README.md` carries the same amendment in its
+"Every pod replacement costs exactly one container restart" section.
+
+### Post-implementation note: §17.4 has no captured evidence
+
+Added 2026-09-18, after implementation. Eleven of the twelve checks above are
+evidenced. **§17.4 is not.** The operator ran `configure-vault.sh` a second
+time, but its output was never captured or inspected, so the guard's
+`already present, leaving the credential alone` line and the "prints no
+password" half are both unconfirmed here; the guard was only ever read
+statically. What would close it, and why it matters, is recorded in
+`platform/nexus/README.md` under "What is not measured, and must not be
+claimed". Do not describe §17 as fully verified until that re-run is captured.

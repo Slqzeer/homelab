@@ -14,7 +14,7 @@ into the web UI.
 | Edition the server reports | `Nexus/3.96.1-01 (COMMUNITY)` |
 | UI and raw | <https://nexus.taildf6cd4.ts.net> |
 | Docker clients | <https://nexus-docker.taildf6cd4.ts.net> |
-| containerd mirror | `http://127.0.0.1:30082` (NodePort, pinned) |
+| containerd mirror | `http://127.0.0.1:30082` — NodePort, pinned, on Service `nexus-docker` |
 
 - `platform/nexus/config/` — the only directory Argo CD reconciles.
 - `platform/nexus/rest-schemas.md` — every REST endpoint, body and status code
@@ -269,6 +269,34 @@ no duplicate connector. Tasks are not in that list because the Job creates
 none — the only cleanup task is the product's own (see "Community Edition's
 limits"), so there was never a task for a re-run to duplicate.
 
+## The Job can complete green with the mirror unverified
+
+The last thing `bootstrap.sh` does is fetch a manifest anonymously through the
+Docker connector (`$NEXUS_DOCKER/v2/library/alpine/manifests/3.20`). It is the
+**only automated check that the connector serves anything at all**, and it is
+deliberately warning-only:
+
+- `200` → `anonymous read OK`.
+- `401`/`403` → `ANONYMOUS READ REFUSED` and the Job **fails**. That is the
+  fault this check exists to catch: anonymous access off means containerd
+  cannot pull.
+- anything else — `000`, `404`, `502` — → `anonymous read inconclusive`, and
+  the script **exits 0**.
+
+That third branch is intentional. The first fetch of that manifest goes
+upstream to Docker Hub, so a transient egress failure lands there, and an
+egress blip should not fail an Argo CD sync. The cost is a **false green**: the
+Job reports `Complete`, the `nexus` Application reports `Synced`/`Healthy`, and
+nothing anywhere else says that the mirror was never exercised. The two
+`inconclusive` lines in the Job log are the only signal, and nothing reads
+them for you.
+
+So a green sync is not evidence the Docker connector works. **Read the Job log
+and require the literal `anonymous read OK` line**; if it says `inconclusive`,
+check port 8082 on the pod and this host's egress before assuming the mirror is
+live. The cache-side check in "What the mirror costs" — an image appearing as a
+component in `docker-proxy` — is the stronger proof, and it is manual.
+
 ## Taking Nexus down — `--replicas=0` does not work
 
 ```
@@ -323,6 +351,53 @@ carries the atomic-list server-side-apply trap documented at length in
 `platform/databases/postgres/config/postgres.yaml`). Re-architecting against
 two explicit spec decisions to remove a self-healing 20-second hiccup is not a
 trade worth making here.
+
+## Two Services, and the NodePort that published the UI
+
+`config/nexus.yaml` defines **two** Services for one pod, and the split is a
+security fix rather than tidiness:
+
+| Service | Type | Port | Used by |
+| --- | --- | --- | --- |
+| `nexus` | ClusterIP | 8081 (`http`) | the `nexus` Ingress, the bootstrap Job |
+| `nexus-docker` | NodePort 30082 | 8082 (`docker`) | containerd via `registries.yaml`, the `nexus-docker` Ingress |
+
+Originally there was one Service, `type: NodePort`, carrying both ports with
+`nodePort: 30082` pinned on 8082 alone. **`type: NodePort` applies to every
+port a Service carries**, not only the one that declares a number, so
+Kubernetes quietly auto-assigned a second node port — 30708, on the 8081
+UI/API port. Nobody chose it, eleven reviews did not notice it, and it was
+live: `http://192.168.1.201:30708/service/rest/v1/status` answered **200
+anonymously over plaintext HTTP from the LAN**, the same address listed all
+nine repositories anonymously, the admin login form was served in cleartext,
+and it answered on this host's tailnet address too — bypassing the Tailscale
+Ingress and its TLS entirely. Anonymous read is enabled here on purpose, for
+the mirror, so none of that needed a credential. Being auto-assigned, the port
+also changed on every Service re-creation, so it could not even be firewalled
+deterministically.
+
+Pinning 8081's node port would have made the exposure predictable, not removed
+it. Splitting the Service removes it: the only thing published to the node is
+now the docker port, which is what `registries.yaml` needs and nothing more.
+**The docker NodePort is still not host-local** — `127.0.0.1` is the *client*
+address written into `registries.yaml`; the listener binds every interface on
+this node, so 30082 is reachable from the LAN and the tailnet as well. It
+serves the Docker Registry v2 API of a pull-through cache with anonymous read,
+which is the exposure this design accepts knowingly; the UI, the REST API and
+the login form are not part of it any more.
+
+One consequence worth knowing before you debug the Job: its final
+anonymous-read check talks to **`nexus-docker.artifacts.svc:8082`**, not
+`nexus.artifacts.svc:8082`. A ClusterIP Service routes only the ports it
+declares, so the old address stopped resolving to anything the moment `nexus`
+lost 8082 — and because that check is warning-only (see "The Job can complete
+green with the mirror unverified"), getting it wrong would have produced a
+permanently `inconclusive` line and a green sync, not a failure.
+
+If you rebuild this: keep `nodePort: 30082` pinned on `nexus-docker`, because
+`/etc/rancher/k3s/registries.yaml` names that number and Argo CD does not
+reconcile that file — a reassignment breaks image pulls silently. And do not
+merge the two Services back together for neatness.
 
 ## The mirror file git cannot apply: `registries.yaml`
 
@@ -580,6 +655,32 @@ Also verified live, each with its own evidence rather than an assertion:
   it points at. Stated here as well as there because this is the section a
   sceptical reader checks.
 
+- **Spec §17.4 has no captured evidence — `configure-vault.sh` re-run.** The
+  check reads: *a re-run leaves the existing password unchanged, and prints no
+  password at any point.* The operator did run the ceremony a second time, but
+  its output was never captured or inspected here, so both halves are
+  unconfirmed. The guard was only ever read **statically**, in the script, and
+  reading an `if` is not running it. Eleven of the twelve §17 checks are
+  evidenced; this one is not, and §17 must not be described as fully verified
+  until it is.
+
+  **What would close it:** one re-run of the ceremony with its output kept,
+  showing the literal `already present, leaving the credential alone` line and
+  **no password anywhere in the output**. It needs an interactive `vault login`
+  with the root token, which lives only in the operator's password manager, so
+  no agent can do it.
+
+  **Why it matters rather than being pedantry:** the guard is
+  `if vault kv get homelab/nexus`. That read failing for any reason **other
+  than absence** — a policy change, a mount rename, a transient 5xx — falls
+  through to the `else`, which **generates a fresh password and writes it**.
+  VSO republishes `nexus-admin` within `refreshAfter: 60s`, Nexus keeps the old
+  hash in its H2 store, and the old value is gone. That is exactly the
+  stranded-admin scenario "Rotating the admin password" says must never happen,
+  and its recovery is the un-rehearsed H2-edit path above. A guard that is
+  wrong only on the unhappy path is the kind that stays wrong until the day it
+  matters.
+
 ## Known gaps
 
 - **No Maven, npm or PyPI proxies.** Nothing in this cluster builds a Maven, npm
@@ -590,9 +691,10 @@ Also verified live, each with its own evidence rather than an assertion:
   credential is already wired in (phase 20, `platform/registry/`). A second copy
   earns nothing. Decision N3.
 - **No `NetworkPolicy`** — for Nexus or for anything else in this cluster. Every
-  pod can reach `nexus.artifacts.svc` on 8081 and 8082, and anonymous read is
-  enabled on purpose so containerd can pull. This is the cluster-wide gap
-  recorded in the root README, not a Nexus-specific one.
+  pod can reach `nexus.artifacts.svc` on 8081 and
+  `nexus-docker.artifacts.svc` on 8082, and anonymous read is enabled on
+  purpose so containerd can pull. This is the cluster-wide gap recorded in the
+  root README, not a Nexus-specific one.
 - **The bootstrap Job mounts the same RWO PVC as the Deployment.** That is legal
   only because this is a single node: `ReadWriteOnce` is a per-node constraint,
   not a per-pod one. On a second node the Job would be unschedulable or the

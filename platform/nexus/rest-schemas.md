@@ -315,11 +315,21 @@ the root-level registry endpoint; path-based access on 8081
 
 Both repositories are **not idempotent**. Verified on the probe:
 
-| Repeat call | Result |
-|---|---|
-| duplicate `POST …/repositories/raw/hosted` | `400` — `[{"id":"PARAMETER name","message":"Name is already used, must be unique (ignoring case)"}]` |
-| duplicate `POST …/repositories/docker/proxy` | `400` |
-| `PUT /service/rest/v1/repositories/raw/hosted/raw-hosted` (same body) | **`204`** |
+| Repeat call | Result | Observed on |
+|---|---|---|
+| duplicate `POST …/repositories/raw/hosted` | `400` — `[{"id":"PARAMETER name","message":"Name is already used, must be unique (ignoring case)"}]` | probe, 2026-09-17 |
+| duplicate `POST …/repositories/docker/proxy` | `400` | probe, 2026-09-17 |
+| `PUT /service/rest/v1/repositories/raw/hosted/raw-hosted` (same body) | **`204`** | probe, 2026-09-17 |
+| `PUT /service/rest/v1/repositories/docker/proxy/docker-proxy` (same body) | **`204`** | live, 2026-09-18 |
+
+The docker-proxy `PUT` row came later and from a different source than the rest
+of this file: it was **not** exercised on the probe, and the `204` above was an
+extrapolation from `raw-hosted` until the deployed bootstrap Job was re-run on
+the cluster on 2026-09-18 and its log read `docker-proxy: updated (204)`. The
+extrapolation was right, and it is now an observation — full log in
+`.superpowers/sdd/2026-09-17-nexus-repository/verification-report.md` §1d. The
+cleanup-policy `PUT` on the same run returned **`200`**, not `204`, as §5
+already records.
 
 A bootstrap that may run twice should `GET` the repository first and skip, or
 use the `PUT …/{format}/{type}/{name}` update form, which is idempotent.
@@ -766,10 +776,17 @@ What was actually established, and what was not:
   naming a cleanup policy that does not exist is refused.
 - **Proven: steps 4, 5 and 6 are not re-runnable** — each returns `400` on a
   second run, with `PUT` as the idempotent alternative (see §4 and §5).
-- **Not tested: re-running steps 1, 2 or 3.** The probe ran each once. The EULA
-  POST is one-way (`"accepted": false` returns `500`), and both realm and
-  anonymous calls are `PUT`s of complete desired state, so all three *look*
-  idempotent — but that is inference, not an observation.
+- **Re-running steps 1, 2 and 3 is now observed, not inferred.** The probe ran
+  each once, and this file previously recorded them as untested: the EULA POST
+  is one-way (`"accepted": false` returns `500`), and both realm and anonymous
+  calls are `PUT`s of complete desired state, so all three *looked* idempotent.
+  A second run of the deployed bootstrap Job against the live server on
+  **2026-09-18** confirmed it, with the same status codes as the first run:
+  `accepted (204)`, `active realms set (204)`, `anonymous access enabled
+  (200)`. That run took 4 s and produced no duplicate of anything. Full log in
+  `.superpowers/sdd/2026-09-17-nexus-repository/verification-report.md` §1d.
+  Read narrowly: this is one re-run on one instance where the desired state had
+  not changed, which is the case the bootstrap actually re-runs in.
 - **Not tested: whether an unaccepted EULA blocks steps 4-6.** Acceptance
   cannot be undone, so the ordering of step 1 could not be challenged. It is
   placed first because it costs one call and removes the question.

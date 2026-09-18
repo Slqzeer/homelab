@@ -15,24 +15,53 @@ metadata:
   name: nexus
   namespace: artifacts
 spec:
-  # NodePort, not ClusterIP, and only because of the docker port. containerd
-  # runs on the HOST: it does not use cluster DNS, so it cannot resolve
-  # nexus.artifacts.svc, and routing its layer pulls through the tailnet proxy
-  # would make every image pull depend on the Tailscale operator. A NodePort on
-  # 127.0.0.1 needs neither. See spec section 8.
-  type: NodePort
+  # ClusterIP, and carrying 8081 ONLY. Both halves of that are deliberate, and
+  # they are the same decision: `type: NodePort` applies to EVERY port a
+  # Service carries, not only the one that declares a nodePort number. This
+  # Service was originally one NodePort object with both ports on it, so
+  # Kubernetes auto-assigned a node port to 8081 as well -- and the UI, the
+  # REST API and the login form answered on it, in plaintext, on every
+  # interface of this host, with anonymous access enabled. Nobody chose that
+  # port, so it also changed on every re-creation and could not be firewalled.
+  # Splitting the docker port into its own Service below is what removes it;
+  # pinning 8081's node port would only have made the exposure predictable.
+  #
+  # This is the Service the `nexus` Ingress and the bootstrap Job use, both of
+  # which speak cluster-internal DNS and need no node port at all.
+  type: ClusterIP
   selector:
     app: nexus
   ports:
     - name: http
       port: 8081
       targetPort: 8081
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexus-docker
+  namespace: artifacts
+spec:
+  # A SECOND Service, existing only so that `type: NodePort` applies to the
+  # docker port and to nothing else. See the note above: one Service cannot be
+  # NodePort for 8082 and ClusterIP for 8081.
+  #
+  # The node port is needed because containerd runs on the HOST: it does not
+  # use cluster DNS, so it cannot resolve nexus.artifacts.svc, and routing its
+  # layer pulls through the tailnet proxy would make every image pull depend on
+  # the Tailscale operator. See spec section 8.
+  type: NodePort
+  selector:
+    app: nexus
+  ports:
     - name: docker
       port: 8082
       targetPort: 8082
       # Pinned, not auto-assigned: /etc/rancher/k3s/registries.yaml names this
       # number and that file is not reconciled by Argo CD. A reassignment here
-      # would break image pulls silently on the next rebuild.
+      # would break image pulls silently on the next rebuild. The mirror config
+      # is unchanged by the split -- it still points at
+      # http://127.0.0.1:30082, which this Service keeps serving.
       nodePort: 30082
 ---
 apiVersion: v1

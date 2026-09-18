@@ -505,6 +505,16 @@ spec:
 Substitute the tag and `failureThreshold` recorded in Task 2 where this shows
 `NEXUSTAG` and `FAILURETHRESHOLD`.
 
+**Superseded 2026-09-18 — do not copy the Service below verbatim.** The single
+`type: NodePort` Service written here publishes *every* port it carries, so
+Kubernetes auto-assigned a node port to 8081 as well and the UI, REST API and
+login form answered in plaintext on every interface of this host. The shipped
+manifest splits it: `nexus` is ClusterIP with port 8081 only, and a second
+Service `nexus-docker` is NodePort with port 8082 pinned at 30082. See spec
+§5.1 and `platform/nexus/config/nexus.yaml`. The "A NodePort on 127.0.0.1"
+sentence below is also wrong — 127.0.0.1 is the *client* address in
+`registries.yaml`; the listener binds all interfaces.
+
 ```yaml
 # Nexus Repository Community Edition -- phase 21, filling the roadmap's
 # "Artifactory" role with a different product. Spec section 2 has the argument:
@@ -1176,6 +1186,11 @@ registry root. One hostname per endpoint is also what `argocd`, `vault` and
 its own proxy.
 
 - [ ] **Step 1: Write `infrastructure/ingress/config/nexus-ingress.yaml`**
+
+**Amended 2026-09-18:** the `nexus-docker` Ingress below must name Service
+`nexus-docker`, not `nexus` — the docker port moved to its own Service when the
+NodePort exposure described at spec §5.1 was fixed. The "host-local" claim in
+the header comment is also wrong; see spec §6.3's dated correction.
 
 ```yaml
 # Nexus on the tailnet: the UI and raw repository at

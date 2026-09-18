@@ -17,6 +17,15 @@
 # /nexus-data/admin.password no longer exists, so the script authenticates with
 # the Vault password instead of the boot-generated one.
 #
+# BOTH objects carry sync-wave "1", above the Deployment, Service and PVC,
+# which are all at the default wave 0. Spec section 9.1 asks for the wave AND
+# the script's own wait loop, and is explicit that the wave alone is not
+# enough: Argo CD advances a wave when the Deployment reports Healthy, and a
+# Nexus pod is Ready before its REST API accepts writes. The wave removes the
+# common case of the hook opening a connection to a pod that does not exist
+# yet; the wait loop covers the rest. Within a wave Argo CD applies a
+# ConfigMap before a Job, so the script is always in place when the pod starts.
+#
 # Every endpoint, body and status code the script uses was observed against
 # sonatype/nexus3:3.96.1 and is recorded in platform/nexus/rest-schemas.md.
 # That file is the authority; do not "correct" a payload here from upstream
@@ -31,6 +40,8 @@ metadata:
   annotations:
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    # Above the Deployment's default 0 -- see the header comment.
+    argocd.argoproj.io/sync-wave: "1"
 spec:
   # Two attempts, not the default six. Every failure mode here is either
   # permanent (a schema mismatch) or slow (Nexus not up yet, which the wait
@@ -122,6 +133,9 @@ metadata:
   annotations:
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    # The same wave as the Job that mounts it, not an earlier one: hook
+    # objects in one wave are applied in kind order, ConfigMap before Job.
+    argocd.argoproj.io/sync-wave: "1"
 data:
   bootstrap.sh: |
     #!/bin/sh
@@ -147,13 +161,32 @@ data:
     # reaches it through nodePort 30082. The path-based route on 8081 has
     # curl-only evidence behind it and nothing depends on it, so the anonymous
     # check at the end asks the port that matters.
-    NEXUS_DOCKER=http://nexus.artifacts.svc:8082
+    #
+    # nexus-docker, NOT nexus: the docker port lives on its own Service so
+    # that the NodePort publishes only it (see config/nexus.yaml). The nexus
+    # Service is ClusterIP with port 8081 alone, so nexus.artifacts.svc:8082
+    # is NOT routed and would leave the check below reporting `inconclusive`
+    # for ever.
+    NEXUS_DOCKER=http://nexus-docker.artifacts.svc:8082
     BOOTPW=/nexus-data/admin.password
 
     # Credentials reach curl through --config/-K and request bodies through
     # --data-binary @file, never as arguments. A password on a command line is
     # visible in `ps` to anything sharing the pod's PID namespace -- the rule
     # platform/vault/configure-vault.sh and the Vault unsealer already follow.
+    #
+    # ONE EXCEPTION, and it is load-bearing: the three `printf` lines that
+    # write $AUTHFILE below and the one that writes $PWBODY do pass a
+    # credential as an argument. That is safe here ONLY because
+    # `printf` is a SHELL BUILTIN in this image -- verified on the pinned tag:
+    # `type printf` answers `printf is a shell builtin` under BusyBox v1.37.0
+    # ash, so no process is forked and nothing ever appears in argv. The
+    # dependency is real: /usr/bin/printf also exists in this image (a busybox
+    # symlink), so a future base image whose /bin/sh resolves printf to that
+    # binary instead would silently put both credentials into a visible
+    # process's arguments. If the image or its shell changes, re-check
+    # `type printf` before trusting these lines, or rewrite them to write the
+    # file via a heredoc.
     AUTHFILE=$(mktemp)
     PWBODY=$(mktemp)
     BODY=$(mktemp)
@@ -466,7 +499,12 @@ data:
     # components at 40,000 and says nothing -- it PAUSES rather than erroring,
     # so a proxy that has silently stopped caching looks exactly like one that
     # is merely slow. A Docker proxy accrues one component per cached tag.
-    # Nexus creates and maintains the task that enforces this policy itself.
+    # Nexus creates and maintains the task that enforces this policy itself --
+    # see rest-schemas.md section 5, which carries the three independent
+    # checks behind that claim (live GET /service/rest/v1/tasks, the pod's own
+    # startup log line, and disassembly of the shipped CleanupBootService).
+    # That is also why this script must NOT create a task: the same code path
+    # calls removeDuplicates(), so a second copy is deleted at the next restart.
     #
     # /service/rest/internal/, not /service/rest/v1/. The v1 path the vendor
     # documents returns 404 on this build and is absent from its own
@@ -515,8 +553,9 @@ data:
 
     echo "==> repository docker-proxy"
     # docker.httpPort 8082 IS the connector -- there is no separate object to
-    # create, and the Service already publishes that container port on
-    # nodePort 30082 for containerd. forceBasicAuth false routes Docker
+    # create, and the nexus-docker Service (the NodePort one; nexus itself is
+    # ClusterIP) already publishes that container port on nodePort 30082 for
+    # containerd. forceBasicAuth false routes Docker
     # clients through the Bearer Token realm instead of HTTP basic auth,
     # which is what lets containerd pull anonymously.
     cat > "$BODY" <<'JSON'
