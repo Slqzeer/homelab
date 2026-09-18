@@ -65,3 +65,17 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: artifacts
+---
+# Prometheus, Grafana and their exporters -- workstation-plan phases 22 and
+# 23, built as one release because Grafana is a subchart of
+# kube-prometheus-stack. See docs/superpowers/specs/
+# 2026-09-18-monitoring-stack-design.md.
+#
+# The exporters for PostgreSQL and Redis do NOT live here: they sit in
+# `databases`, beside what they scrape, because each needs that namespace's
+# credential Secret and a VaultAuth ServiceAccount must reside in the
+# consuming Secret's namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring

@@ -214,4 +214,85 @@ vault write auth/kubernetes/role/vso-nexus \
     token_policies=vso-nexus-read \
     ttl=1h
 
+echo "==> seeding homelab/grafana"
+if vault kv get homelab/grafana >/dev/null 2>&1; then
+  echo "    already present, leaving the credential alone"
+else
+  # Generated here and never displayed, exactly as the postgres, redis and
+  # nexus blocks above.
+  #
+  # Alphanumeric only -- this password is set as Grafana's admin password and
+  # may be pasted into a browser login; a / or @ survives neither round trip
+  # predictably.
+  #
+  # Written to a file so that only the FILENAME becomes an argument -- a
+  # password on a command line is visible in `ps`.
+  PWFILE=$(mktemp)
+  trap 'rm -f "$PWFILE"' EXIT
+  head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32 > "$PWFILE"
+  vault kv put homelab/grafana username=admin password=@"$PWFILE" >/dev/null
+  rm -f "$PWFILE"
+  echo "    generated"
+fi
+
+echo "==> policy vso-grafana-read"
+# The data/ segment is REQUIRED and is not a typo -- see the note on
+# vso-canary-read above.
+vault policy write vso-grafana-read - <<'POLICY'
+path "homelab/data/grafana" {
+  capabilities = ["read"]
+}
+POLICY
+
+echo "==> role vso-grafana"
+# bound_service_account_names must match the ServiceAccount created in
+# observability/monitoring/config/vault-secrets.yaml, and audience must match
+# that file's VaultAuth spec.kubernetes.audiences.
+vault write auth/kubernetes/role/vso-grafana \
+    bound_service_account_names=grafana \
+    bound_service_account_namespaces=monitoring \
+    audience=vault \
+    token_policies=vso-grafana-read \
+    ttl=1h
+
+echo "==> seeding homelab/postgres-exporter"
+if vault kv get homelab/postgres-exporter >/dev/null 2>&1; then
+  echo "    already present, leaving the credential alone"
+else
+  # Generated here and never displayed, exactly as the postgres, redis and
+  # nexus blocks above.
+  #
+  # Alphanumeric only: a / or @ inside a password breaks connection URLs in
+  # ways that surface far from the cause.
+  #
+  # Written to a file so that only the FILENAME becomes an argument -- a
+  # password on a command line is visible in `ps`.
+  PWFILE=$(mktemp)
+  trap 'rm -f "$PWFILE"' EXIT
+  head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32 > "$PWFILE"
+  vault kv put homelab/postgres-exporter username=exporter password=@"$PWFILE" >/dev/null
+  rm -f "$PWFILE"
+  echo "    generated"
+fi
+
+echo "==> policy vso-postgres-exporter-read"
+# The data/ segment is REQUIRED and is not a typo -- see the note on
+# vso-canary-read above.
+vault policy write vso-postgres-exporter-read - <<'POLICY'
+path "homelab/data/postgres-exporter" {
+  capabilities = ["read"]
+}
+POLICY
+
+echo "==> role vso-postgres-exporter"
+# bound_service_account_names must match the ServiceAccount created in
+# observability/monitoring/targets/postgres-exporter.yaml, and audience must
+# match that file's VaultAuth spec.kubernetes.audiences.
+vault write auth/kubernetes/role/vso-postgres-exporter \
+    bound_service_account_names=postgres-exporter \
+    bound_service_account_namespaces=databases \
+    audience=vault \
+    token_policies=vso-postgres-exporter-read \
+    ttl=1h
+
 echo "==> done"
