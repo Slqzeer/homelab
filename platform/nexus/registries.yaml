@@ -1,0 +1,31 @@
+# The canonical copy of /etc/rancher/k3s/registries.yaml.
+#
+# NOT RECONCILED BY ARGO CD. k3s reads this file from the host at startup;
+# nothing in the cluster can apply it. Same arrangement as
+# infrastructure/networking/policy.hujson. Copying it into place requires
+# `sudo systemctl restart k3s`, which restarts every pod on this node.
+#
+# WHY 127.0.0.1 AND A NODEPORT, and not a Service name or the tailnet
+# hostname: containerd runs on the HOST. It does not use cluster DNS, so it
+# cannot resolve nexus.artifacts.svc -- and CoreDNS may not even be running at
+# the moment containerd needs to pull. Routing through the tailnet hostname
+# would make every layer pull depend on the Tailscale operator, which is itself
+# an image containerd has to pull.
+#
+# WHY `docker.io` EXPLICITLY AND NOT "*": with containerd 2.x, the "*" wildcard
+# breaks fallback to the upstream registry (k3s#11857). This host runs
+# containerd v2.3.4-k3s1.36, so that bug applies here. For the same reason
+# there are NO `rewrite:` rules -- those break fallback too (k3s#7007).
+#
+# WHY THIS IS SAFE ON A COLD REBUILD: containerd always tries the default
+# endpoint as a last resort, even when a mirror is configured. So on a cluster
+# with no Nexus yet, pulls -- including Nexus's own image -- go straight to
+# Docker Hub. Disabling that with --disable-default-registry-endpoint would
+# make this file a bootstrap deadlock; this host must never set that flag.
+#
+# `http://` is REQUIRED. Without the scheme containerd assumes HTTPS and every
+# pull fails against a plain-HTTP NodePort.
+mirrors:
+  docker.io:
+    endpoint:
+      - "http://127.0.0.1:30082"
