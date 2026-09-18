@@ -1,0 +1,56 @@
+# kube-prometheus-stack: Prometheus, Grafana, kube-state-metrics and
+# node-exporter. Workstation-plan phases 22 and 23, merged -- Grafana is a
+# subchart, so splitting them means installing the chart twice.
+#
+# Wave 23 -- the SAME wave as postgres, redis, registry and nexus, not 24.
+# This depends on none of them, and both redis.yaml and nexus.yaml warn
+# against stacking a wave "out of habit": sharing one means these reconcile
+# in parallel and none gates another.
+#
+# It is at or above 22, the floor vso-config.yaml establishes for anything
+# that depends on a human having run platform/vault/configure-vault.sh.
+# Grafana's admin password does.
+#
+# The ServiceMonitors are NOT here. They are custom resources needing the
+# CRDs this Application installs, so they live in monitoring-config at wave
+# 24 -- the same split, for the same reason, as vso-operator/vso-config.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "23"
+spec:
+  project: default
+  sources:
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      targetRevision: 91.4.1
+      helm:
+        # Pinned deliberately: it prefixes every object name the chart
+        # creates, so changing it renames live objects -- including the
+        # Services that grafana-ingress.yaml and the ServiceMonitors in
+        # monitoring-config reference by name.
+        releaseName: monitoring
+        valueFiles:
+          - $values/observability/monitoring/values.yaml
+    - repoURL: git@github.com:Slqzeer/homelab.git
+      targetRevision: main
+      ref: values
+    # The Vault path for Grafana's password is not part of the chart, so it
+    # needs a source of its own. path is .../config -- NOT the parent, which
+    # also holds values.yaml, and a Helm values file has no kind. Same split,
+    # and the same reason, as platform/vault/config.
+    - repoURL: git@github.com:Slqzeer/homelab.git
+      targetRevision: main
+      path: observability/monitoring/config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

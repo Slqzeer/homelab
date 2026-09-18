@@ -1,0 +1,166 @@
+# kube-prometheus-stack -- workstation-plan phases 22 and 23 in one release.
+# Chart: prometheus-community/kube-prometheus-stack 91.4.1
+#        (prometheus-operator v0.94.0, Grafana subchart 13.2.5)
+# Repo:  https://prometheus-community.github.io/helm-charts
+#
+# Design: docs/superpowers/specs/2026-09-18-monitoring-stack-design.md
+#
+# Two things here are not defaults and will look wrong to anyone who has run
+# this chart elsewhere: Alertmanager is off, and four control-plane scrapers
+# are off. Both are argued in the spec, sections 3.1 and 7. Do not "restore"
+# them without reading it.
+
+# Decision P3. No notification destination exists, and a router with nowhere
+# to route is infrastructure with no consumer. The stack's ~30 default alert
+# RULES still load and evaluate in Prometheus -- only delivery is absent.
+alertmanager:
+  enabled: false
+
+# Decision P6. On k3s these four run as goroutines inside one `k3s server`
+# process with their metrics bound to 127.0.0.1. Left enabled they are four
+# permanently red targets, and a monitoring system whose own dashboard is
+# broken teaches you to ignore it. Turning them on needs
+# --kube-scheduler-arg=bind-address=0.0.0.0 and three siblings in the k3s
+# systemd unit: a host-root edit, so an operator hand-off, deliberately not
+# taken on a single-node cluster with one etcd member.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+kubeEtcd:
+  enabled: false
+
+defaultRules:
+  # Disabling the scrapers above without disabling their rules leaves alerts
+  # that reference series nothing produces. The same is true of Alertmanager
+  # itself: its own rules select job="monitoring-kube-prometheus-alertmanager",
+  # a job that alertmanager.enabled: false above ensures never exists -- that
+  # toggle does not gate these rules, so it is disabled separately below.
+  # These six keys are the exact ones chart 91.4.1 exposes for the above --
+  # scheduler rules are split across two keys and there is no
+  # kubernetesSystemScheduler key.
+  rules:
+    alertmanager: false
+    etcd: false
+    kubeControllerManager: false
+    kubeProxy: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+prometheus:
+  prometheusSpec:
+    # 30s rather than the chart's default (unset, which resolves to 30s in
+    # the operator) -- stated explicitly so a future chart default cannot
+    # silently halve the sample rate and double the memory.
+    scrapeInterval: 30s
+
+    # Spec section 5.1. The SIZE cap is the one that protects the node;
+    # retention by time alone does not bound disk, and disk pressure here
+    # evicts pods. 12GiB against a 20Gi volume leaves room for the WAL and
+    # for compaction, which retentionSize does not govern.
+    retention: 15d
+    retentionSize: 12GiB
+
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        # Exceeding this is an OOMKill that loses the write-ahead log, which
+        # is why retentionSize exists above.
+        memory: 2Gi
+
+    # Discover ServiceMonitors in every namespace, not only this one. The
+    # targets in observability/monitoring/targets/ live in argocd, vault,
+    # kube-system and databases. Without these four lines the operator
+    # applies a release-label selector and finds none of them -- Prometheus
+    # comes up healthy and scrapes nothing, which is the failure mode this
+    # chart is most often misconfigured into.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorNamespaceSelector: {}
+    ruleSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              # local-path does not enforce capacity -- a PV is a directory
+              # on /srv, which has 850G free. Nominal, not a quota. The real
+              # bound is retentionSize above.
+              storage: 20Gi
+
+grafana:
+  # Decision P4. NO PVC. /var/lib/grafana is an emptyDir and the SQLite
+  # database is discarded on every restart.
+  #
+  # THIS MEANS A DASHBOARD EDITED IN THE UI IS LOST ON RESTART. That is the
+  # design, not a defect: plan section 26 asks that the configuration be
+  # declarative and versioned in git, and a PVC would quietly make the
+  # cluster authoritative over git instead. Anything that must survive is
+  # provisioned from a file. See this directory's README.
+  persistence:
+    enabled: false
+
+  # The admin credential comes from Vault via VSO -- see config/
+  # vault-secrets.yaml. The two key names below are the chart's defaults and
+  # are restated because the VaultStaticSecret must produce exactly these.
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+
+  # Roughly 25 dashboards shipped as ConfigMaps: nodes, pods, namespaces,
+  # workloads, kubelet, PV usage. They cover plan section 25's "CPU / RAM /
+  # nodes / pods / Kubernetes" list outright, which is why this phase adds
+  # no dashboards of its own (decision P7).
+  defaultDashboardsEnabled: true
+
+  sidecar:
+    dashboards:
+      # Label discovery stays on, so a future dashboard is one ConfigMap
+      # labelled grafana_dashboard: "1" and nothing else.
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: ALL
+    datasources:
+      # The stack provisions the Prometheus datasource itself. This phase
+      # writes no datasource manifest.
+      enabled: true
+      defaultDatasourceEnabled: true
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      memory: 64Mi
