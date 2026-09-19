@@ -1,0 +1,23 @@
+# Alloy's own metrics -- integration 7. Phase 24.
+#
+# This is the target that makes decision L11 visible. Alloy's failure mode
+# when it cannot read /var/log/pods is a pod that starts, passes its probes
+# and reports Healthy while collecting nothing: the only signals are
+# loki_source_file_* series that stay flat and a log line nobody is reading.
+# Scraping it means the Targets page answers the question instead.
+#
+# No exclusion is needed here, unlike loki.yaml: the alloy chart renders a
+# single Service.
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: alloy
+  namespace: logging
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: alloy
+      app.kubernetes.io/instance: alloy
+  endpoints:
+    - port: http-metrics

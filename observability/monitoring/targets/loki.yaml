@@ -1,0 +1,43 @@
+# Loki's own metrics -- integration 6. Phase 24.
+#
+# In `logging`, beside what it scrapes, like every other file in this
+# directory. A ServiceMonitor's default scope is its own namespace, so no
+# namespaceSelector is needed. (The Prometheus-side
+# serviceMonitorNamespaceSelector: {} is a DIFFERENT selector: it governs
+# which ServiceMonitors get discovered, not which Services this one picks.)
+#
+# The selector is not the obvious one, and the reason is worth the lines.
+# This chart renders THREE Services -- loki, loki-headless and
+# loki-memberlist -- and all three carry the same app.kubernetes.io/name and
+# app.kubernetes.io/instance pair. loki-memberlist exposes only tcp/7946 so
+# it yields no target, but loki-headless exposes http-metrics on 3100 just
+# like loki does. Selecting on the pair alone therefore scrapes the same
+# single pod twice, under two different `service` labels, and every Loki
+# series silently doubles.
+#
+# The chart signals the intent with prometheus.io/service-monitor: "false"
+# on the headless Service, and the matchExpressions below honours it. Note
+# the subtlety that makes it work: in a Kubernetes label selector, an object
+# MISSING the key satisfies NotIn. So `loki`, which carries no such label,
+# is selected; `loki-headless`, which carries "false", is not.
+#
+# helm.sh/chart is deliberately NOT in the selector: it carries the chart
+# version (loki-7.3.0) and would break on the next chart bump.
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: loki
+  namespace: logging
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: loki
+      app.kubernetes.io/instance: loki
+    matchExpressions:
+      - key: prometheus.io/service-monitor
+        operator: NotIn
+        values:
+          - "false"
+  endpoints:
+    - port: http-metrics
