@@ -17,8 +17,9 @@
 # catastrophe; this rule is what bounds ordinary growth.
 #
 # In `monitoring`: unlike the ServiceMonitors in this directory, a
-# PrometheusRule is not scoped to what it watches, and the series it reads
-# (kubelet_volume_stats_*) come from the kubelet target, not from Loki.
+# PrometheusRule is not scoped to what it watches. On this cluster
+# kubelet_volume_stats_* arrives from both kubelet and apiserver targets,
+# so both expressions pin job="kubelet" -- argument above the first expr:.
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
