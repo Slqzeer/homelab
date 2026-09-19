@@ -1,0 +1,51 @@
+# Traefik's metrics, and the k3s HelmChartConfig that enables them. Phase 22.
+#
+# Measured on the live cluster before writing this: the Traefik pod already
+# runs with --metrics.prometheus=true, --metrics.prometheus.entrypoint=metrics
+# and --entryPoints.metrics.address=:9100/tcp, already declares containerPort
+# metrics=9100, and scraping http://127.0.0.1:9100/metrics from inside the
+# pod returns 6 traefik_* metric families right now. Only the Service is
+# missing the port -- `kubectl -n kube-system get svc traefik` shows web=80
+# and websecure=443, no metrics. So this HelmChartConfig applies a Service
+# mutation, not a pod redeploy: the helm-controller upgrade adds a port to an
+# existing Service, it does not change the pod spec. The payoff is immediate
+# because the endpoint is already live and only needs a Service port to be
+# scrapable.
+#
+# Deliberately the only thing in this file so that `git revert` of the commit
+# that added it is a complete rollback.
+#
+# Traefik carries NO tailnet traffic today: every published URL here uses
+# ingressClassName: tailscale and reaches its backend through a Tailscale
+# proxy pod, never through Traefik. What this buys is edge metrics for a path
+# nothing currently takes -- which becomes worth having the moment anything
+# does.
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  # NOT this Application's destination namespace. k3s' helm-controller only
+  # reads a HelmChartConfig that sits in the same namespace as the HelmChart
+  # it modifies, and k3s puts both in kube-system. Elsewhere it is silently
+  # ignored: no error, no metrics, and a green Argo CD.
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    metrics:
+      prometheus:
+        service:
+          enabled: true
+        entryPoint: metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: traefik
+  endpoints:
+    - port: metrics
