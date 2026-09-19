@@ -4,13 +4,21 @@
 # runs with --metrics.prometheus=true, --metrics.prometheus.entrypoint=metrics
 # and --entryPoints.metrics.address=:9100/tcp, already declares containerPort
 # metrics=9100, and scraping http://127.0.0.1:9100/metrics from inside the
-# pod returns 6 traefik_* metric families right now. Only the Service is
-# missing the port -- `kubectl -n kube-system get svc traefik` shows web=80
-# and websecure=443, no metrics. So this HelmChartConfig applies a Service
-# mutation, not a pod redeploy: the helm-controller upgrade adds a port to an
-# existing Service, it does not change the pod spec. The payoff is immediate
-# because the endpoint is already live and only needs a Service port to be
-# scrapable.
+# pod returns 6 traefik_* metric families right now. Only the Service side
+# is missing -- `kubectl -n kube-system get svc traefik` shows web=80 and
+# websecure=443, no metrics. So this HelmChartConfig applies a Service
+# mutation, not a pod redeploy: the helm-controller upgrade creates a
+# separate `traefik-metrics` Service (ClusterIP, port `metrics` = 9100) and
+# leaves the existing `traefik` Service and the pod spec untouched --
+# confirmed both by rendering chart 40.1.0 with these values and on the live
+# cluster, where `traefik-metrics` now exists and is scraped successfully.
+# The payoff is immediate because the endpoint is already live and only
+# needed a Service in front of it to be scrapable.
+#
+# The ServiceMonitor below selects on app.kubernetes.io/name: traefik, which
+# matches both Services, but only traefik-metrics has a port named `metrics`
+# -- traefik itself exposes web/websecure -- so only traefik-metrics yields
+# a target. That's the intended behavior, not a selector bug to "fix".
 #
 # Deliberately the only thing in this file so that `git revert` of the commit
 # that added it is a complete rollback.
