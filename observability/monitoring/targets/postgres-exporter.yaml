@@ -107,8 +107,17 @@ spec:
               # The password is passed through a psql variable, never
               # interpolated into the SQL text, so it cannot reach a log or
               # the process list.
-              psql -v ON_ERROR_STOP=1 -v pw="$EXPORTER_PASSWORD" \
-                -c "ALTER ROLE exporter WITH PASSWORD :'pw'"
+              #
+              # This goes through stdin, not -c: psql does not expand -v
+              # variables inside a -c command string, so `-c "... :'pw'"`
+              # sends the six literal characters `:'pw'` to the server and
+              # fails with a syntax error -- proved against this database,
+              # not assumed. Piped via a quoted heredoc, the shell leaves
+              # :'pw' untouched and psql itself expands it before sending
+              # the statement, which is what -v is for.
+              psql -v ON_ERROR_STOP=1 -v pw="$EXPORTER_PASSWORD" <<'SQL'
+              ALTER ROLE exporter WITH PASSWORD :'pw';
+              SQL
               psql -v ON_ERROR_STOP=1 -c "GRANT pg_monitor TO exporter"
               echo "done"
 ---
