@@ -385,9 +385,25 @@ ServiceMonitors already there:
 | `loki.yaml` | Service `loki` | `http-metrics` (3100) | `logging` |
 | `alloy.yaml` | Service `alloy` | `http-metrics` (12345) | `logging` |
 
-Both carry `namespaceSelector: matchNames: [logging]`, because Prometheus runs
-with `serviceMonitorNamespaceSelector: {}` — discovery is cluster-wide and
-every existing target file states its own namespace this way.
+Alloy needs no such exclusion: its chart renders a single Service.
+
+Both live **in namespace `logging`** and omit `namespaceSelector` entirely,
+matching every existing file in that directory: a ServiceMonitor's default
+scope is its own namespace, so placing it beside what it scrapes is the whole
+configuration. (`serviceMonitorNamespaceSelector: {}` on the Prometheus is a
+different selector — it governs which *ServiceMonitors* Prometheus discovers,
+not which *Services* a ServiceMonitor selects.)
+
+**The Loki selector cannot be `app.kubernetes.io/name` plus `instance` alone.**
+The chart renders three Services — `loki`, `loki-headless` and
+`loki-memberlist` — and all three carry that identical label pair.
+`loki-memberlist` exposes only `tcp`/7946 and so yields no target, but
+**`loki-headless` exposes `http-metrics` on 3100 as well**, so the naive
+selector scrapes the same pod twice under two `service` labels. The chart
+signals the intent with `prometheus.io/service-monitor: "false"` on the
+headless Service, and the ServiceMonitor honours it with a `matchExpressions`
+`NotIn` requirement — which selects `loki` because a *missing* key satisfies
+`NotIn`, and rejects `loki-headless` because its value matches.
 
 The charts' own `monitoring.serviceMonitor.enabled` (Loki) and
 `serviceMonitor.enabled` (Alloy) stay **off** (L16). A chart-rendered
@@ -550,6 +566,7 @@ Every claim below is a command with an expected output, not an impression.
 | Duplicate logs after an Alloy restart | L12. hostPath positions; §11 step 9 |
 | A runaway pod fills `/srv` | §5.1. Ingest caps and `max_global_streams_per_user: 1000` bound catastrophe; the §8.4 rule bounds growth — and it only ever shows in the Prometheus UI, which its own header states |
 | Label cardinality explosion | L14, enforced twice: four labels in the collector, 1000 global streams in the server |
+| Loki scraped twice under two `service` labels | §8.1. `loki-headless` also exposes `http-metrics`; the selector excludes it by the chart's own `prometheus.io/service-monitor: "false"` label |
 | Datasource ConfigMap in the wrong namespace | §8.2. Measured `NAMESPACE` absence on the datasources sidecar; it must be `monitoring` |
 | Loki PVC destroyed by a scale-to-zero | L10. `Retain` on both retention-policy keys, against a chart default of `Delete` |
 | Unbounded rules sidecar inside the Loki pod | L19. Disabled, not merely bounded — it watches for rules this phase never ships |
