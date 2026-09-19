@@ -22,6 +22,7 @@ manifest ever applied by hand.
 | `platform/registry/` | GHCR pull credential: Vault Secrets Operator wiring, README covering issuing, seeding and rotating the token |
 | `platform/nexus/` | Nexus Repository CE: manifests, the bootstrap Job that configures it over REST, the probed REST schemas, and the k3s `registries.yaml` that is **not** reconciled |
 | `observability/monitoring/` | Prometheus, Grafana: Helm values, VSO wiring for the Grafana admin credential, every ServiceMonitor and its exporter. See `observability/monitoring/README.md` |
+| `observability/logging/` | Loki and Grafana Alloy: Helm values for both charts, the Grafana datasource, and the collector pipeline. See `observability/logging/README.md` |
 | `apps` namespace | Created by `bootstrap/namespaces/namespaces.yaml`; holds `beacon` and the GHCR pull Secret it consumes — **not** the same thing as the `apps/` directory below, despite the shared name |
 | `apps/` | Currently unused; reserved for per-application values/manifests, not Application objects |
 | `artifacts` namespace | Created by `bootstrap/namespaces/namespaces.yaml`; holds Nexus, its PVC and its admin Secret. See `platform/nexus/README.md` |
@@ -44,7 +45,16 @@ configure ceremony already run — the same two preconditions `vso-config`
 itself depends on, which is why they naturally land after it rather than
 because of it. Sharing the wave rather than stacking one behind another
 lets them reconcile in parallel since none of the five depends on
-another. Wave 23 is **not** last of all any more: two Applications sit
+another.
+
+Phase 24 added `logging` and `logging-agent` to that same wave for a
+*different* reason: they need neither the VSO operator nor Vault's configure
+ceremony — Loki runs `auth_enabled: false` and holds no credential at all —
+and nothing at wave 23 gates them. By the rule below they therefore belong at
+or below 23; stacking them higher would have broken the wave-24 invariant the
+next sentences describe, for no dependency that exists.
+
+Wave 23 is **not** last of all any more: two Applications sit
 alone at wave 24, one wave above, and each is there for its own *real*
 dependency, not out of habit. `beacon`'s pod cannot pull its image until
 `registry` (23) has created the `ghcr-pull` Secret it consumes.

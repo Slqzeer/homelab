@@ -11,12 +11,14 @@
 # unroutable on this tailnet. It still references the ProxyClass so the pod
 # stays memory-bounded.
 #
-# There is deliberately NO Ingress for Prometheus. Prometheus has no
-# authentication of any kind, and infrastructure/networking/policy.hujson is
-# currently a single {"src": ["*"], "dst": ["*"], "ip": ["*"]} grant -- so
-# publishing it would expose its admin API to every device on the tailnet.
-# Reach it with a port-forward; the command is in
-# observability/monitoring/README.md.
+# There is deliberately NO Ingress for Prometheus, and none for Loki either.
+# Neither has authentication of any kind -- Prometheus exposes an admin API,
+# Loki exposes a delete surface -- and
+# infrastructure/networking/policy.hujson is currently a single
+# {"src": ["*"], "dst": ["*"], "ip": ["*"]} grant, so publishing either
+# would hand that surface to every device on the tailnet. Reach them with a
+# port-forward; the commands are in observability/monitoring/README.md and
+# observability/logging/README.md.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

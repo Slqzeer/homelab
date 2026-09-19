@@ -941,15 +941,63 @@ Détails complets, mesures et décisions dans
 
 # 27. Phase 24 — Logging
 
-Ajouter plus tard un système de logs, par exemple Loki.
-
-Architecture :
+Livrée. Loki stocke les logs de conteneurs du cluster, collectés par un
+DaemonSet Grafana Alloy, et interrogés depuis le Grafana de la phase 23.
+L'architecture visée est donc complète :
 
 ```text
 Prometheus → métriques
 Loki       → logs
 Grafana    → visualisation
 ```
+
+**Alloy, pas Promtail** : le chart `grafana/promtail` est marqué `deprecated`
+dans l'index Helm, sa dernière version réelle date de mai 2025, et Promtail a
+atteint sa fin de vie le 2026-03-02. Le chart `loki-stack`, qui aurait livré
+les deux en une seule release, est lui aussi déprécié et fige Loki en 2.9.3.
+
+Loki tourne en mode `SingleBinary` — un seul processus, un seul pod — sur un
+PVC 10Gi `local-path`, donc sous `/srv/kubernetes/storage`, avec un stockage
+`filesystem` et une rétention de **31 jours**. Le mode par défaut du chart
+(`SimpleScalable`, neuf pods) et ses deux caches memcached — dont un qui
+réclame **8 GiB** à lui seul — sont désactivés : ce nœud n'a qu'environ 4 Gio
+disponibles.
+
+**La rétention demande trois clés, pas une.** `retention_period` seul ne
+supprime rien, parce que le `compactor: {}` par défaut du chart n'exécute
+jamais la rétention. C'est `compactor.retention_enabled` et
+`delete_request_store` qui l'arment réellement.
+
+**Loki n'a pas d'équivalent de `retentionSize`.** Contrairement à Prometheus,
+dont le plafond en taille est décrit dans `observability/monitoring/values.yaml`
+comme « la vraie limite », la seule borne ici est rétention × débit, et
+`local-path` n'applique pas la capacité du PVC. Deux choses s'y substituent :
+des plafonds d'ingestion qui bornent une catastrophe et non la croissance
+ordinaire, et une `PrometheusRule` sur l'espace libre du volume — la première
+de ce dépôt. Cette règle **ne notifie personne** : Alertmanager reste
+désactivé depuis la phase 22, elle passe au rouge dans l'UI de Prometheus et
+nulle part ailleurs.
+
+Le collecteur conserve exactement **quatre labels** — `namespace`, `pod`,
+`container`, `app` — et non les labels du pod : chaque combinaison est un flux
+distinct, et une explosion de cardinalité est ce qui tue un petit Loki, sans
+retour possible une fois écrite dans les blocs.
+
+Loki et Alloy sont scrapés par Prometheus (intégrations 6 et 7). Ce n'est pas
+décoratif : quand Alloy ne peut pas lire `/var/log/pods`, il démarre, passe
+ses probes et se déclare *Healthy* tout en ne collectant rien.
+
+Il n'y a **pas d'Ingress pour Loki**, pour la raison exacte déjà retenue pour
+Prometheus : aucune authentification, une API qui inclut une surface de
+suppression, et une policy tailnet toujours en `*` → `*`. On l'atteint par le
+datasource Grafana, ou par port-forward.
+
+Aucune sauvegarde des logs, conformément à la section 32 : perdre le volume
+coûte 31 jours de logs et rien d'autre.
+
+Détails complets, mesures et décisions (L1–L19) dans
+`docs/superpowers/specs/2026-09-19-logging-stack-design.md` et
+`observability/logging/README.md`.
 
 ---
 
