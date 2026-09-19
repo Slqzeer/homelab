@@ -854,40 +854,88 @@ Documentation opérationnelle : `platform/nexus/README.md`.
 
 # 25. Phase 22 — Prometheus
 
-Prometheus collecte :
+**Livrée fusionnée avec la phase 23 (Grafana) dans une seule release Helm**,
+`kube-prometheus-stack` — Grafana est un subchart de ce chart, donc
+l'installer deux fois reviendrait à dupliquer Prometheus et l'operator.
+Voir `docs/superpowers/specs/2026-09-18-monitoring-stack-design.md`,
+décision P2.
 
-```text
-CPU
-RAM
-nodes
-pods
-Kubernetes
-applications
-services
-```
+Prometheus collecte, via cinq intégrations livrées chacune dans son propre
+fichier sous `observability/monitoring/targets/`, chacune preuve par une
+requête PromQL le 2026-09-19 :
 
-Ses données persistantes peuvent être placées dans :
+| Cible | Requête | Résultat |
+| --- | --- | --- |
+| PostgreSQL | `pg_up` | `1` |
+| Redis | `redis_up` | `1` |
+| Vault | `vault_core_unsealed` | `1` |
+| Traefik | `traefik_config_reloads_total` | `3` |
+| Argo CD | `count(argocd_app_info)` | `15` |
 
-```text
-/srv/kubernetes/storage
-```
+18 cibles actives, toutes `up`. **Les scrapers du control-plane k3s
+(kube-scheduler, kube-controller-manager, kube-proxy, etcd) sont
+délibérément désactivés** — sur ce cluster mono-nœud ils tournent comme des
+goroutines à l'intérieur d'un seul processus `k3s server`, liés à
+`127.0.0.1` ; les activer est une modification host-root du service systemd
+k3s, un hand-off opérateur volontairement non pris ici. C'est un écart
+assumé par rapport à la liste "CPU / RAM / nodes / pods / Kubernetes /
+applications / services" ci-dessus prise dans son sens le plus large : ce
+que Prometheus scrape couvre nodes/pods/Kubernetes et cinq applications
+nommées, pas le control-plane lui-même.
 
-Il n’est généralement pas nécessaire de sauvegarder tout l’historique de métriques.
+Données persistantes sur un PVC 20Gi `local-path`, donc bien sous
+`/srv/kubernetes/storage`, avec rétention 15 jours plafonnée à 12GiB
+(`retentionSize`, la vraie limite — le PVC ne peut jamais être agrandi,
+`local-path` a `ALLOWVOLUMEEXPANSION: false`). Confirmé par un test réel :
+le pod a été supprimé puis recréé, et une requête à l'horodatage
+pré-redémarrage a retourné les mêmes séries — l'historique survit bien au
+volume, il ne repart pas vide.
+
+Aucune sauvegarde de l'historique de métriques (comme prévu ci-dessus) : une
+perte du volume coûte l'historique et rien d'autre, tout le reste
+(dashboards, règles, datasources) est reconstruit depuis git.
+
+Il n'y a **pas d'Ingress pour Prometheus** : aucune authentification
+n'existe sur ce endpoint, et la policy tailnet actuelle est une autorisation
+`*` → `*` unique — l'exposer reviendrait à publier son API d'admin à tout
+l'appareil du tailnet. On l'atteint par port-forward ; la commande exacte
+est dans `observability/monitoring/README.md`.
+
+Détails complets, mesures et décisions (P1–P18) dans la spec ci-dessus et
+dans `observability/monitoring/README.md`.
 
 ---
 
 # 26. Phase 23 — Grafana
 
-Grafana fournit :
+Grafana fournit dashboards, datasources et visualisation — **pas
+d'alerting** : Alertmanager est désactivé (décision P3, aucune destination
+de notification n'existe encore ; les ~30 règles d'alerte par défaut du
+chart continuent malgré tout à charger et à s'évaluer dans Prometheus, seule
+la livraison est absente).
 
-```text
-dashboards
-datasources
-alerting
-visualisation
-```
+**La configuration est entièrement déclarative et versionnée dans ce dépôt,
+au-delà de ce que la phrase ci-dessus visait** : Grafana tourne sans PVC
+(`persistence.enabled: false`, décision P4) — `/var/lib/grafana` est un
+`emptyDir`, donc **tout dashboard construit à la main dans l'UI est perdu au
+redémarrage suivant**. Ce n'est pas un défaut mais le but : un PVC rendrait
+le cluster vivant autoritaire sur git au lieu de l'inverse. Tout ce qui doit
+survivre est une ConfigMap étiquetée `grafana_dashboard: "1"`, ramassée
+automatiquement par le sidecar de découverte. Un redémarrage à froid prend
+environ 4 minutes et reprovisionne les ~24 dashboards embarqués par le chart
+en une seule fois — mesuré lors du redémarrage forcé du 2026-09-19, où ce
+pic a provoqué un OOMKill avant que la limite mémoire ne soit corrigée
+(`values.yaml`, 256Mi → 512Mi).
 
-Une partie importante de la configuration devrait être déclarative et versionnée dans GitHub.
+Aucun dashboard n'est ajouté par cette phase (décision P7) : les ~24
+dashboards du chart couvrent déjà la liste "CPU / RAM / nodes / pods /
+Kubernetes" ci-dessus. Publiée sur le tailnet à
+<https://grafana.taildf6cd4.ts.net> ; l'identifiant admin vient de Vault via
+VSO, jamais tapé dans l'UI.
+
+Détails complets, mesures et décisions dans
+`docs/superpowers/specs/2026-09-18-monitoring-stack-design.md` et
+`observability/monitoring/README.md`.
 
 ---
 
