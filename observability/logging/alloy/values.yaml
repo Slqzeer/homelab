@@ -34,6 +34,27 @@ controller:
           path: /var/lib/alloy
           type: DirectoryOrCreate
 
+# Decision L19, the same defect class. Verified on the live pod:
+# config-reloader carries `requests: {cpu: 10m, memory: 50Mi}` and no
+# limits -- configReloader.resources has no limits in the chart default,
+# only requests. This sidecar shares the pod with Alloy, which has its own
+# 256Mi limit above; an unbounded sidecar can push total pod usage past
+# that budget while `kubectl top pod` still reports a plausible-looking
+# figure for the pod as a whole -- exactly how a previous phase's Grafana
+# OOMKill hid behind a 408Mi pod total. The numbers match
+# observability/monitoring/values.yaml's prometheusConfigReloader block,
+# which bounds the identical image (quay.io/prometheus-operator/
+# prometheus-config-reloader v0.91.0) for the same reason; the chart's own
+# default request here is 50Mi, so this also lowers the request to match
+# that precedent, not just adds the limit.
+configReloader:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 64Mi
+
 alloy:
   # Decision L9. Adds --disable-reporting. Alloy phones home to Grafana Labs
   # by default.
