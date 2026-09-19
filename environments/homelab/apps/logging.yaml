@@ -52,6 +52,17 @@ spec:
     - repoURL: git@github.com:Slqzeer/homelab.git
       targetRevision: main
       ref: values
+    # The Grafana datasource is not part of the chart, so it needs a source
+    # of its own. path is .../loki/config -- NOT .../loki, which also holds
+    # values.yaml, and a Helm values file has no kind. Same split, and the
+    # same reason, as observability/monitoring/config and platform/vault/config.
+    #
+    # It writes into `monitoring`, not this Application's destination
+    # namespace. The manifest states its own namespace; destination.namespace
+    # is only the default for a manifest that omits one.
+    - repoURL: git@github.com:Slqzeer/homelab.git
+      targetRevision: main
+      path: observability/logging/loki/config
   destination:
     server: https://kubernetes.default.svc
     namespace: logging

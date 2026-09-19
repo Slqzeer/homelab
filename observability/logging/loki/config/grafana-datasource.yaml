@@ -1,0 +1,45 @@
+# The Loki datasource for the Grafana that phase 23 published.
+#
+# NAMESPACE: monitoring, NOT logging, and not this Application's destination
+# namespace either. Measured on the live pod 2026-09-19: grafana-sc-dashboard
+# runs with NAMESPACE=ALL, but grafana-sc-datasources carries NO NAMESPACE
+# environment variable at all and therefore watches only its own namespace.
+# Placed in `logging` this file would be silently ignored -- Grafana healthy,
+# sidecar healthy, no datasource, no error anywhere.
+#
+# It lives in THIS directory rather than under observability/monitoring/
+# because it dies with Loki: it is a logging artefact pointed at Grafana, not
+# a Grafana artefact. The `logging` Application carries it as a third source,
+# the same multi-source shape monitoring.yaml already uses for
+# observability/monitoring/config.
+#
+# The sidecar runs METHOD=WATCH, so this is picked up live. Grafana is NOT
+# restarted to apply it, which matters: phase 23's decision P4 leaves Grafana
+# without a PVC, so every restart is a ~4-minute cold start that re-provisions
+# ~24 dashboards in one burst -- the memory peak that OOMKilled it once.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasource-loki
+  namespace: monitoring
+  labels:
+    # The label the sidecar selects on. Value must be the string "1".
+    grafana_datasource: "1"
+data:
+  loki-datasource.yaml: |-
+    apiVersion: 1
+    datasources:
+      - name: Loki
+        type: loki
+        access: proxy
+        url: http://loki.logging.svc.cluster.local:3100
+        # Prometheus stays the default. A default datasource is what an
+        # unqualified panel or a fresh Explore tab resolves to, and metrics
+        # are the more common starting point on this cluster.
+        isDefault: false
+        # No basicAuth, no httpHeaderName1 for X-Scope-OrgID: the Loki this
+        # points at runs auth_enabled: false (decision L5), so a tenant
+        # header would be rejected rather than required.
+        jsonData:
+          maxLines: 1000
