@@ -141,13 +141,49 @@ grafana:
       # writes no datasource manifest.
       enabled: true
       defaultDatasourceEnabled: true
+      # The chart's default here is true and is NOT gated by
+      # alertmanager.enabled: false above -- the same oversight the
+      # defaultRules.rules.alertmanager comment already caught, in the
+      # other place this chart makes it. Left on, this provisions a
+      # datasource at http://monitoring-kube-prometheus-alertmanager
+      # .monitoring:9093/, a Service that does not exist because P3
+      # disables Alertmanager. Verified 2026-09-19:
+      # `kubectl get svc monitoring-kube-prometheus-alertmanager` ->
+      # NotFound. Grafana loads with a datasource pointing at nothing.
+      alertmanager:
+        enabled: false
+
+    # Measured 2026-09-19: grafana-sc-dashboard at 79Mi, grafana-sc-datasources
+    # at 77Mi, with no limit on either -- the chart's default here is `{}`,
+    # not a value this phase ever set. That is the same defect class
+    # infrastructure/ingress/config/nexus-ingress.yaml warns about for
+    # Tailscale proxies: "omitting it leaves the proxy unbounded (chart
+    # default resources: {}), which is how this host lost CoreDNS once."
+    # Limits below leave roughly 2x headroom over the measured figures;
+    # memory-only, no CPU limit, matching every other limits: block in this
+    # repository.
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        memory: 160Mi
 
   resources:
     requests:
       cpu: 50m
       memory: 128Mi
     limits:
-      memory: 256Mi
+      # Measured 2026-09-19: the grafana container was OOMKilled at the
+      # previous 256Mi limit (lastState reason=OOMKilled, exitCode=137) and
+      # now runs at 252Mi steady state against that same 256Mi -- 98%, no
+      # margin. The mechanism is P4: no PVC means every restart is a cold
+      # start that rebuilds SQLite from scratch and re-provisions all 24
+      # dashboards from ConfigMaps in one burst, and that burst is the
+      # memory peak. So statelessness guarantees a spike on exactly the
+      # event the limit is most likely to kill it on, which can loop. Raised
+      # to 512Mi; the node has room (limits at 66%, 4Gi available).
+      memory: 512Mi
 
 kube-state-metrics:
   resources:
