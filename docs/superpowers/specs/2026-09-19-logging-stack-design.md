@@ -305,9 +305,15 @@ and is *not* the key the StatefulSet reads.
 `observability/logging/alloy/values.yaml`. `controller.type: daemonset` is the
 chart default and is stated explicitly anyway; one node means one pod.
 
-The chart's RBAC needs **no work** — `rbac.rules` and `rbac.clusterRules` ship
-`get/list/watch` on pods, namespaces, events and nodes already. Four other
-defaults are overridden, three of them because they fail *silently*:
+The chart's default RBAC is far wider than this pipeline needs: `rbac.rules`
+ships cluster-wide `get/list/watch` on `configmaps`, `secrets`, `pods/log`,
+`replicasets`, and six `monitoring.coreos.com` kinds, bound to a
+ServiceAccount whose pod runs as `runAsUser: 0` (L20). This phase narrows it
+— `rules` is overridden to `pods` and `namespaces` only, which is all
+`discovery.kubernetes` and file tailing require; `clusterRules` is left at
+its default, whose `nodes`/`nodes/pods`/`nodes/metrics` grants are harmless.
+Five other defaults are overridden, three of them because they fail
+*silently*:
 
 **`securityContext.runAsUser: 0` (L11).** Measured: `/var/log/pods` is
 `drwxr-x--- root:root`, and the chart sets `securityContext: {}`. Without

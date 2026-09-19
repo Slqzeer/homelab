@@ -92,6 +92,21 @@ loki:
     ingestion_burst_size_mb: 6
     per_stream_rate_limit: 3MB
     per_stream_rate_limit_burst: 10MB
+    # Decision L21. The chart default is `filter-and-delete`, and
+    # auth_enabled above is false with no NetworkPolicy in this namespace --
+    # so any pod in the cluster can POST /loki/api/v1/delete?query=... and
+    # irreversibly remove logs that L18 already accepts are not backed up.
+    # The no-Ingress decision (L17) protects the tailnet boundary only; it
+    # does nothing against a pod inside the cluster. The delete API is
+    # unused here, so it is off.
+    #
+    # This does NOT touch time-based retention. retention_period above and
+    # the compactor block below drive the 31-day policy entirely
+    # independently of deletion_mode -- compactor-side expiry is a
+    # different code path from the delete API. Do not "restore" this
+    # thinking it re-enables retention; it does not, and retention was never
+    # affected by it.
+    deletion_mode: disabled
     # Decision L14, amended. This is the server-side half of the
     # four-label rule; the collector half is the stage.label_keep in
     # observability/logging/alloy/values.yaml. Loki 3.x auto-detects a
@@ -109,6 +124,20 @@ loki:
     working_directory: /var/loki/compactor
     retention_enabled: true
     delete_request_store: filesystem
+
+  # Decision L22. The chart's default `ingester.wal.replay_memory_ceiling`
+  # is 4GB, against singleBinary.resources.limits.memory: 512Mi below -- 8x
+  # the container's own cgroup limit. This ceiling is where Loki starts
+  # flushing chunks DURING WAL replay instead of accumulating them in
+  # memory; above the cgroup limit it never engages, so a large-enough WAL
+  # replays straight into an OOMKill, and then CrashLoopBackOff, because the
+  # WAL that caused the OOM is still on disk on restart. Steady state here
+  # is ~1.7 lines/sec so the WAL is normally tiny -- the trigger is
+  # precisely what the ingest caps above permit, not ordinary load. 256MB
+  # leaves headroom under the 512Mi limit for the rest of the process.
+  ingester:
+    wal:
+      replay_memory_ceiling: 256MB
 
 singleBinary:
   replicas: 1

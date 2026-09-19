@@ -20,6 +20,33 @@
 crds:
   create: false
 
+# Decision L20. The chart's default `rbac.rules` grants cluster-wide
+# get/list/watch on configmaps AND secrets, plus pods/log, replicasets, and
+# six monitoring.coreos.com kinds -- bound to a ServiceAccount whose pod runs
+# as runAsUser: 0. That reaches vault-*, grafana-admin, ghcr-pull,
+# nexus-admin and every database credential in this cluster. This pipeline
+# uses discovery.kubernetes with role = "pod" plus file tailing; it needs
+# none of it. Overriding `rules` replaces that grant with just the two verbs
+# this pipeline actually uses.
+#
+# Do NOT set `clusterRules: []`. The template renders invalid YAML when you
+# do ("did not find expected '-' indicator") -- override `rules` only and
+# leave `clusterRules` at its chart default, which grants `nodes`,
+# `nodes/pods` and `nodes/metrics`. Those are harmless (no Secret is a node)
+# and are not touched here.
+#
+# `namespaces` stays alongside `pods` even though this pipeline only paths
+# into pods. Dropping it is the exact silent failure L11 exists to prevent,
+# reintroduced by a security fix: if discovery.kubernetes needs namespace
+# metadata and doesn't have it, the DaemonSet comes up Healthy and collects
+# nothing. Namespace metadata is a cheap read; a cluster-wide Secrets grant
+# is not -- that asymmetry is the whole decision.
+rbac:
+  rules:
+    - apiGroups: [""]
+      resources: ["pods", "namespaces"]
+      verbs: ["get", "list", "watch"]
+
 controller:
   # The chart default, restated so a future chart default cannot quietly
   # turn one pod per node into one pod per cluster.
