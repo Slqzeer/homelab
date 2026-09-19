@@ -152,6 +152,18 @@ alloy:
       loki.process "pod_logs" {
         stage.cri {}
 
+        // Decision L14, amended. loki.source.file attaches `filename` on
+        // its own -- it is not produced by any rule above -- and the value
+        // is the full hostPath INCLUDING THE POD UID, so without this
+        // stage every pod restart anywhere in the cluster mints a
+        // permanent new stream. stage.cri also adds `stream` (stdout vs
+        // stderr). Do not delete this as redundant: the relabel rules
+        // above already look like they produce exactly four labels, but
+        // they don't stop these two from being attached afterward.
+        stage.label_keep {
+          values = ["namespace", "pod", "container", "app"]
+        }
+
         forward_to = [loki.write.default.receiver]
       }
 

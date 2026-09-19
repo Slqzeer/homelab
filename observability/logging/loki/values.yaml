@@ -92,6 +92,13 @@ loki:
     ingestion_burst_size_mb: 6
     per_stream_rate_limit: 3MB
     per_stream_rate_limit_burst: 10MB
+    # Decision L14, amended. This is the server-side half of the
+    # four-label rule; the collector half is the stage.label_keep in
+    # observability/logging/alloy/values.yaml. Loki 3.x auto-detects a
+    # `service_name` label on every push -- invisible in the collector
+    # config, because Alloy never sends it -- and the chart default is on.
+    # An empty list disables the heuristic instead of feeding it a guess.
+    discover_service_name: []
 
   # Decision L8. THIS is what makes retention happen. The chart's default is
   # `compactor: {}`, which means the compactor never runs retention at all --
