@@ -1,0 +1,44 @@
+# Grafana Alloy -- workstation-plan phase 24, the log collector.
+#
+# Wave 23, the SAME wave as logging.yaml rather than behind it. Alloy does
+# not gate on Loki: if Loki is not yet serving, loki.write retries with
+# backoff and Alloy reports Healthy either way, so stacking a wave here
+# would be the habit redis.yaml and nexus.yaml warn against. It needs no
+# CRD either -- crds.create is false in its values.
+#
+# Separate from logging.yaml because it is a separate chart, pinned
+# separately. Argo CD renders one chart per Application, and pinning the
+# collector independently of the store is the point.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: logging-agent
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "23"
+spec:
+  project: default
+  sources:
+    - repoURL: https://grafana.github.io/helm-charts
+      chart: alloy
+      targetRevision: 1.12.1
+      helm:
+        # Pinned for the same reason logging.yaml pins its own: it prefixes
+        # every object the chart creates, and the ServiceMonitor in
+        # observability/monitoring/targets/alloy.yaml selects the resulting
+        # Service `alloy` by name.
+        releaseName: alloy
+        valueFiles:
+          - $values/observability/logging/alloy/values.yaml
+    - repoURL: git@github.com:Slqzeer/homelab.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: logging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

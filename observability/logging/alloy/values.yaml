@@ -1,0 +1,162 @@
+# Grafana Alloy -- workstation-plan phase 24, the log collector.
+# Chart: grafana/alloy 1.12.1 (Alloy v1.19.2)
+# Repo:  https://grafana.github.io/helm-charts
+#
+# Design: docs/superpowers/specs/2026-09-19-logging-stack-design.md
+#
+# NOT Promtail. grafana/promtail is marked deprecated in the Helm index, its
+# last real release was 2025-05, and upstream Promtail reached end of life on
+# 2026-03-02.
+#
+# Three of the overrides below exist because the chart default fails
+# SILENTLY: the DaemonSet starts, passes its probes, reports Healthy, and
+# either collects nothing (securityContext) or replays every log file on
+# every restart (storagePath). A green pod is not evidence here.
+
+# Decision L13. The chart's `crds` subchart installs a monitoring.grafana.com
+# PodLogs CRD. This pipeline uses discovery.kubernetes and file tailing, not
+# PodLogs, and an unused CRD is a kind in this cluster that CI has never
+# validated.
+crds:
+  create: false
+
+controller:
+  # The chart default, restated so a future chart default cannot quietly
+  # turn one pod per node into one pod per cluster.
+  type: daemonset
+
+  # Decision L12. Where the positions file actually lives. See storagePath
+  # below for why this volume has to exist at all.
+  volumes:
+    extra:
+      - name: positions
+        hostPath:
+          path: /var/lib/alloy
+          type: DirectoryOrCreate
+
+alloy:
+  # Decision L9. Adds --disable-reporting. Alloy phones home to Grafana Labs
+  # by default.
+  enableReporting: false
+
+  # Decision L12. The chart starts the container with
+  # --storage.path=/tmp/alloy and MOUNTS NO VOLUME THERE -- verified in
+  # templates/containers/_agent.yaml, whose volumeMounts block carries only
+  # `config` and `varlog`. That path holds loki.source.file's positions, so
+  # at the default they die with the pod and Alloy re-reads every log file
+  # from byte zero on every restart -- including every restart caused by
+  # editing this file.
+  storagePath: /var/lib/alloy
+
+  # Decision L11. Measured on this host: /var/log/pods is drwxr-x--- root:root.
+  # The chart sets securityContext: {} and the image does not run as root, so
+  # WITHOUT THIS LINE the DaemonSet comes up Healthy and tails nothing at all.
+  # This is the single most important line in this file.
+  securityContext:
+    runAsUser: 0
+
+  mounts:
+    # hostPath /var/log, mounted readOnly. One mount covers both trees:
+    # /var/log/containers/*.log are symlinks INTO /var/log/pods/... , so they
+    # resolve inside it.
+    varlog: true
+    # This cluster runs containerd 2.3.4-k3s1.36. There is no /var/lib/docker.
+    dockercontainers: false
+    extra:
+      - name: positions
+        mountPath: /var/lib/alloy
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+  configMap:
+    create: true
+    # The whole collector pipeline. Validated by `alloy validate` against
+    # v1.19.2 before this file was committed -- see the plan's Task 3.
+    #
+    # K8S_NODE_NAME is supplied BY THE CHART from spec.nodeName (alongside
+    # HOSTNAME and ALLOY_DEPLOY_MODE); this file deliberately does not add a
+    # duplicate NODE_NAME of its own.
+    #
+    # On one node the node filter changes nothing. It costs six lines and
+    # keeps the pipeline correct if a second node ever appears.
+    content: |-
+      discovery.kubernetes "pods" {
+        role = "pod"
+
+        selectors {
+          role  = "pod"
+          field = "spec.nodeName=" + sys.env("K8S_NODE_NAME")
+        }
+      }
+
+      // Decision L14. EXACTLY FOUR LABELS: namespace, pod, container, app.
+      // Not the pod's labels wholesale. Every distinct combination is a
+      // separate stream, index entry and chunk set, and relabelling pod
+      // labels in is the standard way a small Loki falls over. It is also
+      // the one mistake here that cannot be undone, because the cardinality
+      // is written into blocks already on disk. Everything else about a pod
+      // stays searchable as log CONTENT, which is what Loki is good at.
+      discovery.relabel "pod_logs" {
+        targets = discovery.kubernetes.pods.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+          target_label  = "app"
+        }
+
+        // Builds /var/log/pods/*<uid>/<container>/*.log. The separator joins
+        // the two source labels into "<uid>/<container>", and the default
+        // regex (.*) captures the pair as $1.
+        rule {
+          source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+          separator     = "/"
+          action        = "replace"
+          replacement   = "/var/log/pods/*$1/*.log"
+          target_label  = "__path__"
+        }
+      }
+
+      local.file_match "pod_logs" {
+        path_targets = discovery.relabel.pod_logs.output
+      }
+
+      loki.source.file "pod_logs" {
+        targets    = local.file_match.pod_logs.targets
+        forward_to = [loki.process.pod_logs.receiver]
+      }
+
+      // stage.cri is NOT optional. containerd writes each line as
+      // "<RFC3339Nano> <stream> <F|P> <text>"; without this stage every log
+      // line in Loki carries that prefix as content and is stamped with the
+      // ingest time rather than the time it was emitted.
+      loki.process "pod_logs" {
+        stage.cri {}
+
+        forward_to = [loki.write.default.receiver]
+      }
+
+      loki.write "default" {
+        endpoint {
+          url = "http://loki.logging.svc.cluster.local:3100/loki/api/v1/push"
+        }
+      }
