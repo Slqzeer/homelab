@@ -41,6 +41,24 @@ defaultRules:
   # These six keys are the exact ones chart 91.4.1 exposes for the above --
   # scheduler rules are split across two keys and there is no
   # kubernetesSystemScheduler key.
+  #
+  # A third instance of the same trap, found FIRING on 2026-09-19: the
+  # `defaultRules.rules.prometheus` group carries
+  # PrometheusNotConnectedToAlertmanagers, which watches
+  # prometheus_notifications_alertmanagers_discovered. With alertmanager.
+  # enabled: false above, that gauge is a hard zero forever -- not
+  # intermittent, not rate-based, structurally zero -- so the alert cannot
+  # ever resolve. Verified: `ALERTS` returns exactly two series, `Watchdog`
+  # (by design) and this one, both firing. The rest of the `prometheus`
+  # group -- roughly 25 rules covering scrape health, rule-evaluation
+  # failures, TSDB and config-reload state -- is genuinely useful on this
+  # single Prometheus and stays on, so the fix is the chart's per-rule
+  # escape hatch, not `rules.prometheus: false`. Its two siblings,
+  # PrometheusErrorSendingAlertsToSomeAlertmanager and
+  # ...ToAnyAlertmanager, are rate() based and confirmed inactive (no
+  # samples), so they are left alone.
+  disabled:
+    PrometheusNotConnectedToAlertmanagers: true
   rules:
     alertmanager: false
     etcd: false
@@ -56,6 +74,25 @@ prometheusOperator:
       memory: 64Mi
     limits:
       memory: 128Mi
+
+  # Verified on the live Prometheus pod: init-config-reloader and the
+  # config-reloader sidecar both carry `{}` -- prometheusConfigReloader.
+  # resources has no chart default. Both containers share the pod with
+  # Prometheus, which has its own 2Gi limit; an unbounded sidecar can push
+  # total pod usage past that budget while `kubectl top pod` still reports a
+  # plausible-looking figure for the pod as a whole -- exactly how Task 10's
+  # Grafana OOMKill hid behind a 408Mi pod total. This key sets resources for
+  # both the init container and the sidecar at once; there is no separate
+  # key for each. Applying it restarts the Prometheus pod, which this phase
+  # already proved is safe on this PV -- history survives (see README,
+  # "The five scrape targets").
+  prometheusConfigReloader:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 64Mi
 
 prometheus:
   prometheusSpec:
@@ -86,10 +123,21 @@ prometheus:
     # applies a release-label selector and finds none of them -- Prometheus
     # comes up healthy and scrapes nothing, which is the failure mode this
     # chart is most often misconfigured into.
+    #
+    # probeSelectorNilUsesHelmValues and scrapeConfigSelectorNilUsesHelmValues
+    # below close the same hole for Probe and ScrapeConfig objects. Chart
+    # 91.4.1's values.yaml carries both (lines 4714 and 4739), defaulting
+    # true -- this repo does not currently ship a Probe or ScrapeConfig, but
+    # setting them now means all six CRD selectors behave identically, and a
+    # future one is picked up the same way a ServiceMonitor already is
+    # rather than silently dropped on the operator's default
+    # release-scoped label.
     serviceMonitorSelectorNilUsesHelmValues: false
     serviceMonitorNamespaceSelector: {}
     ruleSelectorNilUsesHelmValues: false
     podMonitorSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    scrapeConfigSelectorNilUsesHelmValues: false
 
     storageSpec:
       volumeClaimTemplate:

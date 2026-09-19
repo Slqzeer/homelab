@@ -49,6 +49,17 @@ spec:
     name: postgres-exporter
     create: true
     transformation:
+      # No `excludes: [".*"]` here, deliberately, unlike
+      # observability/monitoring/config/vault-secrets.yaml. That file's
+      # templates RENAME username/password into admin-user/admin-password,
+      # so it must drop the source keys or the Secret carries the password
+      # twice. This VaultStaticSecret has no templates at all: the Secret
+      # must carry Vault's own `username`/`password` keys verbatim, because
+      # two consumers read `password` by that exact name -- the role Job
+      # above (`EXPORTER_PASSWORD`) and the Deployment below
+      # (`DATA_SOURCE_PASS`). Adding `excludes: [".*"]` to "match the other
+      # file" would empty this Secret; VSO and Argo CD would both stay
+      # green while `pg_up` silently dropped to 0.
       excludeRaw: true
 ---
 apiVersion: batch/v1
@@ -59,8 +70,16 @@ metadata:
   annotations:
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    # Above the Deployment's default 0 -- the exporter cannot authenticate
-    # until the role exists.
+    # Above the Deployment's default 0 -- a higher wave runs LATER, so this
+    # Job creates the role AFTER the Deployment already started, not before
+    # it. There is no ordering guarantee here: the exporter comes up, fails
+    # to authenticate, and retries until this hook lands. It converges
+    # (`pg_up` = 1 confirms it), but only because the Deployment has NO
+    # readiness probe, so Argo CD calls wave 0 Healthy immediately and
+    # proceeds to wave 1 regardless of whether the exporter can actually
+    # log in yet. A connectivity-gated readiness probe added to that
+    # Deployment would deadlock this sync: wave 0 would never go Healthy,
+    # so this wave-1 Job that creates the role would never run.
     argocd.argoproj.io/sync-wave: "1"
 spec:
   backoffLimit: 2

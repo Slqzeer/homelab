@@ -71,6 +71,34 @@ That restart is not free, either: bringing Grafana back cold takes roughly
 dashboards from ConfigMaps in one burst, which was the OOMKill this phase
 found — see "Memory" below.
 
+## Logging into Grafana
+
+The admin credential lives in Vault and reaches the cluster as the
+`grafana-admin` Secret via VSO (see `config/vault-secrets.yaml`). Read it
+back with:
+
+```bash
+sg k3s-admin -c 'kubectl -n monitoring get secret grafana-admin -o jsonpath="{.data.admin-password}"' | base64 -d
+```
+
+Username is `admin`.
+
+`platform/nexus/README.md`'s "Rotating the admin password, and the ordering
+trap" section sets the house convention for this kind of credential, and it
+is worth reading before assuming the same trap applies here — **it does
+not.** Nexus keeps its own password hash inside an H2 database it owns, so a
+value changed in Vault sits inert until the bootstrap Job re-runs and
+explicitly pushes it to the running server; discard the old password before
+that re-run happens and the account is stranded. Grafana has no such state
+to go stale, for the same reason a dashboard clicked together in the UI
+does not survive a restart: decision P4 gives it no PVC. `admin.
+existingSecret: grafana-admin` (see `values.yaml`) means the container reads
+this Secret fresh on every cold start and re-applies it as the admin
+credential each time — there is nothing analogous to Nexus's embedded
+database to fall out of sync. Rotating the value in Vault takes effect on
+Grafana's next restart, full stop; none of the Nexus ordering trap, and
+none of its stranded-admin recovery path, applies here.
+
 ## Reaching Prometheus — port-forward, not Ingress
 
 There is deliberately no Ingress for Prometheus. It has no authentication of
@@ -151,16 +179,20 @@ mid-verification (pod deleted, recreated on the same PVC) and a query at the
 pre-restart timestamp still returned data — the 20Gi `local-path` volume is
 genuinely persisting history, not silently starting empty on every restart.
 
-**`probeSelector` and `scrapeConfigSelector` are still release-scoped.**
-`values.yaml` sets `serviceMonitorSelectorNilUsesHelmValues: false`,
-`serviceMonitorNamespaceSelector: {}`, `ruleSelectorNilUsesHelmValues: false`
-and `podMonitorSelectorNilUsesHelmValues: false` — every ServiceMonitor,
-PodMonitor and PrometheusRule in the cluster is picked up regardless of
-label. The chart does not expose the equivalent nil-uses-helm-values toggle
-for `Probe` or `ScrapeConfig` objects, so those two remain on the operator's
-default label selector, `release: monitoring`. A future `Probe` or
-`ScrapeConfig` that omits that label is silently ignored — valid, applied,
-and never scraped, with nothing in Argo CD or `kubectl get` saying so.
+**All six CRD selectors are open, not just the original four.** `values.yaml`
+sets `serviceMonitorSelectorNilUsesHelmValues: false`,
+`serviceMonitorNamespaceSelector: {}`, `ruleSelectorNilUsesHelmValues: false`,
+`podMonitorSelectorNilUsesHelmValues: false`,
+`probeSelectorNilUsesHelmValues: false` and
+`scrapeConfigSelectorNilUsesHelmValues: false` — every ServiceMonitor,
+PodMonitor, PrometheusRule, Probe and ScrapeConfig in the cluster is picked
+up regardless of label. The chart does expose the equivalent
+nil-uses-helm-values toggle for `Probe` and `ScrapeConfig` (91.4.1's
+`values.yaml`, lines 4714 and 4739, defaulting `true`); this repo does not
+ship either kind of object today, but the toggles are set anyway so a future
+one is discovered the same way a ServiceMonitor already is, rather than
+falling back to the operator's default release-scoped label and being
+silently ignored.
 
 ## What is deliberately absent
 

@@ -21,7 +21,7 @@ manifest ever applied by hand.
 | `platform/databases/redis/` | Redis: ephemeral cache, its own Vault-Secrets-Operator wiring, README |
 | `platform/registry/` | GHCR pull credential: Vault Secrets Operator wiring, README covering issuing, seeding and rotating the token |
 | `platform/nexus/` | Nexus Repository CE: manifests, the bootstrap Job that configures it over REST, the probed REST schemas, and the k3s `registries.yaml` that is **not** reconciled |
-| `observability/` | Prometheus, Grafana, logging |
+| `observability/monitoring/` | Prometheus, Grafana: Helm values, VSO wiring for the Grafana admin credential, every ServiceMonitor and its exporter. See `observability/monitoring/README.md` |
 | `apps` namespace | Created by `bootstrap/namespaces/namespaces.yaml`; holds `beacon` and the GHCR pull Secret it consumes — **not** the same thing as the `apps/` directory below, despite the shared name |
 | `apps/` | Currently unused; reserved for per-application values/manifests, not Application objects |
 | `artifacts` namespace | Created by `bootstrap/namespaces/namespaces.yaml`; holds Nexus, its PVC and its admin Secret. See `platform/nexus/README.md` |
@@ -33,26 +33,31 @@ Application picks it up; nothing is applied by hand. Order components with the
 `argocd.argoproj.io/sync-wave` annotation: infrastructure 0-2, platform 10
 (`vault`), apps 20, `ingress-config` and `vso-operator` sharing wave 21
 deliberately (see below for why `vso-operator` is not right after `vault`),
-`vso-config` at 22, and wave 23 shared by `postgres`, `redis`, `registry`
-and `nexus` — **not** because `vso-config` creates a Secret any of them
-consumes (it does not: `postgres-credentials`, `redis-credentials`,
-`ghcr-pull` and `nexus-admin` are each created by that component's own
-`VaultStaticSecret`, shipped in its own Application at wave 23), but because
-all four need the
+`vso-config` at 22, and wave 23 shared by `postgres`, `redis`, `registry`,
+`nexus` and `monitoring` — **not** because `vso-config` creates a Secret any
+of them consumes (it does not: `postgres-credentials`, `redis-credentials`,
+`ghcr-pull`, `nexus-admin` and `grafana-admin` are each created by that
+component's own `VaultStaticSecret`, shipped in its own Application at wave
+23), but because all five need the
 VSO **operator** (`vso-operator`, wave 21) already running and Vault's
 configure ceremony already run — the same two preconditions `vso-config`
 itself depends on, which is why they naturally land after it rather than
 because of it. Sharing the wave rather than stacking one behind another
-lets them reconcile in parallel since none of the four depends on
-another. Wave 23 is **not** last of all any more: `beacon` sits alone at
-wave 24, one wave above, because it is the one component in this list with
-a *real* dependency — its pod cannot pull its image until `registry` (23)
-has created the `ghcr-pull` Secret it consumes. That is the exception the
-rule below exists to describe, not a violation of it. The rule going
+lets them reconcile in parallel since none of the five depends on
+another. Wave 23 is **not** last of all any more: two Applications sit
+alone at wave 24, one wave above, and each is there for its own *real*
+dependency, not out of habit. `beacon`'s pod cannot pull its image until
+`registry` (23) has created the `ghcr-pull` Secret it consumes.
+`monitoring-config`'s dependency is different in kind: it ships
+ServiceMonitors, a CRD `monitoring` (23) installs via the
+prometheus-operator subchart, so `monitoring-config` cannot apply until
+those CRDs exist, regardless of anything at wave 23. That is the exception
+the rule below exists to describe, not a violation of it. The rule going
 forward: a component that does not depend on Postgres, Redis, the
-`ghcr-pull` credential, or anything else at wave 23 belongs at or below
-23, not above it out of habit — `beacon` sits above it precisely because
-it does. Platform (10) gates apps (20) and wave 21 the same way
+`ghcr-pull` credential, a CRD installed at wave 23, or anything else at that
+wave belongs at or below 23, not above it out of habit — `beacon` and
+`monitoring-config` sit above it precisely because they do, for two
+different reasons. Platform (10) gates apps (20) and wave 21 the same way
 infrastructure gates platform — see below for what that means on a rebuild.
 
 Every Application object belongs in `environments/homelab/apps/` — `root.yaml`
