@@ -79,3 +79,21 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: monitoring
+---
+# Loki and the Grafana Alloy DaemonSet that feeds it -- workstation-plan
+# phase 24. See docs/superpowers/specs/2026-09-19-logging-stack-design.md.
+#
+# Separate from `monitoring` on purpose: this is a different chart pair with a
+# different lifecycle, and phase 22 already set the precedent of putting a
+# component outside `monitoring` when ownership argued for it (the PostgreSQL
+# and Redis exporters live in `databases`).
+#
+# The Grafana DATASOURCE for Loki does not live here. It is a ConfigMap in
+# `monitoring`, because the grafana-sc-datasources sidecar carries no
+# NAMESPACE environment variable and watches only its own namespace --
+# unlike grafana-sc-dashboard, which runs with NAMESPACE=ALL. Verified on the
+# live pod 2026-09-19.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: logging
