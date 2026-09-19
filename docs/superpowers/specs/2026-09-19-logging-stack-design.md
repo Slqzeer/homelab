@@ -83,6 +83,7 @@ Memory is the binding constraint of this phase, as it was in 18, 21, 22 and
 | L16 | The two ServiceMonitors go into the **existing `observability/monitoring/targets/`**, and the charts' own `serviceMonitor` toggles stay **off** | §8. That directory is the single answer to "what does Prometheus scrape?", it is CI-validated, and Loki's chart-side toggle drags `metricsInstance.enabled: true` with it — a CRD from the grafana-agent-operator, which this cluster does not have |
 | L17 | **No Ingress for Loki** | §8.3. Identical to P9's argument for Prometheus: no authentication, and the tailnet policy is still one `*` → `*` grant |
 | L18 | **No backup of logs**, and a `PrometheusRule` instead of a size cap | §5.1. Plan §32 does not list logs. Loki has no `retentionSize` analogue, so growth is bounded by a rule that turns red in the Prometheus UI, not by the store itself |
+| L19 | **`sidecar.rules.enabled: false`** | §6. The chart's default puts a `kiwigrid/k8s-sidecar` container with `resources: {}` inside the Loki pod to watch for ruler-rule ConfigMaps this phase never ships — an unbounded sidecar, the exact defect phase 22 found twice |
 
 ### 3.1 Rejected alternatives
 
@@ -285,7 +286,19 @@ is easy to replace … we will rely on re-fetching data when needed." That is
 true when chunks live in S3. Here the PVC is the only copy, so left at the
 default a `kubectl scale --replicas=0` destroys 31 days of logs.
 
-**Resources (§5).** 128Mi request, 512Mi limit, memory-only.
+**The rules sidecar off (L19).** `sidecar.rules.enabled` defaults to `true`,
+which injects a second container — `kiwigrid/k8s-sidecar` 2.5.0 with
+`resources: {}` — into the Loki pod, watching for ruler-rule ConfigMaps that
+this phase never ships. An unbounded sidecar sharing a pod with a limited
+process is the defect `observability/monitoring/values.yaml` already documents
+twice, for the Grafana sidecars and for `prometheusConfigReloader`: total pod
+usage passes the budget while `kubectl top pod` still reports a plausible
+figure. `ruler.enabled` is left alone — inside the single binary the ruler
+target is inert without rules; it is the sidecar that costs.
+
+**Resources (§5).** 128Mi request, 512Mi limit, memory-only, on
+**`singleBinary.resources`** — `loki.resources` exists in the chart's values
+and is *not* the key the StatefulSet reads.
 
 ## 7. The Alloy values file and the pipeline
 
@@ -539,4 +552,5 @@ Every claim below is a command with an expected output, not an impression.
 | Label cardinality explosion | L14, enforced twice: four labels in the collector, 1000 global streams in the server |
 | Datasource ConfigMap in the wrong namespace | §8.2. Measured `NAMESPACE` absence on the datasources sidecar; it must be `monitoring` |
 | Loki PVC destroyed by a scale-to-zero | L10. `Retain` on both retention-policy keys, against a chart default of `Delete` |
+| Unbounded rules sidecar inside the Loki pod | L19. Disabled, not merely bounded — it watches for rules this phase never ships |
 | Log volume lost | Accepted (L18). 31 days of logs; every byte of configuration is in git |
