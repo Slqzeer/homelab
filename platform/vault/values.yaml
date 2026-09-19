@@ -46,9 +46,17 @@ server:
       # bumped, diff this against the new default before assuming it still
       # matches. `helm show values hashicorp/vault --version <v>` prints it.
       #
-      # Changing this restarts Vault, which reseals it. That is safe here
-      # and only here, because platform/vault/config/unsealer.yaml unseals
-      # it automatically from the in-cluster key Secret.
+      # Applying this updates the vault-config ConfigMap, but that alone
+      # does NOT restart Vault: the StatefulSet's pod spec is unchanged, so
+      # no rollout is triggered, and Vault only reads this file at startup.
+      # Verified on the live cluster after a push: the ConfigMap carried the
+      # new telemetry stanza while vault-0's restart count and age were
+      # unchanged and /v1/sys/metrics still returned 403. The new listener
+      # config is inert until someone deliberately restarts the pod, e.g.
+      # `kubectl -n vault delete pod vault-0`. That restart -- not the sync
+      # -- is what reseals Vault, and platform/vault/config/unsealer.yaml
+      # unseals it automatically from the in-cluster key Secret, so the
+      # reseal itself is safe; it is just not automatic.
       config: |
         ui = true
 
