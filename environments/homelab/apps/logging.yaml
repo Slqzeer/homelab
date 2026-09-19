@@ -1,0 +1,63 @@
+# Loki -- workstation-plan phase 24, the log store.
+#
+# Wave 23 -- the SAME wave as monitoring, postgres, redis, registry and
+# nexus. NOT a new wave behind them, and the distinction matters.
+#
+# redis.yaml and nexus.yaml both warn against stacking a wave "out of
+# habit": sharing one means these reconcile in parallel and none gates
+# another. Applying that test here, Loki gates on nothing at wave 23 --
+# auth_enabled is false so there is no Vault credential and the wave-22
+# floor vso-config.yaml establishes does not apply, and it needs no CRD.
+#
+# The consequence is the reason for the choice. monitoring-config.yaml
+# records as an invariant that NOTHING sits behind wave 24, because
+# observability watches the cluster and the cluster must never wait on it.
+# Putting logging at 25 would have broken that invariant and required
+# editing that comment. At 23 it survives untouched -- and the two
+# ServiceMonitors this phase adds land at 24, ABOVE the Services they
+# select, which is also the stricter ordering.
+#
+# There is deliberately NO Ingress for Loki. It has no authentication of any
+# kind, its API includes a delete surface, and
+# infrastructure/networking/policy.hujson is still a single
+# {"src": ["*"], "dst": ["*"], "ip": ["*"]} grant -- so publishing it would
+# hand that surface to every device on the tailnet. This is the same
+# argument grafana-ingress.yaml already records for Prometheus. Reach it
+# through the Grafana datasource, or by port-forward; the command is in
+# observability/logging/README.md.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: logging
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "23"
+spec:
+  project: default
+  sources:
+    - repoURL: https://grafana.github.io/helm-charts
+      chart: loki
+      targetRevision: 7.3.0
+      helm:
+        # Pinned deliberately, and it must stay `loki`. The chart's
+        # fullname helper returns the release name alone when it already
+        # contains the chart name, so this is what makes the Service
+        # `loki` rather than `loki-loki`. The ServiceMonitor in
+        # observability/monitoring/targets/loki.yaml, the PrometheusRule's
+        # persistentvolumeclaim="storage-loki-0" selector and the Grafana
+        # datasource URL all reference that name.
+        releaseName: loki
+        valueFiles:
+          - $values/observability/logging/loki/values.yaml
+    - repoURL: git@github.com:Slqzeer/homelab.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: logging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
