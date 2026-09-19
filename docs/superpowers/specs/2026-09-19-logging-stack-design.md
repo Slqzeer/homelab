@@ -318,8 +318,13 @@ Five other defaults are overridden, three of them because they fail
 **`securityContext.runAsUser: 0` (L11).** Measured: `/var/log/pods` is
 `drwxr-x--- root:root`, and the chart sets `securityContext: {}`. Without
 root the DaemonSet starts, passes its probes, reports Healthy, and collects
-nothing. This is precisely the failure the `alloy` ServiceMonitor in §8 exists
-to make visible.
+nothing. Integration 7 (§8.1) is scraped to catch this, but the `alloy`
+ServiceMonitor's `up` series does not prove it by itself: Alloy's HTTP server
+on :12345 answers regardless of whether `/var/log/pods` is readable, so a
+Healthy Targets page survives this exact failure. The real evidence is
+`loki_source_file_files_active_total > 0` and a non-zero
+`rate(loki_write_sent_entries_total[10m])`, both exposed on that same
+target.
 
 **Positions off `/tmp/alloy` (L12).** The chart starts the container with
 `--storage.path=/tmp/alloy` (`templates/containers/_agent.yaml`) and mounts no
@@ -568,7 +573,7 @@ Every claim below is a command with an expected output, not an impression.
 | `chunksCache` default left in place | L4. 8 GiB from one key on a node with ~4Gi. Caught by §11 step 2, but the values file names the figure so it is never "restored" by someone tidying |
 | Retention configured but never runs | L8. §11 step 7 reads the rendered ConfigMap, not the values file |
 | `schemaConfig.from` edited later | L7. Warning in the values header; every block written before the edit becomes unreadable and there is no recovery |
-| Alloy Healthy but collecting nothing | L11. §11 step 3 checks the logs; integration 7 (§8.1) makes it visible on the Targets page afterwards |
+| Alloy Healthy but collecting nothing | L11. §11 step 3 checks the logs; integration 7 (§8.1) exposes `loki_source_file_files_active_total` and `rate(loki_write_sent_entries_total[10m])` — not the target's `up` series, which stays 1 regardless |
 | Duplicate logs after an Alloy restart | L12. hostPath positions; §11 step 9 |
 | A runaway pod fills `/srv` | §5.1. Ingest caps and `max_global_streams_per_user: 1000` bound catastrophe; the §8.4 rule bounds growth — and it only ever shows in the Prometheus UI, which its own header states |
 | Label cardinality explosion | L14, enforced twice: four labels in the collector, 1000 global streams in the server |

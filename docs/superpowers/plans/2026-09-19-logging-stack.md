@@ -2089,3 +2089,21 @@ Nothing in this phase modifies a component outside `logging` except the
 Grafana datasource ConfigMap, the two ServiceMonitors, the PrometheusRule and
 four documentation files. Argo CD's own release, Vault, Traefik and
 `configure-vault.sh` are untouched.
+
+---
+
+## Corrections found during execution
+
+Two verification commands above do not match Loki 3.6.12 as deployed;
+neither affects what was actually verified during execution, only what a
+future reader who runs these commands verbatim would see.
+
+- **Step 2 (~line 1672).** `grep -E '^loki_compactor_(running|apply_retention)'`
+  matches nothing on this version — the real metric is
+  `loki_boltdb_shipper_compactor_running`. As written, this reads as
+  "compactor not running" on a healthy cluster.
+- **Step 5 (~lines 1745 and 1858).** `/loki/api/v1/labels` gives a false
+  failure for the four-label check: it resolves label names over a looser
+  range than any window passed, so a correct configuration looks broken.
+  `/loki/api/v1/series` is the correct instrument — see the `README.md`
+  section "Four labels, on purpose" for the corrected command.

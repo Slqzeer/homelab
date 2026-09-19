@@ -1,10 +1,11 @@
 # Alloy's own metrics -- integration 7. Phase 24.
 #
-# This is the target that makes decision L11 visible. Alloy's failure mode
-# when it cannot read /var/log/pods is a pod that starts, passes its probes
-# and reports Healthy while collecting nothing: the only signals are
-# loki_source_file_* series that stay flat and a log line nobody is reading.
-# Scraping it means the Targets page answers the question instead.
+# This is the target that makes decision L11 visible -- but up{job="alloy"}
+# on the Targets page is NOT the proof: Alloy's HTTP server on :12345
+# answers regardless of whether /var/log/pods is readable, so that series
+# stays green through the exact failure L11 exists to catch. The real
+# evidence is loki_source_file_files_active_total > 0 and a non-zero
+# rate(loki_write_sent_entries_total[10m]), both exposed by this same scrape.
 #
 # No exclusion is needed here, unlike loki.yaml: the alloy chart renders a
 # single Service.

@@ -29,7 +29,7 @@ Measured 2026-09-20 on `slqzeer-ms7c56`, after the restart tests.
 | Alloy memory | 62Mi (`alloy` 56Mi + `config-reloader` 6Mi) |
 | `/var/loki` on disk | 4.6M |
 | Node memory | 73% |
-| Namespaces collected | 9 (of 14 cluster namespaces; the other 5 have no running pods) |
+| Namespaces collected | 9 (of 14 cluster namespaces; the other 5 have no running pods, or (in `apps`) a pod that has logged nothing since Loki started) |
 
 The spec's §5 budget was Loki 250-350Mi, Alloy 100-150Mi, roughly 350-500Mi
 combined. The measured combined total is **138Mi** — roughly 2.5x below the
@@ -114,15 +114,24 @@ The first day's history is thin for the same reason, by design. On first
 start Alloy tails existing log files from byte zero, so it replayed roughly
 a week of historical lines — and Loki rejected and dropped every one of them
 with `failed to create stream: no schema config found for time ...`, because
-those lines predate `from:`. This is self-resolving — it stopped once the
-replay drained — and there is no way to recover that history: backdating
-`from:` would make every block written since unreadable, which is the
-trade-off the entry above already describes.
+those lines predate `from:`. (Separately, the chart's default
+`reject_old_samples_max_age: 168h` would have rejected anything older than 7
+days regardless of the schema date — the two reasons overlap here.) This is
+self-resolving — it stopped once the replay drained — and there is no way to
+recover that history: backdating `from:` would make every block written
+since unreadable, which is the trade-off the entry above already describes.
 
 **Alloy runs as root.** `/var/log/pods` is `drwxr-x--- root:root`. Without
 `runAsUser: 0` the DaemonSet starts, passes its probes, reports Healthy and
-collects nothing. A green pod is not evidence; the `alloy` target on the
-Prometheus Targets page is.
+collects nothing. A green pod is not evidence — and neither is a green
+`alloy` target on the Prometheus Targets page: `up{job="alloy"}` is 1
+whenever Alloy's HTTP server on :12345 answers, which is entirely
+independent of whether `/var/log/pods` is readable. Remove `runAsUser: 0`
+and the Targets page stays green; the DaemonSet is still Healthy and still
+collects nothing. The real evidence is `loki_source_file_files_active_total
+> 0` (63 at last check) and a non-zero
+`rate(loki_write_sent_entries_total[10m])` (~1.72/s at last check), both
+exposed by that same scrape.
 
 **Logs are not backed up.** Plan §32 does not list them. A lost PVC costs 31
 days of logs and nothing else — every byte of configuration is in git.
