@@ -164,10 +164,10 @@ spec:
               cpu: 100m
               memory: 384Mi
             limits:
-              # A STARTING POINT, not a result. Replaced with a measured
-              # figure in the last task of
-              # docs/superpowers/plans/2026-09-20-keycloak.md.
-              memory: 768Mi
+              # Measured 2026-09-20: 602Mi at rest and a 603Mi peak across
+              # two Grafana OIDC logins. 896Mi keeps that peak at 67%; the
+              # old 768Mi limit left only 21% headroom.
+              memory: 896Mi
       volumes:
         - name: realm
           configMap:

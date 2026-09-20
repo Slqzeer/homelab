@@ -240,29 +240,41 @@ defaults to `-XX:MaxRAMPercentage=70 -XX:InitialRAMPercentage=50`, so at a
 cache and thread stacks land on top of it — arriving at the limit by
 arithmetic, not under load.
 
-So the heap is set **explicitly** rather than derived from the limit:
+So the heap is set **explicitly** rather than derived from the limit. The
+result was measured on 2026-09-20:
 
 | Setting | Value |
 | --- | --- |
 | `JAVA_OPTS_KC_HEAP` | `-Xms192m -Xmx448m` |
 | `resources.requests.memory` | 384Mi |
-| `resources.limits.memory` | 768Mi |
+| `resources.limits.memory` | 896Mi |
 | `resources.requests.cpu` | 100m |
+| Steady-state memory | 602Mi (`kubectl top`, after 116 minutes) |
+| Peak across two Grafana OIDC logins | 632242176 bytes (603Mi, cAdvisor) |
+| Cold boot to Ready | 21 seconds |
 
 Memory-only limit, no CPU limit, matching every other `limits:` block in
-this repository. This takes committed limits to roughly 12.8Gi (80%).
+this repository. The measured login peak was 78.5% of the original 768Mi
+limit, above the plan's roughly 70% threshold. Raising the limit to 896Mi
+puts that peak at 67.3% while adding only 128Mi to this memory-constrained
+host. The node's committed limits measured **13098Mi (82%)** after the
+change, compared with the 12074Mi (75%) baseline in §2.
 
-**These figures are a starting point, not a result.** The plan carries a
-task that measures the running pod — at rest, and across a login — and
-records the measured value in this spec and in the component README the way
-phase 23 and phase 24 did. A limit this phase never measures is a limit
-phase 26 discovers.
+The backup test supplied a second check on the margin: a default live
+`kc.sh export` OOMKilled the 768Mi container. At 896Mi, directory export
+with an export-only `-Xms64m -Xmx128m` heap completed without restarting
+the server. The export process still returned non-zero after writing the
+realm because its second management listener could not bind port 9000,
+already held by the running server; the resulting JSON parsed as realm
+`homelab`.
 
 `--import-realm` on a `kc.sh start` that also performs its Quarkus
 augmentation (K14) makes the first boot the memory peak, exactly as
 Grafana's dashboard-provisioning burst is its peak. The `startupProbe` must
 therefore be generous enough to survive that boot without liveness killing
-it — the same reasoning, for the same class of restart loop.
+it — the same reasoning, for the same class of restart loop. The measured
+21-second cold boot consumes only 10.5% of its 200-second budget, so the
+probe needs no adjustment.
 
 ## 6. Files
 
