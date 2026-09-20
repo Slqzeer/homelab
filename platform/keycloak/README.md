@@ -79,6 +79,21 @@ On a rebuild, the realm import generates the Grafana client secret;
 `configure-vault.sh` only seeds a placeholder. SSO returns `invalid_client`
 until this ceremony replaces it. The issuer is Keycloak, not Vault, just
 as GitHub issues the GHCR token in the root README's rebuild instructions.
+
+Before the Vault write, record a fingerprint of the current Kubernetes
+Secret in the host's Bash shell. Keep this same shell open through the
+paste and restart checks. Only the SHA-256 fingerprint enters a variable;
+the Secret value travels through pipes, never argv or terminal output.
+Stop if the baseline cannot be read. A TRUE VSO status may still describe
+the old value and does not prove the replacement has arrived.
+
+```bash
+set -o pipefail
+keycloak_grafana_fingerprint() { sg k3s-admin -c 'kubectl -n monitoring get secret keycloak-grafana -o json' | jq -er '.data.clientSecret | select(type == "string" and length > 0)' | sha256sum; }
+KC_GRAFANA_SECRET_BEFORE=$(keycloak_grafana_fingerprint) || unset KC_GRAFANA_SECRET_BEFORE
+test -n "${KC_GRAFANA_SECRET_BEFORE:-}" && printf '%s\n' 'Baseline recorded; continue with the paste ceremony.'
+```
+
 Task 7's paste instructions follow verbatim:
 
 1. Open `https://keycloak.taildf6cd4.ts.net/admin`, sign in as `admin`, switch to the **homelab** realm.
@@ -106,15 +121,23 @@ exit
 sg k3s-admin -c 'kubectl -n vault exec vault-0 -- rm -f /home/vault/.vault-token'
 ```
 
-VSO refreshes within 60 seconds, but Grafana reads the environment variable
-only at startup. Wait for `keycloak-grafana`'s SYNCED/HEALTHY/READY columns
-to be true, then restart Grafana:
+Back in the same host shell, VSO normally refreshes within 60 seconds.
+Poll for up to two minutes for a successful read whose fingerprint differs
+from the baseline. Missing/empty Secrets and read errors do not pass. The
+restart is gated on that change, so a still-TRUE status for a placeholder
+or old secret cannot trigger it. Grafana reads the value only at startup.
 
 ```bash
 sg k3s-admin -c 'kubectl -n monitoring get vaultstaticsecret keycloak-grafana'
-sg k3s-admin -c 'kubectl -n monitoring rollout restart deploy/monitoring-grafana'
-sg k3s-admin -c 'kubectl -n monitoring rollout status deploy/monitoring-grafana'
+KC_GRAFANA_SECRET_CHANGED=false
+for attempt in $(seq 1 60); do KC_GRAFANA_SECRET_AFTER=$(keycloak_grafana_fingerprint) && [ -n "${KC_GRAFANA_SECRET_BEFORE:-}" ] && [ "$KC_GRAFANA_SECRET_AFTER" != "$KC_GRAFANA_SECRET_BEFORE" ] && { KC_GRAFANA_SECRET_CHANGED=true; break; }; sleep 2; done
+if [ "$KC_GRAFANA_SECRET_CHANGED" = true ]; then sg k3s-admin -c 'kubectl -n monitoring rollout restart deploy/monitoring-grafana' && sg k3s-admin -c 'kubectl -n monitoring rollout status deploy/monitoring-grafana'; else printf '%s\n' 'No verified secret change; Grafana was not restarted. Check the Vault write and VSO, then retry.' >&2; fi
+unset KC_GRAFANA_SECRET_BEFORE KC_GRAFANA_SECRET_AFTER KC_GRAFANA_SECRET_CHANGED
 ```
+
+If the baseline was already the intended value, this intentionally does
+not prove a new delivery or restart Grafana. Do not use a timeout as proof
+that the paste succeeded; investigate before repeating the ceremony.
 
 ## Things that will surprise you
 
@@ -176,8 +199,7 @@ set -o pipefail
 umask 077
 mkdir -p /backups/services/keycloak
 chmod 700 /backups/services/keycloak
-sg k3s-admin -c 'kubectl -n databases exec postgres-0 -- pg_dump -U postgres -d keycloak' \
-  | gzip > /backups/services/keycloak/keycloak-db-$(date +%Y%m%d).sql.gz
+sg k3s-admin -c 'kubectl -n databases exec postgres-0 -- pg_dump -U postgres -d keycloak' | gzip > /backups/services/keycloak/keycloak-db-$(date +%Y%m%d).sql.gz
 chmod 600 /backups/services/keycloak/keycloak-db-$(date +%Y%m%d).sql.gz
 gzip -t /backups/services/keycloak/keycloak-db-$(date +%Y%m%d).sql.gz
 ls -l /backups/services/keycloak/
@@ -187,38 +209,50 @@ Check the dump command's status as well as `gzip -t`; gzip validity alone
 does not prove `pg_dump` succeeded. The measured dump was 65175 bytes.
 
 Live `kc.sh export --file` OOMKilled the pod at 768Mi. At the current 896Mi
-limit, this constrained second JVM wrote the realm successfully:
+limit, the constrained second JVM with `--dir /tmp/homelab-export` wrote
+the measured realm configuration successfully. That original command used
+the default `different_files` user strategy; the measured realm JSON alone
+does not prove user credentials were included.
+
+For subsequent backups, explicitly use `--users realm_file`: pinned
+26.7.4's export help supports it, and the
+[Keycloak export guide](https://www.keycloak.org/server/importExport)
+defines it as including users in the realm JSON. This keeps users and
+their credentials in `homelab-realm.json` instead of separate user files.
+The user-inclusive variant is checked against the pinned help; it has not
+been measured live. Its size need not match the original 66050 bytes.
+Start with a fresh directory so stale files cannot pass validation:
 
 ```bash
-sg k3s-admin -c 'kubectl -n keycloak exec deploy/keycloak -- env JAVA_OPTS_KC_HEAP="-Xms64m -Xmx128m" /opt/keycloak/bin/kc.sh export --realm homelab --dir /tmp/homelab-export'
+sg k3s-admin -c 'kubectl -n keycloak exec deploy/keycloak -- rm -rf -- /tmp/homelab-export'
+sg k3s-admin -c 'kubectl -n keycloak exec deploy/keycloak -- env JAVA_OPTS_KC_HEAP="-Xms64m -Xmx128m" /opt/keycloak/bin/kc.sh export --realm homelab --dir /tmp/homelab-export --users realm_file'
 ```
 
-It logs `Realm 'homelab' - data exported` and `Export finished successfully`,
-then **exits 1** because the second process cannot bind management port
-9000, already occupied by the live server. Do not mistake this for a
-zero-exit command, or accept every export error as this known case. Confirm
-both success messages and validate the actual JSON before copying it:
+The measured live command logged `Realm 'homelab' - data exported` and
+`Export finished successfully`, then **exited 1** because the second
+process could not bind management port 9000, already occupied by the live
+server. Do not mistake this for a zero-exit command, or accept every
+export error as this known case. Confirm both success messages and
+validate the JSON's realm and user array before copying it. This homelab
+already has users, so an empty or absent array is a failed backup check.
 
 ```bash
 set -o pipefail
 umask 077
-if sg k3s-admin -c 'kubectl -n keycloak exec deploy/keycloak -- cat /tmp/homelab-export/homelab-realm.json' \
-  | jq -e '.realm == "homelab"' >/dev/null; then
-  sg k3s-admin -c 'kubectl -n keycloak exec deploy/keycloak -- cat /tmp/homelab-export/homelab-realm.json' \
-    > /backups/services/keycloak/homelab-realm-$(date +%Y%m%d).json
-  chmod 600 /backups/services/keycloak/homelab-realm-$(date +%Y%m%d).json
-  jq -e '.realm == "homelab"' /backups/services/keycloak/homelab-realm-$(date +%Y%m%d).json
-else
-  printf '%s\n' 'Realm validation failed; no backup copied.' >&2
-fi
-sg k3s-admin -c 'kubectl -n keycloak exec deploy/keycloak -- rm -f /tmp/homelab-export/homelab-realm.json'
-sg k3s-admin -c 'kubectl -n keycloak exec deploy/keycloak -- rmdir /tmp/homelab-export'
+if sg k3s-admin -c 'kubectl -n keycloak exec deploy/keycloak -- cat /tmp/homelab-export/homelab-realm.json' | jq -e '.realm == "homelab" and (.users | type == "array" and length > 0)' >/dev/null; then sg k3s-admin -c 'kubectl -n keycloak exec deploy/keycloak -- cat /tmp/homelab-export/homelab-realm.json' > /backups/services/keycloak/homelab-realm-$(date +%Y%m%d).json && chmod 600 /backups/services/keycloak/homelab-realm-$(date +%Y%m%d).json && jq -e '.realm == "homelab" and (.users | type == "array" and length > 0)' /backups/services/keycloak/homelab-realm-$(date +%Y%m%d).json; else printf '%s\n' 'Realm/user validation failed; no backup copied.' >&2; fi
+sg k3s-admin -c 'kubectl -n keycloak exec deploy/keycloak -- rm -rf -- /tmp/homelab-export'
 ```
 
-The measured JSON was 66050 bytes. This proves usable backup artifacts
-were written and parsed; **restoration has not been tested**. The full
-database dump is the durable-state backup; a realm configuration export is
-not a substitute for it.
+Cleanup removes the entire exact `/tmp/homelab-export` directory,
+including any credential-bearing user files left by an interrupted or
+older export. It never targets a parent directory or a wildcard.
+
+The measured JSON was 66050 bytes. That proves a realm configuration
+artifact was written and parsed; **restoration has not been tested**.
+Keycloak's export guide does not guarantee consistency while a server is
+running, and exports omit some server state. The full database dump is
+the durable-state backup; even a user-inclusive realm export is not a
+substitute for it.
 
 ## Files
 

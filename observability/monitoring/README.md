@@ -114,11 +114,7 @@ edit. Before changing it, render both the ConfigMap and Deployment from
 the pinned chart:
 
 ```bash
-helm template monitoring prometheus-community/kube-prometheus-stack \
-  --version 91.4.1 -n monitoring \
-  -f observability/monitoring/values.yaml \
-  --show-only charts/grafana/templates/configmap.yaml \
-  --show-only charts/grafana/templates/deployment.yaml
+helm template monitoring prometheus-community/kube-prometheus-stack --version 91.4.1 -n monitoring -f observability/monitoring/values.yaml --show-only charts/grafana/templates/configmap.yaml --show-only charts/grafana/templates/deployment.yaml
 ```
 
 Check `[auth.generic_oauth]`, all three Keycloak URLs and `[server]`
@@ -297,8 +293,7 @@ Application's `operation` field directly, the same recipe
 `platform/nexus/README.md` documents for the `nexus-bootstrap` Job:
 
 ```bash
-sg k3s-admin -c 'kubectl -n argocd patch application monitoring-config --type merge \
-  -p "{\"operation\":{\"sync\":{\"syncStrategy\":{\"hook\":{}}}}}"'
+sg k3s-admin -c 'kubectl -n argocd patch application monitoring-config --type merge -p "{\"operation\":{\"sync\":{\"syncStrategy\":{\"hook\":{}}}}}"'
 ```
 
 Then confirm the Job actually re-ran by its `creationTimestamp`, not by the
