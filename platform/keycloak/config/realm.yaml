@@ -1,0 +1,141 @@
+# The `homelab` realm: groups, roles, the groups claim, and the Grafana
+# client. Structure only -- NO USERS. Humans are created by hand and
+# documented in platform/keycloak/README.md, so that who has access to this
+# homelab is not repository content.
+#
+# IMPORTED ON FIRST START ONLY. `kc.sh start --import-realm` uses the
+# IGNORE_EXISTING strategy, so once the realm exists in PostgreSQL this file
+# is read and ignored on every subsequent boot. Editing it does NOT change a
+# running Keycloak, and an edit made in the admin console does not come back
+# here. That drift is the accepted cost of not adopting keycloak-config-cli
+# (spec section 3.1); the mitigation is the realm export in
+# platform/keycloak/README.md.
+#
+# The `groups` client scope is not decorative. Without its
+# oidc-group-membership-mapper the token carries no groups claim at all, and
+# Grafana's role_attribute_path silently falls through to its default for
+# every user -- a login that succeeds with the wrong permissions, which is
+# worse than one that fails.
+#
+# CONFIGURE_TOTP is a realm-wide default required action, so every account
+# enrols TOTP at first login. The roadmap asks only for MFA on admin
+# accounts; this is deliberately stricter and simpler than a conditional-OTP
+# browser flow. Relax it by editing the browser flow, not by deleting this.
+#
+# resetPasswordAllowed is false because there is NO SMTP anywhere in this
+# homelab. Left true, "Forgot password" renders a form that silently never
+# sends mail. Recovery is the break-glass admin of the `master` realm.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm
+  namespace: keycloak
+data:
+  homelab-realm.json: |
+    {
+      "realm": "homelab",
+      "displayName": "Homelab",
+      "enabled": true,
+      "sslRequired": "external",
+      "registrationAllowed": false,
+      "resetPasswordAllowed": false,
+      "rememberMe": true,
+      "loginWithEmailAllowed": true,
+      "duplicateEmailsAllowed": false,
+      "bruteForceProtected": true,
+      "permanentLockout": false,
+      "failureFactor": 5,
+      "maxFailureWaitSeconds": 900,
+      "requiredActions": [
+        {
+          "alias": "CONFIGURE_TOTP",
+          "name": "Configure OTP",
+          "providerId": "CONFIGURE_TOTP",
+          "enabled": true,
+          "defaultAction": true,
+          "priority": 10
+        }
+      ],
+      "roles": {
+        "realm": [
+          {
+            "name": "admin",
+            "description": "Homelab administrator"
+          },
+          {
+            "name": "user",
+            "description": "Homelab user"
+          }
+        ]
+      },
+      "groups": [
+        {
+          "name": "homelab-admins",
+          "path": "/homelab-admins",
+          "realmRoles": [
+            "admin"
+          ]
+        },
+        {
+          "name": "homelab-users",
+          "path": "/homelab-users",
+          "realmRoles": [
+            "user"
+          ]
+        }
+      ],
+      "clientScopes": [
+        {
+          "name": "groups",
+          "description": "Group membership, as a groups claim",
+          "protocol": "openid-connect",
+          "attributes": {
+            "include.in.token.scope": "true",
+            "display.on.consent.screen": "false"
+          },
+          "protocolMappers": [
+            {
+              "name": "groups",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-group-membership-mapper",
+              "consentRequired": false,
+              "config": {
+                "full.path": "false",
+                "id.token.claim": "true",
+                "access.token.claim": "true",
+                "userinfo.token.claim": "true",
+                "claim.name": "groups"
+              }
+            }
+          ]
+        }
+      ],
+      "clients": [
+        {
+          "clientId": "grafana",
+          "name": "Grafana",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": false,
+          "standardFlowEnabled": true,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "serviceAccountsEnabled": false,
+          "redirectUris": [
+            "https://grafana.taildf6cd4.ts.net/login/generic_oauth"
+          ],
+          "webOrigins": [
+            "https://grafana.taildf6cd4.ts.net"
+          ],
+          "defaultClientScopes": [
+            "web-origins",
+            "acr",
+            "profile",
+            "roles",
+            "basic",
+            "email",
+            "groups"
+          ]
+        }
+      ]
+    }
