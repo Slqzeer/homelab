@@ -97,3 +97,21 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: logging
+---
+# Keycloak, the homelab's OIDC identity provider -- workstation-plan phase
+# 25. See docs/superpowers/specs/2026-09-20-keycloak-design.md.
+#
+# Keycloak holds NO volume. All of its state -- realms, clients, users,
+# TOTP seeds -- lives in the `keycloak` database inside the PostgreSQL in
+# `databases`. The pod is disposable; the database is not.
+#
+# Not in `apps`: that namespace is for workloads this homelab's own CI
+# builds. Not in `platform/databases`: Keycloak is a consumer of that
+# namespace, not a member of it. A separate namespace is also a
+# REQUIREMENT, not a preference -- the VaultAuth CRD states its
+# ServiceAccount "must reside in the consuming secret's namespace", and
+# this phase has consuming Secrets in three namespaces.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: keycloak
