@@ -274,11 +274,15 @@ New:
 | `platform/keycloak/config/realm.yaml` | ConfigMap: the `homelab` realm JSON |
 | `platform/keycloak/config/vault-secrets.yaml` | `keycloak` ns: VaultConnection, VaultAuth, two VaultStaticSecrets (`keycloak-admin`, `keycloak-db`) |
 | `platform/keycloak/config/database-job.yaml` | `databases` ns: ServiceAccount, VaultAuth, VaultStaticSecret (`keycloak-db`), and the Sync-hook Job |
-| `platform/keycloak/config/networkpolicy.yaml` | Default-deny ingress on `databases` + 4 allow-rules |
+| `platform/databases/postgres/config/networkpolicy.yaml` | Default-deny ingress on `databases` + PostgreSQL client and exporter rules |
+| `platform/databases/redis/config/networkpolicy.yaml` | Redis client and exporter rules |
 | `platform/keycloak/README.md` | Import semantics, the paste ceremony, MFA, break-glass, backups, rotation traps |
 | `environments/homelab/apps/keycloak.yaml` | Application, sync-wave 24 |
 | `infrastructure/ingress/config/keycloak-ingress.yaml` | Tailscale Ingress, ProxyClass `homelab` |
 | `observability/monitoring/targets/keycloak.yaml` | ServiceMonitor — integration 8. Shipped by `monitoring-config`, also at wave 24, so it may apply before Keycloak's Service exists; a ServiceMonitor with no matching Service is valid and simply has no targets until one appears |
+
+The policies live with the databases they protect because a policy owned by
+one of the database's clients would be removed with that client.
 
 Modified:
 
