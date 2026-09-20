@@ -81,9 +81,11 @@ become a command argument (readable in `ps`) or reach a terminal.
 
 A throwaway pod takes the password from the Secret the same way the real
 workload does — via `secretKeyRef` in the pod spec, never as a literal
-value anywhere on a command line:
+value anywhere on a command line. Since phase 25 it must also carry
+`job: postgres-client`; the old unlabelled recipe is denied by NetworkPolicy.
+The corrected override includes that label in `metadata`:
 
-    sg k3s-admin -c 'kubectl -n databases run pgclient --restart=Never --image=postgres:18.6-alpine --overrides="{\"spec\":{\"containers\":[{\"name\":\"pgclient\",\"image\":\"postgres:18.6-alpine\",\"command\":[\"psql\",\"-h\",\"postgres.databases.svc\",\"-U\",\"postgres\",\"-c\",\"select version();\"],\"env\":[{\"name\":\"PGPASSWORD\",\"valueFrom\":{\"secretKeyRef\":{\"name\":\"postgres-credentials\",\"key\":\"password\"}}}]}]}}"'
+    sg k3s-admin -c 'kubectl -n databases run pgclient --restart=Never --image=postgres:18.6-alpine --overrides="{\"metadata\":{\"labels\":{\"job\":\"postgres-client\"}},\"spec\":{\"containers\":[{\"name\":\"pgclient\",\"image\":\"postgres:18.6-alpine\",\"command\":[\"psql\",\"-h\",\"postgres.databases.svc\",\"-U\",\"postgres\",\"-c\",\"select version();\"],\"env\":[{\"name\":\"PGPASSWORD\",\"valueFrom\":{\"secretKeyRef\":{\"name\":\"postgres-credentials\",\"key\":\"password\"}}}]}]}}"'
     sg k3s-admin -c 'kubectl -n databases wait --for=jsonpath={.status.phase}=Succeeded pod/pgclient --timeout=60s'
     sg k3s-admin -c 'kubectl -n databases logs pgclient'
     sg k3s-admin -c 'kubectl -n databases delete pod pgclient'
@@ -107,6 +109,23 @@ That shortcut only works from inside the pod, over the Unix socket.
 Anything arriving over the network — including the throwaway pod above —
 hits `pg_hba.conf`'s `scram-sha-256` catch-all and needs the real
 credential.
+
+## Network access since phase 25
+
+`config/networkpolicy.yaml` ships three ingress-only policies:
+`default-deny-ingress` selects every pod in `databases`, `postgres-clients`
+opens 5432 to the `keycloak` namespace, the local `postgres-exporter` pods
+and local pods labelled `job: postgres-client`, and
+`postgres-exporter-metrics` opens 9187 to `monitoring`. Both the
+`keycloak-database` and `postgres-exporter-role` Sync hooks carry the client
+label. Egress and DNS are unchanged; password authentication still applies.
+
+These policies live in this component's directory on purpose. PostgreSQL
+is the namespace's anchor, and owns its fence at wave 23; deleting a client
+such as Keycloak must not remove protection from the database. Redis owns
+its two allow policies separately. On 2026-09-20, `pg_up=1`, `redis_up=1`,
+both Sync hooks succeeded and a pod without an allowed selector was denied.
+Those checks prove more than all Applications reporting Healthy.
 
 ## Backups
 

@@ -83,6 +83,50 @@ sg k3s-admin -c 'kubectl -n monitoring get secret grafana-admin -o jsonpath="{.d
 
 Username is `admin`.
 
+### Keycloak SSO, phase 25
+
+Grafana is the first OIDC client at
+<https://grafana.taildf6cd4.ts.net>. The local admin form stays enabled as
+the recovery route; Argo CD is deliberately not an OIDC client yet.
+`values.yaml` supplies `grafana.grafana.ini.auth.generic_oauth`: client
+`grafana`, scopes `openid profile email groups`, and Keycloak's `homelab`
+authorization, token and userinfo endpoints. `homelab-admins` maps to
+organization Admin, everyone else to Viewer; `allow_assign_grafana_admin:
+false` reserves server-admin access for the local account.
+
+`grafana.ini.server.root_url: https://grafana.taildf6cd4.ts.net` is
+**required, not cosmetic**. Grafana constructs its OIDC callback from it;
+without it, an `http://` redirect can be generated and rejected by
+Keycloak. It must agree with the client's exact HTTPS callback
+`https://grafana.taildf6cd4.ts.net/login/generic_oauth`.
+
+`GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET` comes from the `keycloak-grafana`
+Secret via `envValueFrom.secretKeyRef`, never from the rendered ConfigMap.
+The issuer-generated value needs the paste ceremony in
+`platform/keycloak/README.md`; VSO refreshing the Secret alone does not
+reload an environment variable, so restart Grafana after it lands.
+`invalid_client` means to check this path; `user email is not found` means
+the Keycloak user needs an email address. All `homelab` users enrol TOTP.
+
+**`values.yaml` is excluded from kubeconform.** CI checks its YAML syntax
+with yamllint, but `helm template` is the only rendering gate on this OIDC
+edit. Before changing it, render both the ConfigMap and Deployment from
+the pinned chart:
+
+```bash
+helm template monitoring prometheus-community/kube-prometheus-stack \
+  --version 91.4.1 -n monitoring \
+  -f observability/monitoring/values.yaml \
+  --show-only charts/grafana/templates/configmap.yaml \
+  --show-only charts/grafana/templates/deployment.yaml
+```
+
+Check `[auth.generic_oauth]`, all three Keycloak URLs and `[server]`
+`root_url`, then the environment variable's Secret reference. The
+ConfigMap must not contain a `client_secret` value.
+
+### Rotating the local admin password
+
 `platform/nexus/README.md`'s "Rotating the admin password, and the ordering
 trap" section sets the house convention for this kind of credential, and it
 is worth reading before assuming the same trap applies here — **it does
@@ -159,7 +203,18 @@ the volume, which means losing history — `retentionSize: 12GiB` (P8) is
 therefore the real, load-bearing bound on disk use, not the 20Gi request,
 which spec §5.1 already calls nominal against 850G free.
 
-## The five scrape targets
+## Scrape integrations
+
+The table below records the original five integrations at the phase-22/23
+measurement date. Phase 24 added Loki and Alloy as integrations 6 and 7;
+phase 25 adds **Keycloak as integration 8**, in `targets/keycloak.yaml`.
+Its ServiceMonitor scrapes `/metrics` on the Service's management port
+9000 in namespace `keycloak`, not the application port 8080 exposed by the
+Ingress. `monitoring-config` ships it at wave 24 and can apply before
+Keycloak's Service exists; it acquires a target when the Service appears.
+Check that target is UP in Prometheus. The new database NetworkPolicies
+were accepted live on 2026-09-20 with `pg_up=1` and `redis_up=1`; preserving
+the exporters' access and cross-namespace scrape ports is part of the fence.
 
 Each proven live with one PromQL query against the port-forwarded Prometheus
 above, 2026-09-19:

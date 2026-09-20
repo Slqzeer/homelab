@@ -14,13 +14,14 @@ manifest ever applied by hand.
 | `infrastructure/networking/` | Tailnet ACL policy — **not** reconciled by Argo CD |
 | `infrastructure/storage/` | PVC storage notes |
 | `infrastructure/cert-manager/` | Empty; deferred, see the 2026-09-02 spec |
-| `platform/` | Vault, databases, registry, Nexus |
+| `platform/` | Vault, databases, registry, Nexus, Keycloak |
 | `platform/vault/` | HashiCorp Vault: Helm values, unsealer manifest, init/backup docs |
 | `platform/vault-secrets-operator/` | Vault Secrets Operator: Helm values, `VaultConnection`/`VaultAuth`/`VaultStaticSecret` manifests |
 | `platform/databases/postgres/` | PostgreSQL: StatefulSet, PVC, its own Vault-Secrets-Operator wiring, README |
 | `platform/databases/redis/` | Redis: ephemeral cache, its own Vault-Secrets-Operator wiring, README |
 | `platform/registry/` | GHCR pull credential: Vault Secrets Operator wiring, README covering issuing, seeding and rotating the token |
 | `platform/nexus/` | Nexus Repository CE: manifests, the bootstrap Job that configures it over REST, the probed REST schemas, and the k3s `registries.yaml` that is **not** reconciled |
+| `platform/keycloak/` | OIDC identity provider, first-import realm seed, database Job, VSO wiring and recovery/backup ceremonies |
 | `observability/monitoring/` | Prometheus, Grafana: Helm values, VSO wiring for the Grafana admin credential, every ServiceMonitor and its exporter. See `observability/monitoring/README.md` |
 | `observability/logging/` | Loki and Grafana Alloy: Helm values for both charts, the Grafana datasource, and the collector pipeline. See `observability/logging/README.md` |
 | `apps` namespace | Created by `bootstrap/namespaces/namespaces.yaml`; holds `beacon` and the GHCR pull Secret it consumes — **not** the same thing as the `apps/` directory below, despite the shared name |
@@ -54,19 +55,21 @@ and nothing at wave 23 gates them. By the rule below they therefore belong at
 or below 23; stacking them higher would have broken the wave-24 invariant the
 next sentences describe, for no dependency that exists.
 
-Wave 23 is **not** last of all any more: two Applications sit
-alone at wave 24, one wave above, and each is there for its own *real*
+Wave 23 is **not** last of all any more: three Applications sit
+at wave 24, one wave above, and each is there for its own *real*
 dependency, not out of habit. `beacon`'s pod cannot pull its image until
 `registry` (23) has created the `ghcr-pull` Secret it consumes.
 `monitoring-config`'s dependency is different in kind: it ships
 ServiceMonitors, a CRD `monitoring` (23) installs via the
 prometheus-operator subchart, so `monitoring-config` cannot apply until
-those CRDs exist, regardless of anything at wave 23. That is the exception
-the rule below exists to describe, not a violation of it. The rule going
+those CRDs exist. `keycloak` has a third dependency: it needs PostgreSQL
+at wave 23 before its database Job and server can run. It joins wave 24
+rather than opening wave 25, preserving `monitoring-config`'s invariant
+that nothing sits behind 24. The rule going
 forward: a component that does not depend on Postgres, Redis, the
 `ghcr-pull` credential, a CRD installed at wave 23, or anything else at that
-wave belongs at or below 23, not above it out of habit — `beacon` and
-`monitoring-config` sit above it precisely because they do, for two
+wave belongs at or below 23, not above it out of habit — `beacon`,
+`monitoring-config` and `keycloak` sit above it because they do, for three
 different reasons. Platform (10) gates apps (20) and wave 21 the same way
 infrastructure gates platform — see below for what that means on a rebuild.
 
@@ -237,7 +240,13 @@ Log in as `admin`. The initial-password Secret was deleted after the
 first password change; there is no recovery path from the cluster, so the
 password must be kept in a password manager.
 
-If Tailscale itself is unavailable, the port-forward still works:
+Keycloak is at **<https://keycloak.taildf6cd4.ts.net>**; its recovery account
+and OIDC setup are documented in `platform/keycloak/README.md`. Grafana at
+**<https://grafana.taildf6cd4.ts.net>** now offers Keycloak SSO **with its
+local admin form still enabled**. Argo CD deliberately is not an OIDC
+client yet.
+
+For Argo CD, if Tailscale itself is unavailable, port-forward still works:
 
 ```bash
 kubectl port-forward -n argocd svc/argocd-server 8080:80
@@ -392,7 +401,7 @@ once. See `platform/vault/README.md`.
    still not sit in front of every tailnet URL.
 10. Seed the GHCR pull token into Vault at `homelab/ghcr`. This is a
     classic GitHub PAT with `read:packages` and nothing else. It is **not**
-    created by `configure-vault.sh` like every other credential here —
+    created by `configure-vault.sh` —
     GitHub issues it, so it must be pasted in, and the script is fed to the
     pod on stdin where an interactive prompt would consume its own
     remaining lines. This step needs `vault-0` running and unsealed, which
@@ -407,8 +416,18 @@ once. See `platform/vault/README.md`.
     kind Argo CD does not assess. The real check is
     `kubectl -n apps get vaultstaticsecret ghcr-pull` (SYNCED/HEALTHY/READY
     columns), not the Application's own status. See
-    `platform/registry/README.md`.
-11. Install the k3s registry mirror: copy `platform/nexus/registries.yaml` to
+    `platform/registry/README.md`. Step 11's OIDC client secret needs a
+    similar ceremony because its issuer is also outside Vault.
+11. Complete the Grafana client-secret paste ceremony in
+    `platform/keycloak/README.md`, after step 9's **configure** half and
+    Keycloak's first realm import. Keycloak issues this secret, just as
+    GitHub issues step 10's GHCR token; Vault cannot generate either on
+    the issuer's behalf. Copy Clients → `grafana` → Credentials from the
+    `homelab` realm into `homelab/keycloak-grafana` using the documented
+    echo-off prompt, wait for VSO, then restart Grafana. The configure
+    script seeds only a placeholder: until it is replaced, SSO returns
+    `invalid_client`, while local Grafana login remains available.
+12. Install the k3s registry mirror: copy `platform/nexus/registries.yaml` to
     `/etc/rancher/k3s/registries.yaml` and `sudo systemctl restart k3s`. **Not
     reconciled by Argo CD** — k3s reads that path from the host at startup and
     nothing in the cluster can apply it, so a rebuild does not recreate it. The
@@ -443,7 +462,9 @@ list specifically because it needs `vault-0` unsealed first; unlike the
 other steps, doing it in numeric order requires having already done the
 step before it, not just some step before it in the plan. The configure
 half of step 9 can trail behind step 10 without urgency, precisely because
-wave 22 already sits after every Ingress. Step 11 is genuinely last and
+wave 22 already sits after every Ingress. It must finish before step 11:
+Keycloak needs the database credentials and Grafana's Vault path configured
+before its issuer-generated client secret can be delivered. Step 12 is last and
 genuinely optional: the mirror it configures is a cache, so nothing in the
 cluster waits on it. Install it **after** the cluster is up rather than before
 — a mirror pointing at a Nexus that does not exist yet leans on containerd's
@@ -461,13 +482,25 @@ Things this cluster is known to be missing. None of them is urgent today,
 and each is here because the alternative is that it lives only in whoever
 last thought about it.
 
-- **No `NetworkPolicy` anywhere, including `databases`.** Every pod in the
-  cluster can reach PostgreSQL on 5432; the password is the only thing in
-  the way. That is acceptable precisely because nothing connects to the
-  database yet — there is no traffic to permit and therefore nothing a
-  policy could usefully deny. It stops being acceptable the moment the
-  first consumer arrives, which is also the moment you learn what the
-  policy should say. Pick it up in that phase, not before.
+- **NetworkPolicy coverage stops at `argocd` and `databases`.** Four
+  chart-shipped policies exist in `argocd`; five now fence `databases`
+  with default-deny ingress and explicit database/exporter access. Every
+  other namespace, `keycloak` included, remains open. Database egress is
+  also unrestricted. The policy acceptance checks passed with both
+  exporters up, an unauthorized pod denied and both Sync hooks succeeding.
+- **Keycloak's realm drifts after first import.** `--import-realm` uses
+  `IGNORE_EXISTING`: editing the git seed does not update the live realm,
+  and console edits never come back to git. The manual realm export in
+  `platform/keycloak/README.md` records that configuration; there is no
+  continuous reconciler.
+- **Keycloak's admin password cannot be rotated through Vault.**
+  `KC_BOOTSTRAP_ADMIN_PASSWORD` is honoured only when no admin exists.
+  Rotate the live password in Keycloak first, then update Vault, or the
+  recovery credential silently diverges from the account.
+- **The OIDC client secret has no reconciler.** Regenerating Grafana's
+  secret in Keycloak silently breaks SSO until Vault is updated and
+  Grafana restarted. Use the same paste ceremony as a rebuild; the local
+  admin form remains available.
 - **Two of five `VaultStaticSecret` destinations still keep VSO's `_raw`
   key**, so each derived Secret carries its credential twice: once parsed,
   once in the verbatim KV JSON. `spec.destination.transformation.excludeRaw:
@@ -495,7 +528,9 @@ last thought about it.
   file. The password's entropy makes offline recovery infeasible, which is
   why this is a handling-hygiene problem and not an emergency — see
   `platform/databases/postgres/README.md` for the full two-sided
-  argument. Roadmap §33 asks for it independently.
+  argument. Keycloak's newer backup directory is mode 700 and its files
+  mode 600, so that particular exposure does not apply to them. Roadmap
+  §33 asks for backup hygiene independently.
 - **There is no PostgreSQL major-version upgrade procedure.** This matters
   more than it sounds: because `PGDATA` is version-namespaced, a major
   image bump does not refuse to start — it silently initialises an empty

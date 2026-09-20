@@ -1003,76 +1003,72 @@ Détails complets, mesures et décisions (L1–L19) dans
 
 # 28. Phase 25 — Keycloak et authentification centralisée
 
-Keycloak devient le fournisseur central d’identité du homelab. Il fournit une
-authentification unique (SSO) basée sur OpenID Connect (OIDC) afin que chaque
-personne dispose d’un seul compte pour accéder aux applications compatibles.
+Livrée. Keycloak 26.7.4 fournit l'identité OIDC du homelab, avec **Grafana
+comme client de validation**. Son formulaire admin local reste activé ;
+**Argo CD n'est délibérément pas encore un client**, pour que la récupération
+du système de déploiement ne dépende pas du fournisseur d'identité.
 
-Objectifs :
+Mesuré le **2026-09-20** : **602Mi** au repos, 91 minutes après le dernier
+redémarrage (pod âgé de 116 minutes), **603Mi** au pic pendant les vraies
+connexions OIDC (632242176 octets). La limite est passée de 768Mi à
+**896Mi** : le pic représente 67,3 % de cette limite, et les limites mémoire
+engagées du nœud totalisent **13098Mi / 82 %**. Un démarrage à froid atteint
+Ready en **21 secondes**, sur un budget startupProbe inchangé de 200 secondes.
 
-```text
-un compte utilisateur par personne
-une connexion unique pour toutes les applications
-OIDC comme protocole d’intégration principal
-groupes et rôles centralisés
-désactivation d’un compte depuis un point central
-```
+Un Deployment sans PVC rejoint la vague 24, après PostgreSQL en vague 23.
+Realms, clients, utilisateurs et graines TOTP résident dans la base
+`keycloak`, sur le PVC PostgreSQL sous `/srv/kubernetes/storage`. Le nombre
+de realms est resté à **2 après suppression du pod**, preuve de cette
+persistance. L'accès est HTTPS, uniquement sur le tailnet, à
+`https://keycloak.taildf6cd4.ts.net` ; Prometheus le scrape comme intégration 8.
 
-Architecture :
+**Le realm est reproductible depuis git, mais pas réconcilié.** Le seed
+déclare `homelab`, les groupes `homelab-admins` et `homelab-users`, les
+scopes et le client Grafana, sans utilisateur ni secret. `--import-realm`
+utilise `IGNORE_EXISTING` : modifier le fichier ne change plus un realm
+déjà importé, et une modification en console ne revient jamais dans git.
+`keycloak-config-cli` a été écarté parce que son dernier build ciblait
+26.5.5 face au serveur 26.7.4 ; ce décalage de deux versions mineures
+ajoutait une dépendance risquée au service d'identité. L'export manuel
+conserve les changements de configuration effectués en console.
 
-```text
-Utilisateur
-    ↓
-Keycloak
-    ├── authentification
-    ├── utilisateurs et groupes
-    ├── rôles et permissions
-    └── clients OIDC
-          ↓
-    Applications personnelles
-```
+**La MFA est obligatoire pour tout le realm**, via `CONFIGURE_TOTP`, et
+pas seulement pour les administrateurs comme demandé initialement ici.
+Chaque utilisateur doit aussi avoir une adresse email : sans elle Grafana
+refuse la connexion avec `user email is not found`. Les groupes OIDC sont
+traduits explicitement en permissions locales : `homelab-admins` devient
+Admin d'organisation dans Grafana, les autres comptes Viewer.
 
-Keycloak sera déployé dans Kubernetes et géré via GitOps. Sa base de données
-doit être persistante, idéalement dans PostgreSQL, avec les données stockées
-sur :
+**`resetPasswordAllowed` est false, car il n'y a pas de SMTP** — un cas que
+le plan initial n'avait pas anticipé. `master` ne contient qu'un admin de
+récupération, sans TOTP : exiger l'appareil perdu pour récupérer le compte
+annulerait ce recours. Son mot de passe généré de 32 caractères est conservé
+dans Vault et livré par VSO ; ce compte n'est jamais utilisé au quotidien.
+La procédure de récupération est dans `platform/keycloak/README.md`.
 
-```text
-/srv/kubernetes/storage
-```
+Les credentials PostgreSQL, de bootstrap et OIDC transitent par Vault/VSO,
+jamais en clair dans git. Le secret client Grafana est émis par Keycloak et
+doit être collé dans Vault lors du rebuild. Deux rotations restent manuelles :
+changer le mot de passe admin dans Keycloak avant Vault, et reporter dans
+Vault toute régénération du secret Grafana avant de redémarrer Grafana.
 
-Pour chaque application compatible, créer un client OIDC dans le realm du
-homelab avec des URL de redirection limitées au domaine de l’application,
-les scopes minimaux nécessaires et un mapping explicite des groupes et rôles.
+Les sauvegardes manuelles sont dans **`/backups/services/keycloak`** :
+dump PostgreSQL du 2026-09-20 de **65175 octets**, gzip valide, et export
+du realm de **66050 octets**, JSON valide avec `realm: homelab`.
+Le répertoire est en mode **700**, les fichiers en **600** ; ils contiennent
+des données sensibles, dont hashes et graines TOTP dans la base. L'export
+contraint en mémoire écrit son fichier puis sort avec le code 1 sur un conflit
+du port de gestion 9000 avec le serveur actif : le README documente la
+validation du JSON avant copie. **Une restauration n'a pas été testée.**
 
-Les applications ne doivent pas gérer leur propre mot de passe lorsque
-l’authentification OIDC est disponible. Elles délèguent la connexion à
-Keycloak et utilisent les claims OIDC pour identifier l’utilisateur et
-appliquer ses permissions.
+L'arrivée du premier consommateur a aussi fermé l'ingress du namespace
+`databases` par cinq NetworkPolicies. Validation réelle : `pg_up=1`,
+`redis_up=1`, pod non autorisé refusé et les deux hooks Sync exécutés avec
+succès. Les autres namespaces, sauf `argocd` déjà couvert par son chart,
+restent ouverts, y compris `keycloak`.
 
-Prévoir au minimum :
-
-```text
-realm dédié au homelab
-groupes administrateurs et utilisateurs
-MFA pour les comptes administrateurs
-compte de récupération documenté et protégé
-HTTPS obligatoire via l’Ingress
-```
-
-Les secrets OIDC, les credentials PostgreSQL et les clés de bootstrap ne
-doivent pas être stockés en clair dans Git. Ils doivent être gérés avec Vault
-et Vault Secrets Operator.
-
-Sauvegarder la base de données Keycloak, la configuration des realms, clients,
-groupes et rôles, ainsi que la procédure de récupération des comptes
-administrateurs dans :
-
-```text
-/backups/services/keycloak
-```
-
-Keycloak centralise l’identité, mais ne remplace pas les autorisations propres
-à chaque application. Chaque application doit traduire explicitement les
-groupes ou rôles OIDC en permissions locales.
+Détails et cérémonies dans `platform/keycloak/README.md` et
+`docs/superpowers/specs/2026-09-20-keycloak-design.md`.
 
 ---
 

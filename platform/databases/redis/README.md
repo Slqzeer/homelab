@@ -31,6 +31,23 @@ durability guarantee this component does not have.
 
 ## Connecting
 
+Since phase 25, the namespace's default-deny ingress policy blocks a
+separate client pod unless an explicit allow rule matches it. Redis still
+has no consumer besides its exporter, so `config/networkpolicy.yaml`
+contains exactly two narrow policies: `redis-clients` permits local pods
+labelled `app: redis-exporter` to reach Redis on 6379, and
+`redis-exporter-metrics` permits the `monitoring` namespace to scrape the
+exporter on 9121. The default-deny itself belongs to PostgreSQL, the
+namespace's anchor. Egress is unchanged.
+
+The next real consumer must add its namespace/pod selector to
+`redis-clients` as well as obtaining the credential; possession of the
+password no longer grants network reachability. The separate-pod recipe
+below documents safe credential delivery, but **is now denied by policy**
+until such an allow rule is deliberately added. For today's diagnostic
+ping, use the in-pod command below. Live acceptance on 2026-09-20 kept
+`redis_up=1` and `pg_up=1` while denying an unauthorized database client.
+
 The Service is a normal ClusterIP, `redis.databases.svc:6379` — unlike
 PostgreSQL's headless Service, this Deployment has no stable network
 identity worth preserving. The ACL user is `default`; `requirepass` sets
@@ -63,8 +80,9 @@ Writing the command to a file first and having `sg` run the file sidesteps
 the quoting collision between the outer `sg k3s-admin -c '...'` and the
 JSON `--overrides` value's own quotes; the heredoc body above is
 deliberately one long line, not wrapped, because a line a human is meant to
-copy must never depend on a trailing backslash surviving the paste. Verified
-2026-09-16: this returns `PONG`.
+copy must never depend on a trailing backslash surviving the paste. This
+returned `PONG` on 2026-09-16, before the phase-25 network fence; do not use
+that historical result as evidence that this pod is allowed today.
 
 **`requirepass` applies to loopback as well.** Unlike PostgreSQL, which
 trusts its own Unix socket unconditionally (see
