@@ -238,8 +238,17 @@ fi
 echo "==> policy vso-grafana-read"
 # The data/ segment is REQUIRED and is not a typo -- see the note on
 # vso-canary-read above.
+#
+# Two paths since phase 25: the admin credential, and the OIDC client
+# secret Grafana presents to Keycloak. Both are read by the same `grafana`
+# ServiceAccount through the same VaultAuth, so extending this policy is
+# the whole change -- no new role, no new ServiceAccount.
 vault policy write vso-grafana-read - <<'POLICY'
 path "homelab/data/grafana" {
+  capabilities = ["read"]
+}
+
+path "homelab/data/keycloak-grafana" {
   capabilities = ["read"]
 }
 POLICY
@@ -293,6 +302,127 @@ vault write auth/kubernetes/role/vso-postgres-exporter \
     bound_service_account_namespaces=databases \
     audience=vault \
     token_policies=vso-postgres-exporter-read \
+    ttl=1h
+
+echo "==> seeding homelab/keycloak"
+if vault kv get homelab/keycloak >/dev/null 2>&1; then
+  echo "    already present, leaving the credential alone"
+else
+  # The BREAK-GLASS admin of the `master` realm, and nothing else. Humans
+  # live in the `homelab` realm; this account exists to recover them.
+  #
+  # Generated here and never displayed, exactly as the postgres, redis,
+  # nexus and grafana blocks above.
+  #
+  # Alphanumeric only -- this password is pasted into a browser login.
+  #
+  # IMPORTANT ASYMMETRY: KC_BOOTSTRAP_ADMIN_PASSWORD is honoured only when
+  # no admin exists. Unlike homelab/postgres, whose Sync-hook Job runs
+  # ALTER ROLE on every sync, rewriting this value does NOT change the live
+  # password. Rotate in Keycloak first, then update Vault to match.
+  # See platform/keycloak/README.md.
+  PWFILE=$(mktemp)
+  trap 'rm -f "$PWFILE"' EXIT
+  head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32 > "$PWFILE"
+  vault kv put homelab/keycloak username=admin password=@"$PWFILE" >/dev/null
+  rm -f "$PWFILE"
+  echo "    generated"
+fi
+
+echo "==> seeding homelab/keycloak-db"
+if vault kv get homelab/keycloak-db >/dev/null 2>&1; then
+  echo "    already present, leaving the credential alone"
+else
+  # The PostgreSQL login Keycloak connects with. Read in TWO namespaces:
+  # `keycloak` (the Deployment) and `databases` (the Sync-hook Job whose
+  # ALTER ROLE pushes this value into the database on every sync).
+  #
+  # Alphanumeric only: this value lands in a JDBC URL, where a / or @
+  # breaks parsing in ways that surface far from the cause.
+  PWFILE=$(mktemp)
+  trap 'rm -f "$PWFILE"' EXIT
+  head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32 > "$PWFILE"
+  vault kv put homelab/keycloak-db username=keycloak password=@"$PWFILE" >/dev/null
+  rm -f "$PWFILE"
+  echo "    generated"
+fi
+
+echo "==> seeding homelab/keycloak-grafana"
+if vault kv get homelab/keycloak-grafana >/dev/null 2>&1; then
+  echo "    already present, leaving the value alone"
+else
+  # A PLACEHOLDER, and deliberately so. Keycloak generates the real client
+  # secret when it imports the realm; a human then overwrites this value.
+  # See platform/keycloak/README.md.
+  #
+  # This block exists to break a REBUILD DEADLOCK, not to supply a working
+  # credential. Grafana (wave 23) reads this Secret through envValueFrom.
+  # A Secret that does not exist leaves the pod in
+  # CreateContainerConfigError, so `monitoring` never goes Healthy, so
+  # NOTHING AT WAVE 24 SYNCS -- including the Keycloak that is the only
+  # thing able to produce the real value. Grafana would wait on Keycloak
+  # and Keycloak on Grafana, with nothing anywhere naming identity as the
+  # cause.
+  #
+  # Seeded, the failure degrades to `invalid_client` on the SSO button
+  # while Grafana's local admin form keeps working.
+  PWFILE=$(mktemp)
+  trap 'rm -f "$PWFILE"' EXIT
+  head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32 > "$PWFILE"
+  vault kv put homelab/keycloak-grafana clientSecret=@"$PWFILE" >/dev/null
+  rm -f "$PWFILE"
+  echo "    generated placeholder -- Keycloak's real secret replaces it"
+fi
+
+echo "==> policy vso-keycloak-read"
+# Grants BOTH paths the Keycloak pod needs, so its one ServiceAccount needs
+# one role. The data/ segment is REQUIRED and is not a typo -- see the note
+# on vso-canary-read above.
+vault policy write vso-keycloak-read - <<'POLICY'
+path "homelab/data/keycloak" {
+  capabilities = ["read"]
+}
+
+path "homelab/data/keycloak-db" {
+  capabilities = ["read"]
+}
+POLICY
+
+echo "==> role vso-keycloak"
+# bound_service_account_names must match the ServiceAccount created in
+# platform/keycloak/config/vault-secrets.yaml, and audience must match that
+# file's VaultAuth spec.kubernetes.audiences.
+vault write auth/kubernetes/role/vso-keycloak \
+    bound_service_account_names=keycloak \
+    bound_service_account_namespaces=keycloak \
+    audience=vault \
+    token_policies=vso-keycloak-read \
+    ttl=1h
+
+echo "==> policy vso-keycloak-db-read"
+# Narrower than vso-keycloak-read on purpose: the Job in `databases` needs
+# the database login and must not see the Keycloak admin credential.
+vault policy write vso-keycloak-db-read - <<'POLICY'
+path "homelab/data/keycloak-db" {
+  capabilities = ["read"]
+}
+POLICY
+
+echo "==> role vso-keycloak-db"
+# A SECOND role rather than adding `databases` to vso-keycloak's namespaces.
+# Vault's kubernetes auth matches the CROSS-PRODUCT of
+# bound_service_account_names and bound_service_account_namespaces, so one
+# role naming both SAs and both namespaces would additionally authorize
+# `keycloak` in `databases` and `keycloak-db` in `keycloak` -- two
+# identities nobody intended, and a widening no manifest comment reveals.
+#
+# bound_service_account_names must match the ServiceAccount created in
+# platform/keycloak/config/database-job.yaml.
+vault write auth/kubernetes/role/vso-keycloak-db \
+    bound_service_account_names=keycloak-db \
+    bound_service_account_namespaces=databases \
+    audience=vault \
+    token_policies=vso-keycloak-db-read \
     ttl=1h
 
 echo "==> done"
