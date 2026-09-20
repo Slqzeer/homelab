@@ -114,15 +114,20 @@ spec:
                 echo "role keycloak created"
               fi
               # The password is passed through a psql variable, never
-              # interpolated into the SQL text, so it cannot reach a log or
-              # the process list.
+              # interpolated into the SQL text, so it cannot reach a log.
+              # It also never reaches argv: \getenv reads it straight out
+              # of the process environment from inside psql, so unlike
+              # `-v pw="$KEYCLOAK_PASSWORD"` it never becomes a literal
+              # element of the exec'd command line, where `ps` and
+              # /proc/<pid>/cmdline could read it while it runs.
               #
               # This goes through stdin, not -c: psql does not expand -v
               # variables inside a -c command string, so `-c "... :'pw'"`
               # sends the six literal characters `:'pw'` to the server and
               # fails with a syntax error. Piped via a quoted heredoc, the
               # shell leaves :'pw' untouched and psql itself expands it.
-              psql -v ON_ERROR_STOP=1 -v pw="$KEYCLOAK_PASSWORD" <<'SQL'
+              psql -v ON_ERROR_STOP=1 <<'SQL'
+              \getenv pw KEYCLOAK_PASSWORD
               ALTER ROLE keycloak WITH PASSWORD :'pw';
               SQL
               if psql -tAc \
