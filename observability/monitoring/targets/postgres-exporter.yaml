@@ -86,6 +86,14 @@ spec:
   # A Sync hook that never ends stalls the whole Argo CD sync.
   activeDeadlineSeconds: 300
   template:
+    metadata:
+      labels:
+        # Selected by the NetworkPolicy in
+        # platform/databases/postgres/config/networkpolicy.yaml. This Job
+        # predates that policy and had no labels; without this it can no
+        # longer reach 5432, and the failure appears at the NEXT sync of
+        # monitoring-config, arbitrarily far from the commit that caused it.
+        job: postgres-client
     spec:
       restartPolicy: Never
       containers:

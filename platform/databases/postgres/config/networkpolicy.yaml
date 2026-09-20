@@ -1,0 +1,87 @@
+# The fence around this namespace. Phase 25.
+#
+# Shipped by the `postgres` Application (wave 23), NOT by `keycloak`.
+# The spec's section 6 placed it under platform/keycloak/; it belongs with
+# the database it protects, because a policy owned by one of the database's
+# clients would be removed along with that client -- retiring Keycloak by
+# the root README's procedure would take the fence with it. At wave 23 the
+# fence also exists before Keycloak at wave 24 ever connects.
+#
+# INGRESS ONLY. Egress is untouched, so DNS keeps working and a wrong
+# selector here costs reachability, not resolution.
+#
+# The README's Known-gaps entry asked for this "the moment the first
+# consumer arrives, which is also the moment you learn what the policy
+# should say". Keycloak is that consumer.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: databases
+spec:
+  # Every pod in the namespace, including Redis and both exporters. Lives
+  # in the postgres directory because PostgreSQL is this namespace's
+  # anchor -- the same reason its VaultConnection is shared from here.
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-clients
+  namespace: databases
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        # Keycloak. A namespaceSelector with no podSelector beside it
+        # matches every pod in that namespace, which is what is wanted:
+        # the Deployment and any future Job of its own.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: keycloak
+        # A bare podSelector means pods in THIS namespace. The exporter.
+        - podSelector:
+            matchLabels:
+              app: postgres-exporter
+        # Both Sync-hook Jobs: postgres-exporter-role (phase 22) and
+        # keycloak-database (phase 25). Neither is long-lived, and both
+        # would otherwise be denied at the next sync with nothing in their
+        # own manifest naming this policy.
+        - podSelector:
+            matchLabels:
+              job: postgres-client
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-exporter-metrics
+  namespace: databases
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres-exporter
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        # Prometheus scrapes ACROSS the namespace boundary. Without this
+        # rule the default-deny above silently drops every scrape and
+        # pg_up goes to zero while Argo CD, the exporter and Prometheus
+        # all stay green. This is the most likely way to get this phase
+        # wrong.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9187

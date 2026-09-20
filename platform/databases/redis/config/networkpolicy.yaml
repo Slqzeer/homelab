@@ -1,0 +1,49 @@
+# Redis's half of the fence around `databases`. Phase 25.
+#
+# The namespace-wide default-deny lives with postgres, this namespace's
+# anchor; these two rules are Redis's own, shipped by the `redis`
+# Application so that each component owns the opening it needs.
+#
+# Nothing but the exporter talks to Redis today -- it is a cache with no
+# consumer yet. That is exactly why writing this down now is cheap: the
+# policy says what is true, and the next consumer has to add itself.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-clients
+  namespace: databases
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: redis-exporter
+      ports:
+        - protocol: TCP
+          port: 6379
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-exporter-metrics
+  namespace: databases
+spec:
+  podSelector:
+    matchLabels:
+      app: redis-exporter
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9121
