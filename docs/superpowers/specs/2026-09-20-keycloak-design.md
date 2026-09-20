@@ -474,6 +474,15 @@ realm holds the humans. The JSON in git declares structure, never people:
 - `sslRequired: external` — the default — rather than `all`, so in-cluster
   requests and port-forward are not refused outright.
 
+K12 applies to `homelab` and to nothing else: a required action belongs to one
+realm, so the break-glass admin in `master` is untouched by it. That account
+deliberately carries **no** TOTP. A recovery account whose use needs a second
+device fails exactly when that device is the thing lost or unavailable, and
+with K13 and no SMTP it is the only recovery path there is. Its protection is
+a 32-character generated password held only in Vault, on a tailnet-only
+account nobody uses day to day. The asymmetry is intentional and is recorded
+in the component README so it does not read as an oversight.
+
 K5: `--import-realm` uses the `IGNORE_EXISTING` strategy, so the file is
 effective on first start and ignored on every start after. That is the
 chosen trade: the realm is **reproducible** from git, but not
@@ -563,7 +572,7 @@ Secret existed anywhere.
 | 4 | `curl` :9000 `/health/ready` from inside the pod | `UP` |
 | 5 | Prometheus Targets page | `keycloak` **UP** as integration 8 |
 | 6 | `https://keycloak.taildf6cd4.ts.net` in a browser | real Let's Encrypt cert, login page renders |
-| 7 | Log in as the break-glass admin | TOTP enrolment is demanded |
+| 7 | Log in as the break-glass admin in `master` | the admin console opens; TOTP is **not** demanded — see §9.1 |
 | 8 | Grafana SSO as a `homelab-admins` member | lands with Grafana role **Admin** |
 | 9 | Grafana SSO as a `homelab-users` member | lands with role **Viewer** |
 | 10 | Grafana local admin form | still works |
