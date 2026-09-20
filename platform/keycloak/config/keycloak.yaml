@@ -1,0 +1,174 @@
+# Keycloak 26.7.4. Plain manifests rather than a chart: there is no official
+# Keycloak Helm chart, the Keycloak Operator is a CRD and a permanently
+# resident controller to manage one Deployment, and Bitnami's chart renders
+# an unpinned tag -- the same reason phase 18 rejected it for PostgreSQL.
+#
+# NO PVC, deliberately. Realms, clients, users and TOTP seeds all live in
+# the `keycloak` database in PostgreSQL. This pod is disposable; deleting it
+# costs nothing and proves the state really is in the database.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  namespace: keycloak
+  labels:
+    app: keycloak
+spec:
+  selector:
+    app: keycloak
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+    - name: management
+      # Health and metrics only. Keycloak 26 serves /health/* and /metrics
+      # on a SEPARATE port from the application, so nothing on the tailnet
+      # reaches them -- the Ingress publishes 8080 and nothing else.
+      port: 9000
+      targetPort: management
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: keycloak
+spec:
+  replicas: 1
+  strategy:
+    # Recreate, not RollingUpdate. Two Keycloaks against one database can
+    # run schema migrations concurrently during an upgrade; with one
+    # replica a rolling update buys nothing and risks exactly that.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: keycloak
+  template:
+    metadata:
+      labels:
+        app: keycloak
+    spec:
+      serviceAccountName: keycloak
+      securityContext:
+        # The image's own user. Probed from quay.io/keycloak/keycloak:26.7.4:
+        # uid 1000, gid 0 -- the root GROUP is correct here and is how the
+        # image ships, because /opt/keycloak is group-writable.
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 0
+        fsGroup: 0
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:26.7.4
+          args:
+            - start
+            - --import-realm
+          env:
+            # KC_DB is a BUILD-time option. Supplying it to `start` rather
+            # than to a prior `kc.sh build` makes the container perform its
+            # Quarkus augmentation at boot: slower, and it rules out
+            # readOnlyRootFilesystem. The alternative is a derived image
+            # with a Dockerfile and a CI pipeline of its own, which is a
+            # disproportionate amount of machinery for one Deployment.
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL
+              value: >-
+                jdbc:postgresql://postgres.databases.svc.cluster.local:5432/keycloak
+            - name: KC_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-db
+                  key: username
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-db
+                  key: password
+            # Honoured ONLY when no admin exists. Rewriting the Vault value
+            # does not change the live password -- unlike homelab/postgres,
+            # whose Job runs ALTER ROLE every sync. See the README.
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-admin
+                  key: username
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-admin
+                  key: password
+            # Hostname v2 takes a full URL. Without it Keycloak builds URLs
+            # from the request Host header and OIDC redirects break; with
+            # it, `kubectl port-forward` is a DEGRADED route, because
+            # Keycloak redirects to the tailnet URL. That trade is
+            # deliberate -- see the README.
+            - name: KC_HOSTNAME
+              value: https://keycloak.taildf6cd4.ts.net
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            # TLS terminates at the Tailscale proxy. Without this Keycloak
+            # sees plain HTTP and issues http:// redirect URIs that its own
+            # client registration then rejects.
+            - name: KC_PROXY_HEADERS
+              value: xforwarded
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+            - name: KC_METRICS_ENABLED
+              value: "true"
+            # Set explicitly rather than left to the image's
+            # MaxRAMPercentage=70. At a 768Mi limit that default sizes a
+            # ~537Mi heap, and metaspace, code cache and thread stacks land
+            # on top of it -- reaching the limit by arithmetic, before any
+            # load. Phase 23 OOMKilled Grafana at a guessed limit; this host
+            # has 3.9Gi available and swap fully exhausted.
+            - name: JAVA_OPTS_KC_HEAP
+              value: -Xms192m -Xmx448m
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: management
+              containerPort: 9000
+          startupProbe:
+            httpGet:
+              path: /health/started
+              port: management
+            # 40 x 5s = 200s. The first boot is the memory and time peak:
+            # the Quarkus augmentation, the JDBC schema creation and the
+            # realm import all happen once, in that boot. Too tight a budget
+            # here turns the first start into a liveness restart loop that
+            # never converges.
+            periodSeconds: 5
+            failureThreshold: 40
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: management
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: management
+            periodSeconds: 20
+            timeoutSeconds: 5
+            # Deliberately tolerant, matching PostgreSQL's. This host has a
+            # recorded history of probe timeouts under memory pressure
+            # (troubleshooting entries 4 and 10).
+            failureThreshold: 6
+          volumeMounts:
+            - name: realm
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 384Mi
+            limits:
+              # A STARTING POINT, not a result. Replaced with a measured
+              # figure in the last task of
+              # docs/superpowers/plans/2026-09-20-keycloak.md.
+              memory: 768Mi
+      volumes:
+        - name: realm
+          configMap:
+            name: keycloak-realm

@@ -1,0 +1,38 @@
+# Keycloak on the tailnet at https://keycloak.taildf6cd4.ts.net
+#
+# In infrastructure/ingress/config, at wave 21, AHEAD of the Keycloak it
+# points at (wave 24). Every Ingress in this repository lives here for the
+# reason argocd-ingress.yaml sets out: nothing should ever wait on ingress
+# health to sync. An Ingress whose backend does not exist yet is valid and
+# harmless -- it simply has nothing to route to until wave 24 lands.
+#
+# A dedicated proxy rather than the shared ProxyGroup, for the reason
+# argocd-ingress.yaml records at length: Tailscale Services proved
+# unroutable on this tailnet. It still references the ProxyClass so the pod
+# stays memory-bounded.
+#
+# Port 8080 ONLY. Keycloak's management port 9000 carries /health/* and
+# /metrics and is deliberately not published -- Prometheus reaches it
+# in-cluster through the Service.
+#
+# Unlike Prometheus and Loki, this one IS published: Keycloak authenticates
+# every request, and with KC_HOSTNAME set a port-forward is a degraded
+# route anyway. The tailnet is how you reach it.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: keycloak
+  namespace: keycloak
+  annotations:
+    tailscale.com/proxy-class: homelab
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: keycloak
+      port:
+        number: 8080
+  tls:
+    # Short name only. Becomes keycloak.taildf6cd4.ts.net via MagicDNS.
+    - hosts:
+        - keycloak
