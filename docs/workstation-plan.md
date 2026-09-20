@@ -1003,17 +1003,26 @@ Détails complets, mesures et décisions (L1–L19) dans
 
 # 28. Phase 25 — Keycloak et authentification centralisée
 
-Livrée. Keycloak 26.7.4 fournit l'identité OIDC du homelab, avec **Grafana
+Infrastructure livrée ; **acceptation navigateur encore à valider**.
+Keycloak 26.7.4 fournit l'identité OIDC du homelab, avec **Grafana
 comme client de validation**. Son formulaire admin local reste activé ;
 **Argo CD n'est délibérément pas encore un client**, pour que la récupération
 du système de déploiement ne dépende pas du fournisseur d'identité.
 
 Mesuré le **2026-09-20** : **602Mi** au repos, 91 minutes après le dernier
-redémarrage (pod âgé de 116 minutes), **603Mi** au pic pendant les vraies
-connexions OIDC (632242176 octets). La limite est passée de 768Mi à
-**896Mi** : le pic représente 67,3 % de cette limite, et les limites mémoire
-engagées du nœud totalisent **13098Mi / 82 %**. Un démarrage à froid atteint
-Ready en **21 secondes**, sur un budget startupProbe inchangé de 200 secondes.
+redémarrage (pod âgé de 116 minutes), **603Mi** de maximum observé sur
+15 minutes (632242176 octets), sans attribution prouvée à une connexion.
+La limite est passée de 768Mi à **896Mi** : cette observation représente
+67,3 % de la limite, et les limites mémoire engagées du nœud totalisent
+**13098Mi / 82 %**. Un redémarrage du pod avec une base déjà initialisée
+atteint Ready en **21 secondes**, sur un budget startupProbe inchangé de
+200 secondes. Ce n'est pas une mesure d'installation sur base vide.
+
+Le dump du **2026-09-20 à 15:34:32 +0200** établit **zéro utilisateur dans
+`homelab`, un dans `master`**. Les connexions OIDC précédemment rapportées
+par l'opérateur ne constituent pas une acceptation vérifiée. Restent à
+rejouer : rôles Grafana Admin et Viewer, remplacement du mot de passe
+temporaire, inscription et challenge TOTP, puis connexion admin locale.
 
 Un Deployment sans PVC rejoint la vague 24, après PostgreSQL en vague 23.
 Realms, clients, utilisateurs et graines TOTP résident dans la base
@@ -1034,6 +1043,11 @@ conserve les changements de configuration effectués en console.
 
 **La MFA est obligatoire pour tout le realm**, via `CONFIGURE_TOTP`, et
 pas seulement pour les administrateurs comme demandé initialement ici.
+Le seed active aussi `UPDATE_PASSWORD`, non par défaut : déclarer
+`requiredActions` supprime l'enregistrement automatique des actions
+standard. L'opérateur doit l'enregistrer et l'activer dans le realm
+existant avant l'onboarding ; `IGNORE_EXISTING` empêche le seed de le
+réparer. La procédure exacte est dans `platform/keycloak/README.md`.
 Chaque utilisateur doit aussi avoir une adresse email : sans elle Grafana
 refuse la connexion avec `user email is not found`. Les groupes OIDC sont
 traduits explicitement en permissions locales : `homelab-admins` devient
@@ -1059,7 +1073,11 @@ Le répertoire est en mode **700**, les fichiers en **600** ; ils contiennent
 des données sensibles, dont hashes et graines TOTP dans la base. L'export
 contraint en mémoire écrit son fichier puis sort avec le code 1 sur un conflit
 du port de gestion 9000 avec le serveur actif : le README documente la
-validation du JSON avant copie. **Une restauration n'a pas été testée.**
+validation du JSON avant publication atomique. Les nouvelles recettes
+préservent les sauvegardes existantes en cas d'échec et exportent les
+utilisateurs avec `--users realm_file`. De nouvelles sauvegardes sont
+requises après onboarding : les artefacts historiques ne couvrent pas les
+comptes créés ensuite. **Une restauration n'a pas été testée.**
 
 L'arrivée du premier consommateur a aussi fermé l'ingress du namespace
 `databases` par cinq NetworkPolicies. Validation réelle : `pg_up=1`,

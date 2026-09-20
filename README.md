@@ -493,6 +493,13 @@ last thought about it.
   and console edits never come back to git. The manual realm export in
   `platform/keycloak/README.md` records that configuration; there is no
   continuous reconciler.
+- **Keycloak browser acceptance is pending.** The existing `homelab`
+  realm needs `UPDATE_PASSWORD` registered/enabled; the corrected git seed
+  cannot repair it under `IGNORE_EXISTING`. Follow the operator procedure
+  in `platform/keycloak/README.md`, then verify Admin/Viewer roles,
+  temporary-password replacement, TOTP and local Grafana login. Earlier
+  operator-reported logins were not independently established; the dump
+  at 2026-09-20 15:34:32 +0200 contained zero `homelab` users.
 - **Keycloak's admin password cannot be rotated through Vault.**
   `KC_BOOTSTRAP_ADMIN_PASSWORD` is honoured only when no admin exists.
   Rotate the live password in Keycloak first, then update Vault, or the
@@ -501,17 +508,15 @@ last thought about it.
   secret in Keycloak silently breaks SSO until Vault is updated and
   Grafana restarted. Use the same paste ceremony as a rebuild; the local
   admin form remains available.
-- **Two of five `VaultStaticSecret` destinations still keep VSO's `_raw`
+- **Two of eleven `VaultStaticSecret` destinations still keep VSO's `_raw`
   key**, so each derived Secret carries its credential twice: once parsed,
   once in the verbatim KV JSON. `spec.destination.transformation.excludeRaw:
   true` removes the duplicate. The two affected are the phase-17 canary
   `vault-canary` in `vault`
   (`platform/vault-secrets-operator/config/vault-secrets.yaml`) and
-  `postgres-credentials` in `databases`. The three that already carry
-  `excludeRaw: true` are `redis-credentials` (phase 19),
-  `ghcr-pull` (phase 20, `platform/registry/`) and `nexus-admin`
-  (phase 21, `platform/nexus/`). The gap is therefore two Secrets, not
-  five, and the fix for those two remains outstanding — one small
+  `postgres-credentials` in `databases`. The other nine destinations carry
+  `excludeRaw: true`, including all four introduced by Keycloak.
+  The fix for those two remains outstanding — one small
   cross-cutting change rather than a component fix. Every extra copy
   widens what a `kubectl get secret -o yaml`, an Argo CD resource view, or
   an etcd backup exposes.
@@ -547,13 +552,11 @@ last thought about it.
   not close it. Every `role:`/`serviceAccount:`/`audiences:` comment in this
   repository warning that a mismatch "names neither side" still applies
   exactly as before.
-- **The four Helm `values.yaml` files are not validated by CI.** They are
+- **The seven Helm `values.yaml` files have no kubeconform schema gate.** They are
   excluded from `kubeconform` by filename pattern because they are not
   Kubernetes manifests and have no `apiVersion`/`kind`. They configure Vault,
-  VSO, the Tailscale operator and Argo CD itself — arguably the four most
-  consequential files here. The gate covers the many low-risk files and misses
-  the few high-risk ones. A green check on this repository means less than it
-  looks like it means.
+  VSO, the Tailscale operator, Argo CD, monitoring, Loki and Alloy.
+  `yamllint` still covers them; pinned-chart rendering is a separate check.
 - **The GHCR token expires, and the failure is delayed and misleading.**
   Running pods are unaffected; only *new* pulls fail. An expired token
   therefore surfaces at the next rollout, node restart or eviction —

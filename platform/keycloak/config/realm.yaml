@@ -22,6 +22,11 @@
 # accounts; this is deliberately stricter and simpler than a conditional-OTP
 # browser flow. Relax it by editing the browser flow, not by deleting this.
 #
+# Declaring requiredActions suppresses built-in action registration. Keep
+# UPDATE_PASSWORD enabled so temporary passwords can be replaced; it is
+# not a default action because only temporary/reset passwords require it.
+# Existing realms need the operator repair in the README (IGNORE_EXISTING).
+#
 # resetPasswordAllowed is false because there is NO SMTP anywhere in this
 # homelab. Left true, "Forgot password" renders a form that silently never
 # sends mail. Recovery is the break-glass admin of the `master` realm.
@@ -47,6 +52,14 @@ data:
       "failureFactor": 5,
       "maxFailureWaitSeconds": 900,
       "requiredActions": [
+        {
+          "alias": "UPDATE_PASSWORD",
+          "name": "Update Password",
+          "providerId": "UPDATE_PASSWORD",
+          "enabled": true,
+          "defaultAction": false,
+          "priority": 0
+        },
         {
           "alias": "CONFIGURE_TOTP",
           "name": "Configure OTP",

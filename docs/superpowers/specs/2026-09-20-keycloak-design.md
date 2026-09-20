@@ -36,6 +36,14 @@ intact (proving the state really lives in PostgreSQL); when a throwaway pod
 is **refused** by the new NetworkPolicy while every legitimate client still
 connects; and when Keycloak's memory has been **measured**, not assumed.
 
+**Acceptance status, corrected 2026-09-20:** Admin/Viewer OIDC logins,
+temporary-password replacement, TOTP enrolment/challenge, and local
+Grafana login remain pending explicit browser verification. Earlier
+operator-reported completion did not establish those checks: the database
+dump at 2026-09-20 15:34:32 +0200 contained zero `homelab` users and one
+`master` user. The operator must repair `UPDATE_PASSWORD` in the existing
+realm and rerun the browser checks in `platform/keycloak/README.md`.
+
 ## 2. Measured starting state
 
 Measured 2026-09-20 on `slqzeer-ms7c56`.
@@ -85,7 +93,7 @@ other namespace, and the wording needs fixing regardless of this phase.
 | K9 | The `keycloak` PostgreSQL role and database are created by an Argo CD **Sync-hook Job** in `databases`, copying the phase-22 exporter Job |
 | K10 | Two Vault roles, not one bound to two namespaces — `bound_service_account_names` × `bound_service_account_namespaces` is a cross-product |
 | K11 | `master` realm holds one break-glass admin and nothing else; humans live in `homelab`; **no users in git** |
-| K12 | `CONFIGURE_TOTP` is a realm-wide default required action — stricter than the roadmap's "MFA for admins" |
+| K12 | `CONFIGURE_TOTP` is enabled/default realm-wide; `UPDATE_PASSWORD` is explicitly enabled/non-default for temporary passwords |
 | K13 | `resetPasswordAllowed: false` — there is no SMTP in this homelab |
 | K14 | `kc.sh start`, not `--optimized`: no derived image is built for one Deployment |
 | K15 | Default-deny ingress on `databases`, with four explicit allow-rules. Ingress-only; egress and DNS untouched |
@@ -249,14 +257,14 @@ result was measured on 2026-09-20:
 | `resources.requests.memory` | 384Mi |
 | `resources.limits.memory` | 896Mi |
 | `resources.requests.cpu` | 100m |
-| Steady-state memory | 602Mi (`kubectl top`, after 116 minutes) |
-| Peak across two Grafana OIDC logins | 632242176 bytes (603Mi, cAdvisor) |
-| Cold boot to Ready | 21 seconds |
+| Steady-state memory | 602Mi (`kubectl top`, 91 minutes since restart; pod age 116 minutes) |
+| Observed 15-minute maximum | 632242176 bytes (603Mi, cAdvisor); login attribution unverified |
+| Pod restart to Ready | 21 seconds against an existing initialized database |
 
 Memory-only limit, no CPU limit, matching every other `limits:` block in
-this repository. The measured login peak was 78.5% of the original 768Mi
+this repository. The observed 15-minute maximum was 78.5% of the original 768Mi
 limit, above the plan's roughly 70% threshold. Raising the limit to 896Mi
-puts that peak at 67.3% while adding only 128Mi to this memory-constrained
+puts that observation at 67.3% while adding only 128Mi to this memory-constrained
 host. The node's committed limits measured **13098Mi (82%)** after the
 change, compared with the 12074Mi (75%) baseline in §2.
 
@@ -268,13 +276,13 @@ realm because its second management listener could not bind port 9000,
 already held by the running server; the resulting JSON parsed as realm
 `homelab`.
 
-`--import-realm` on a `kc.sh start` that also performs its Quarkus
-augmentation (K14) makes the first boot the memory peak, exactly as
-Grafana's dashboard-provisioning burst is its peak. The `startupProbe` must
-therefore be generous enough to survive that boot without liveness killing
-it — the same reasoning, for the same class of restart loop. The measured
-21-second cold boot consumes only 10.5% of its 200-second budget, so the
-probe needs no adjustment.
+First installation adds schema creation and realm import to the Quarkus
+augmentation (K14), so the startupProbe must allow for that extra work.
+The measured 21-second pod restart against an initialized database used
+10.5% of the 200-second budget; it does not measure empty-database first
+installation. The budget remains unchanged pending that measurement.
+The 896Mi limit is supported by the steady sample and export evidence;
+an explicitly observed browser-login memory measurement remains pending.
 
 ## 6. Files
 
@@ -409,8 +417,8 @@ One hand-run step, and it belongs in the root README's first-install list:
    client secret.
 2. A human reads it once: admin console → `homelab` realm → Clients →
    `grafana` → Credentials.
-3. `vault kv put homelab/keycloak-grafana clientSecret=@<file>`, overwriting
-   the placeholder.
+3. Follow the hidden-input paste ceremony in `platform/keycloak/README.md`
+   to overwrite the Vault placeholder without placing the secret in argv.
 4. VSO refreshes the Secret in `monitoring`; Grafana picks it up on its next
    restart.
 
@@ -482,6 +490,11 @@ realm holds the humans. The JSON in git declares structure, never people:
   accounts; a realm-wide requirement is both stricter and simpler than a
   conditional-OTP browser flow, and is deliberately over-delivering. It can
   be relaxed to admins-only later by editing the browser flow.
+- `UPDATE_PASSWORD` is explicitly enabled with `defaultAction: false`.
+  Declaring `requiredActions` suppresses built-in action registration, so
+  TOTP alone leaves temporary passwords without a registered replacement
+  action. The new seed fixes fresh imports; `IGNORE_EXISTING` requires an
+  operator to register/enable Update Password in an existing realm.
 - `bruteForceProtected: true`; `registrationAllowed: false`.
 - K13: `resetPasswordAllowed: false`. There is no SMTP anywhere in this
   homelab, so "Forgot password" would render a form that silently never
@@ -551,6 +564,17 @@ K4 makes this cheap: there is no volume. Two artifacts:
    for K5's drift: when the console is authoritative for a change the file
    never received, the export is the only record of it.
 
+Use the component README's atomic recipes: `umask 077`, unique captured
+timestamps, same-filesystem private temporary files, checked producers
+and transfers, artifact validation, then a no-overwrite atomic rename.
+The database pipeline uses `pipefail`. Realm exports use
+`--users realm_file`; after onboarding they must contain a nonempty user
+array (prefer the known user count as the minimum). The historical dump
+at 2026-09-20 15:34:32 +0200 held zero `homelab` users and one `master`
+user; fresh backups are required after onboarding. A known post-write
+management-port conflict (exit 1) requires its specific diagnostics plus
+successful transfer and JSON validation; other failures publish nothing.
+
 Losing the Keycloak pod costs nothing. Losing the `keycloak` database costs
 every account, and `/backups` is mode 0777 — the same handling-hygiene
 problem the README already records for `pg_dumpall` output, now holding
@@ -608,7 +632,7 @@ accident.
 
 `.github/workflows/validate.yaml` runs `kubeconform -strict`, which covers
 the new manifests and **not** `observability/monitoring/values.yaml` — one
-of the four Helm values files the README already flags as excluded by
+of the seven Helm values files the README flags as excluded by
 filename pattern. So the Grafana OIDC block, the most error-prone edit in
 this phase, gets no schema gate at all. The realm JSON inside a ConfigMap is
 opaque to kubeconform too: a malformed realm is schema-valid YAML and fails

@@ -18,10 +18,10 @@ Measured live on **2026-09-20**, not estimated from the resource budget:
 | Check | Result |
 | --- | --- |
 | Steady memory | 602Mi, 91 minutes after the last restart; pod age 116 minutes |
-| Peak across real OIDC logins | 603Mi (632242176 bytes) |
-| Memory limit | Raised from 768Mi to 896Mi; login peak is 67.3% of the new limit |
+| Observed 15-minute maximum | 603Mi (632242176 bytes); login attribution unverified |
+| Memory limit | Raised from 768Mi to 896Mi; observed maximum is 67.3% of the new limit |
 | Node committed memory limits after adjustment | 13098Mi / 82% |
-| Cold boot to Ready | 21 seconds, within the unchanged 200-second startupProbe budget |
+| Pod restart to Ready | 21 seconds against an initialized database; startupProbe budget 200 seconds |
 | Persistence after pod deletion | Realm count stayed at 2; state survived without a Keycloak PVC |
 | Database backup | `keycloak-db-20260920.sql.gz`, 65175 bytes, gzip valid |
 | Realm export | `homelab-realm-20260920.json`, 66050 bytes, valid JSON with `realm: homelab` |
@@ -29,6 +29,16 @@ Measured live on **2026-09-20**, not estimated from the resource budget:
 Database-policy acceptance also passed: `pg_up=1`, `redis_up=1`, an
 unauthorized pod was denied, and both `keycloak-database` and
 `postgres-exporter-role` Sync hooks succeeded.
+
+**Browser acceptance is pending.** Earlier operator-reported OIDC logins
+were not independently established: the database dump at
+2026-09-20 15:34:32 +0200 contained zero `homelab` users and one `master`
+user. Admin and Viewer mapping, temporary-password replacement, TOTP
+enrolment and a subsequent TOTP challenge, and local Grafana login must
+be rerun explicitly. The 603Mi observation is a 15-minute maximum, not a
+proven login peak. The 21-second restart did not test first installation
+against an empty database. The 896Mi limit remains supported by the steady
+sample and the export memory evidence below.
 
 ## How to reach it
 
@@ -68,10 +78,50 @@ and set a temporary password. **Every user needs an email address**, unique
 in the realm, or Grafana refuses the login with `user email is not found`.
 The default required action `CONFIGURE_TOTP` makes every account enrol
 TOTP on its first login, stricter than the roadmap's admins-only request.
-Users and their credentials never belong in git.
+`UPDATE_PASSWORD` must also be registered and enabled to replace temporary
+passwords; it is non-default, so existing permanent passwords are not
+changed on every login. Users and their credentials never belong in git.
 
 Grafana maps `homelab-admins` to organization `Admin`, everyone else to
 `Viewer`. The Grafana server-admin role remains local-account only.
+
+### Repair the existing realm and complete browser acceptance
+
+This is an operator procedure. The corrected seed applies to fresh
+imports only: `IGNORE_EXISTING` means pushing it or restarting Keycloak
+cannot repair the existing `homelab` realm. Do not delete/reimport that
+realm. Take a database backup using the atomic recipe below before
+changing its authentication settings.
+
+1. Open `https://keycloak.taildf6cd4.ts.net/admin`, sign in with the
+   break-glass `admin` in `master`, then select **homelab** in the realm
+   selector. Confirm that realm before changing anything.
+2. Open **Authentication → Required actions**. If **Update Password** is
+   absent, choose **Register** and register **Update Password**
+   (`UPDATE_PASSWORD`). Enable it and leave **Default action** off. Move
+   it above **Configure OTP** so password replacement precedes enrolment.
+3. Keep **Configure OTP** (`CONFIGURE_TOTP`) enabled with **Default action**
+   on. Reload the page and verify both rows and their settings. Leave the
+   `master` realm unchanged.
+4. Create one human in `homelab-admins` and one in `homelab-users`, each
+   with a unique email address. Set their passwords in **Credentials**
+   with **Temporary** on. For a user created before the default action was
+   enabled, also add **Configure OTP** to that user's **Required user
+   actions**; changing the realm default does not retrofit existing users.
+5. In a fresh private browser session, open
+   `https://grafana.taildf6cd4.ts.net` and choose **Sign in with Keycloak**.
+   For the admin user, verify that the temporary password must be replaced,
+   then enrol TOTP. Confirm Grafana assigns organization **Admin**.
+6. Fully sign out, close the private session, and open a new one. Verify
+   login requires the new password and a TOTP code. Repeat steps 5–6 for
+   the other user and confirm organization **Viewer**.
+7. In a separate fresh session, verify Grafana's local admin form with its
+   Vault-held credential. Record dated pass/fail results for both roles,
+   password replacement, TOTP enrolment/challenge and local login; no
+   passwords, tokens or TOTP seeds belong in that record.
+8. Take fresh database and `--users realm_file` backups after onboarding,
+   with the realm validation minimum set to the number of users just
+   verified. The earlier zero-user backups do not cover these accounts.
 
 ### The client-secret paste ceremony
 
@@ -147,7 +197,8 @@ does not rotate the live account: rotate in Keycloak first, then update
 `homelab/keycloak` in Vault. Separately, regenerating the Grafana client
 secret in Keycloak breaks SSO until `homelab/keycloak-grafana` is updated
 through the paste ceremony and Grafana restarted. No reconciler performs
-either operation; local Grafana login remains available throughout.
+either operation; the local Grafana form remains enabled throughout, with
+actual login acceptance pending the procedure above.
 
 **The realm is reproducible, not reconciled.** `--import-realm` uses
 `IGNORE_EXISTING`: the seed is applied once, then ignored on every later
@@ -164,6 +215,12 @@ The seed therefore explicitly declares only `groups`, `profile` and
 Referencing a built-in name without declaring it here does not create its
 mappers. The `groups` mapper emits bare group names; without it the role
 mapping quietly falls through to Viewer.
+
+**Declaring `requiredActions` also suppresses built-in registration.**
+The seed explicitly enables `UPDATE_PASSWORD` (non-default) and
+`CONFIGURE_TOTP` (default). Omitting the former prevents replacement of
+temporary passwords. Repair existing realms with the operator procedure
+above; a new git seed has no effect on already imported realms.
 
 **Application health is not credential health.** Argo CD assesses the
 Deployment, but not `VaultAuth`, `VaultConnection` or `VaultStaticSecret`.
@@ -192,21 +249,20 @@ hashes and TOTP seeds, and realm exports can contain client secrets and
 user credentials. Never commit either artifact or print their full contents.
 
 The database dump uses PostgreSQL's trusted local Unix socket, so no
-password is needed. In Bash:
+password is needed. Run this single-line command in Bash. It captures one
+UTC timestamp, creates a private temporary file on the backup filesystem,
+checks producer/pipeline success, gzip integrity and the SQL completion
+marker plus realm table, then atomically publishes the artifact. Failure
+removes only the new temporary file; existing backups are never overwritten.
 
 ```bash
-set -o pipefail
-umask 077
-mkdir -p /backups/services/keycloak
-chmod 700 /backups/services/keycloak
-sg k3s-admin -c 'kubectl -n databases exec postgres-0 -- pg_dump -U postgres -d keycloak' | gzip > /backups/services/keycloak/keycloak-db-$(date +%Y%m%d).sql.gz
-chmod 600 /backups/services/keycloak/keycloak-db-$(date +%Y%m%d).sql.gz
-gzip -t /backups/services/keycloak/keycloak-db-$(date +%Y%m%d).sql.gz
-ls -l /backups/services/keycloak/
+( set -eu; set -o pipefail; umask 077; mkdir -p /backups/services/keycloak; chmod 700 /backups/services/keycloak; KC_BACKUP_STAMP=$(date -u +%Y%m%dT%H%M%S.%NZ); KC_DB_TMP=$(mktemp /backups/services/keycloak/.keycloak-db.XXXXXX); trap 'rm -f -- "$KC_DB_TMP"' EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; KC_DB_FINAL=/backups/services/keycloak/keycloak-db-${KC_BACKUP_STAMP}.sql.gz; sg k3s-admin -c 'kubectl -n databases exec postgres-0 -- pg_dump -U postgres -d keycloak' | gzip > "$KC_DB_TMP"; test -s "$KC_DB_TMP"; gzip -t "$KC_DB_TMP"; gzip -cd "$KC_DB_TMP" | awk '/^CREATE TABLE public.realm / {realm=1} /^-- PostgreSQL database dump complete$/ {complete=1} END {exit !(realm && complete)}'; mv -nT -- "$KC_DB_TMP" "$KC_DB_FINAL"; test ! -e "$KC_DB_TMP"; printf 'Database backup published: %s\n' "$KC_DB_FINAL" )
 ```
 
-Check the dump command's status as well as `gzip -t`; gzip validity alone
-does not prove `pg_dump` succeeded. The measured dump was 65175 bytes.
+`set -o pipefail` propagates a failed `kubectl`/`pg_dump` through gzip;
+gzip validity alone cannot prove success. `mv -nT` also refuses a filename
+collision, and the following check makes that a failure. Nanosecond UTC
+timestamps distinguish same-day runs. The measured dump was 65175 bytes.
 
 Live `kc.sh export --file` OOMKilled the pod at 768Mi. At the current 896Mi
 limit, the constrained second JVM with `--dir /tmp/homelab-export` wrote
@@ -221,31 +277,39 @@ defines it as including users in the realm JSON. This keeps users and
 their credentials in `homelab-realm.json` instead of separate user files.
 The user-inclusive variant is checked against the pinned help; it has not
 been measured live. Its size need not match the original 66050 bytes.
-Start with a fresh directory so stale files cannot pass validation:
-
-```bash
-sg k3s-admin -c 'kubectl -n keycloak exec deploy/keycloak -- rm -rf -- /tmp/homelab-export'
-sg k3s-admin -c 'kubectl -n keycloak exec deploy/keycloak -- env JAVA_OPTS_KC_HEAP="-Xms64m -Xmx128m" /opt/keycloak/bin/kc.sh export --realm homelab --dir /tmp/homelab-export --users realm_file'
-```
 
 The measured live command logged `Realm 'homelab' - data exported` and
 `Export finished successfully`, then **exited 1** because the second
 process could not bind management port 9000, already occupied by the live
-server. Do not mistake this for a zero-exit command, or accept every
-export error as this known case. Confirm both success messages and
-validate the JSON's realm and user array before copying it. This homelab
-already has users, so an empty or absent array is a failed backup check.
+server. The command below accepts exit 1 only with both success markers
+and the specific management-port-9000/address-in-use diagnostics. All
+other producer failures stop it. A successful transfer and artifact
+validation are required even for that known case; no log is printed.
+The diagnostics were reproduced with isolated Keycloak 26.7.4:
+`Unable to start the management interface on 0.0.0.0:9000`, followed by
+`Address already in use` after both export-success messages.
+
+The database dump at **2026-09-20 15:34:32 +0200** establishes **zero
+`homelab` users and one `master` user** then. It does not back up humans
+created later. Keep `KC_MIN_USERS=1` after onboarding, or set it to the
+known number of onboarded users for a stronger check. Only for an
+explicitly verified pre-onboarding realm may it be set to `0`; zero users
+then proves configuration only. Take fresh database and realm backups
+after onboarding. Run exports serially because the pod scratch directory
+is shared. The following command clears that exact directory first,
+transfers once into a private local temporary file and checks that copy
+before atomic publication:
 
 ```bash
-set -o pipefail
-umask 077
-if sg k3s-admin -c 'kubectl -n keycloak exec deploy/keycloak -- cat /tmp/homelab-export/homelab-realm.json' | jq -e '.realm == "homelab" and (.users | type == "array" and length > 0)' >/dev/null; then sg k3s-admin -c 'kubectl -n keycloak exec deploy/keycloak -- cat /tmp/homelab-export/homelab-realm.json' > /backups/services/keycloak/homelab-realm-$(date +%Y%m%d).json && chmod 600 /backups/services/keycloak/homelab-realm-$(date +%Y%m%d).json && jq -e '.realm == "homelab" and (.users | type == "array" and length > 0)' /backups/services/keycloak/homelab-realm-$(date +%Y%m%d).json; else printf '%s\n' 'Realm/user validation failed; no backup copied.' >&2; fi
-sg k3s-admin -c 'kubectl -n keycloak exec deploy/keycloak -- rm -rf -- /tmp/homelab-export'
+( set -eu; set -o pipefail; umask 077; KC_MIN_USERS=1; mkdir -p /backups/services/keycloak; chmod 700 /backups/services/keycloak; KC_BACKUP_STAMP=$(date -u +%Y%m%dT%H%M%S.%NZ); KC_REALM_TMP=$(mktemp /backups/services/keycloak/.homelab-realm.XXXXXX); kc_export_cleanup() { rm -f -- "$KC_REALM_TMP"; sg k3s-admin -c 'kubectl -n keycloak exec deploy/keycloak -- rm -rf -- /tmp/homelab-export' >/dev/null 2>&1 || true; }; trap kc_export_cleanup EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; KC_REALM_FINAL=/backups/services/keycloak/homelab-realm-${KC_BACKUP_STAMP}.json; sg k3s-admin -c 'kubectl -n keycloak exec deploy/keycloak -- rm -rf -- /tmp/homelab-export'; KC_EXPORT_STATUS=0; KC_EXPORT_LOG=$(sg k3s-admin -c 'kubectl -n keycloak exec deploy/keycloak -- env JAVA_OPTS_KC_HEAP="-Xms64m -Xmx128m" /opt/keycloak/bin/kc.sh export --realm homelab --dir /tmp/homelab-export --users realm_file' 2>&1) || KC_EXPORT_STATUS=$?; if [ "$KC_EXPORT_STATUS" -ne 0 ]; then test "$KC_EXPORT_STATUS" -eq 1; printf '%s\n' "$KC_EXPORT_LOG" | grep -F "Realm 'homelab' - data exported" >/dev/null; printf '%s\n' "$KC_EXPORT_LOG" | grep -F 'Export finished successfully' >/dev/null; printf '%s\n' "$KC_EXPORT_LOG" | grep -E 'Unable to start the management interface on .*:9000$' >/dev/null; printf '%s\n' "$KC_EXPORT_LOG" | grep -F 'Address already in use' >/dev/null; fi; sg k3s-admin -c 'kubectl -n keycloak exec deploy/keycloak -- cat /tmp/homelab-export/homelab-realm.json' > "$KC_REALM_TMP"; jq -e --argjson minimum "$KC_MIN_USERS" '.realm == "homelab" and ((.users // []) | type == "array" and length >= $minimum)' "$KC_REALM_TMP" >/dev/null; sg k3s-admin -c 'kubectl -n keycloak exec deploy/keycloak -- rm -rf -- /tmp/homelab-export'; mv -nT -- "$KC_REALM_TMP" "$KC_REALM_FINAL"; test ! -e "$KC_REALM_TMP"; printf 'Realm backup published: %s\n' "$KC_REALM_FINAL" )
 ```
 
-Cleanup removes the entire exact `/tmp/homelab-export` directory,
+Failure removes only the new local temporary file and attempts remote
+scratch cleanup, preserving every existing final backup. Cleanup removes
+the entire exact `/tmp/homelab-export` directory,
 including any credential-bearing user files left by an interrupted or
-older export. It never targets a parent directory or a wildcard.
+older export. It never targets a parent directory or a wildcard. If the
+pod is unreachable, retry that exact cleanup once access returns.
 
 The measured JSON was 66050 bytes. That proves a realm configuration
 artifact was written and parsed; **restoration has not been tested**.
@@ -272,8 +336,9 @@ substitute for it.
 ## Rollback
 
 Revert the Grafana OIDC integration first if SSO needs abandoning; the
-local admin form already works. Reverting the Deployment prunes Keycloak
-but preserves PostgreSQL's database. Reverting `realm.yaml` cannot remove
+local admin form remains enabled (login acceptance is pending). Reverting
+the Deployment prunes Keycloak but preserves PostgreSQL's database.
+Reverting `realm.yaml` cannot remove
 or overwrite an imported realm. To retire the whole Application, follow
 the root README's removal procedure: add its cascade finalizer **before**
 removing its file, or resources are orphaned. The database and Vault paths

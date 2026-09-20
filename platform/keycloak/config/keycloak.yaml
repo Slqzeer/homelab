@@ -133,10 +133,10 @@ spec:
             httpGet:
               path: /health/started
               port: management
-            # 40 x 5s = 200s. The first boot is the memory and time peak:
-            # the Quarkus augmentation, the JDBC schema creation and the
-            # realm import all happen once, in that boot. Too tight a budget
-            # here turns the first start into a liveness restart loop that
+            # 40 x 5s = 200s. First installation adds JDBC schema creation
+            # and realm import to augmentation. The measured 21s restart
+            # used an existing DB; first-install timing is unverified.
+            # Too tight a budget turns first start into a restart loop that
             # never converges.
             periodSeconds: 5
             failureThreshold: 40
@@ -164,9 +164,10 @@ spec:
               cpu: 100m
               memory: 384Mi
             limits:
-              # Measured 2026-09-20: 602Mi at rest and a 603Mi peak across
-              # two Grafana OIDC logins. 896Mi keeps that peak at 67%; the
-              # old 768Mi limit left only 21% headroom.
+              # Measured 2026-09-20: 602Mi at rest and a 603Mi observed
+              # 15-minute maximum (login attribution unverified). 896Mi
+              # keeps that observation at 67%; the old 768Mi limit left
+              # only 21% headroom.
               memory: 896Mi
       volumes:
         - name: realm

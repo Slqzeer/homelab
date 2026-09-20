@@ -105,9 +105,11 @@ spec:
               until pg_isready -q; do
                 echo "waiting for postgres"; sleep 2
               done
-              if psql -tAc \
-                "SELECT 1 FROM pg_roles WHERE rolname='keycloak'" \
-                | grep -q 1; then
+              # Assign separately: set -e stops on a failed psql probe.
+              # A failed connection/query must never mean "not present".
+              role_exists=$(psql -v ON_ERROR_STOP=1 -tAc \
+                "SELECT 1 FROM pg_roles WHERE rolname='keycloak'")
+              if [ "$role_exists" = 1 ]; then
                 echo "role keycloak exists"
               else
                 psql -v ON_ERROR_STOP=1 -c "CREATE ROLE keycloak LOGIN"
@@ -130,9 +132,9 @@ spec:
               \getenv pw KEYCLOAK_PASSWORD
               ALTER ROLE keycloak WITH PASSWORD :'pw';
               SQL
-              if psql -tAc \
-                "SELECT 1 FROM pg_database WHERE datname='keycloak'" \
-                | grep -q 1; then
+              database_exists=$(psql -v ON_ERROR_STOP=1 -tAc \
+                "SELECT 1 FROM pg_database WHERE datname='keycloak'")
+              if [ "$database_exists" = 1 ]; then
                 echo "database keycloak exists"
               else
                 # CREATE DATABASE cannot run inside a transaction block,
