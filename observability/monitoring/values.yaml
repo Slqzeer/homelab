@@ -217,6 +217,49 @@ grafana:
       limits:
         memory: 160Mi
 
+  # Phase 25. Grafana is this homelab's first real OIDC client -- the canary
+  # for the whole identity plane, chosen because it is the safest place to
+  # be wrong: the admin form below stays enabled, Grafana has no PVC, and
+  # nothing else depends on a Grafana login.
+  grafana.ini:
+    server:
+      # REQUIRED, not cosmetic. Grafana builds its OIDC redirect_uri from
+      # root_url. Without it, it derives one from the request Host header
+      # and produces an http:// URI that Keycloak rejects as a redirect
+      # mismatch -- an error naming the URI but never the missing setting.
+      root_url: https://grafana.taildf6cd4.ts.net
+    auth.generic_oauth:
+      enabled: true
+      name: Keycloak
+      client_id: grafana
+      # The `groups` scope is what carries group membership into the token.
+      # Drop it and role_attribute_path below silently matches nothing.
+      scopes: openid profile email groups
+      auth_url: https://keycloak.taildf6cd4.ts.net/realms/homelab/protocol/openid-connect/auth
+      token_url: https://keycloak.taildf6cd4.ts.net/realms/homelab/protocol/openid-connect/token
+      api_url: https://keycloak.taildf6cd4.ts.net/realms/homelab/protocol/openid-connect/userinfo
+      role_attribute_path: contains(groups[*], 'homelab-admins') && 'Admin' || 'Viewer'
+      # false so a user in neither group lands as Viewer rather than being
+      # refused outright.
+      role_attribute_strict: false
+      # The Grafana SERVER admin role stays reachable only through the local
+      # account, which is what keeps this canary abandonable.
+      allow_assign_grafana_admin: false
+
+  # The client secret arrives as an env var, not in grafana.ini: an env var
+  # overrides the ini file and keeps the secret out of the rendered
+  # ConfigMap, where `kubectl get configmap -o yaml` and every Argo CD
+  # resource view would otherwise show it.
+  envValueFrom:
+    GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET:
+      secretKeyRef:
+        name: keycloak-grafana
+        key: clientSecret
+
+  # NOT SET, deliberately: auth.disable_login_form. The local admin form,
+  # backed by homelab/grafana in Vault since phase 23, is the fallback that
+  # makes an OIDC misconfiguration recoverable instead of a lockout.
+
   resources:
     requests:
       cpu: 50m
