@@ -1,0 +1,39 @@
+# Keycloak, the homelab's OIDC identity provider. Workstation-plan phase 25.
+#
+# Wave 24, and for a real dependency rather than habit: the bootstrap Job
+# below needs the `postgres-credentials` Secret and a running PostgreSQL,
+# both of which arrive at wave 23. By the root README's rule, a component
+# that depends on something at wave 23 sits above it -- which is why this
+# joins `beacon` and `monitoring-config` rather than sitting at 23 with the
+# database it consumes.
+#
+# It JOINS wave 24 rather than opening a wave 25, so monitoring-config's
+# invariant that nothing sits behind wave 24 survives this phase. Wave-24
+# Applications reconcile in parallel; Keycloak does not wait on
+# monitoring-config and monitoring-config does not wait on Keycloak.
+#
+# The destination namespace is `keycloak`, but config/database-job.yaml
+# does NOT land there -- it carries `namespace: databases` on every object.
+# destination.namespace is only the default for a manifest that omits one.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keycloak
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "24"
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:Slqzeer/homelab.git
+    targetRevision: main
+    path: platform/keycloak/config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keycloak
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
