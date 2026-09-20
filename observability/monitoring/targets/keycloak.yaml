@@ -1,0 +1,33 @@
+# Keycloak -- integration 8. Phase 25.
+#
+# Shipped by `monitoring-config` (wave 24) rather than by the `keycloak`
+# Application, because every ServiceMonitor in this repository lives here:
+# they need the CRDs the kube-prometheus-stack chart installs at wave 23.
+#
+# monitoring-config and keycloak share wave 24 and reconcile in parallel, so
+# this may apply before Keycloak's Service exists. That is harmless -- a
+# ServiceMonitor with no matching Service is valid and simply has no
+# targets until one appears.
+#
+# Scrapes the MANAGEMENT port, not 8080. Keycloak 26 serves /metrics and
+# /health/* on a separate port, which is also why the Ingress publishes
+# 8080 alone.
+#
+# This is not decorative. Keycloak passes its probes and serves logins
+# whether or not anyone is watching its JVM heap, and this host runs at
+# 75% committed memory limits with swap exhausted.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: keycloak
+  namespace: keycloak
+  labels:
+    app: keycloak
+spec:
+  selector:
+    matchLabels:
+      app: keycloak
+  endpoints:
+    - port: management
+      path: /metrics
+      interval: 30s
