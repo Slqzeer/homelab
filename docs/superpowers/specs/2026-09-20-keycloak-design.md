@@ -525,6 +525,9 @@ Known gap and §10 makes the realm export the mitigation.
 grafana.ini:
   server.root_url            https://grafana.taildf6cd4.ts.net
   auth.generic_oauth.enabled true
+  ...auth_url                https://keycloak.taildf6cd4.ts.net/.../auth
+  ...token_url               http://keycloak.keycloak.svc.cluster.local:8080/.../token
+  ...api_url                 http://keycloak.keycloak.svc.cluster.local:8080/.../userinfo
   ...role_attribute_path     contains(groups[*], 'homelab-admins') && 'Admin' || 'Viewer'
   ...role_attribute_strict   false
   ...allow_assign_grafana_admin false
@@ -534,6 +537,14 @@ grafana.ini:
 it, and without it derives one from the request `Host` header — producing an
 `http://` URI that Keycloak rejects as a redirect mismatch, an error that
 names the URI but not the missing setting.
+
+OIDC routing is deliberately split. `auth_url` is a browser front-channel
+and therefore uses tailnet HTTPS. `token_url` and `api_url` are Grafana
+server back-channels and use Keycloak's in-cluster HTTP Service. CoreDNS
+does not resolve the Tailscale MagicDNS hostname; using the public URL for
+the back-channels makes code exchange fail at DNS before client
+authentication. TLS still protects both browser-facing legs, while the two
+back-channel calls remain inside the cluster network.
 
 `role_attribute_strict: false` so a user in neither group lands as Viewer
 rather than being refused, and `allow_assign_grafana_admin: false` so the

@@ -90,9 +90,13 @@ Grafana is the first OIDC client at
 the recovery route; Argo CD is deliberately not an OIDC client yet.
 `values.yaml` supplies `grafana.grafana.ini.auth.generic_oauth`: client
 `grafana`, scopes `openid profile email groups`, and Keycloak's `homelab`
-authorization, token and userinfo endpoints. `homelab-admins` maps to
+endpoints. The browser-facing authorization endpoint uses tailnet HTTPS.
+The token and userinfo back-channels use
+`http://keycloak.keycloak.svc.cluster.local:8080`: CoreDNS does not resolve
+the Tailscale MagicDNS name from Grafana's pod. `homelab-admins` maps to
 organization Admin, everyone else to Viewer; `allow_assign_grafana_admin:
-false` reserves server-admin access for the local account.
+false` reserves server-admin access for the local account. CI parses the
+values with `test_oauth_routing.py` to preserve this routing split.
 
 `grafana.ini.server.root_url: https://grafana.taildf6cd4.ts.net` is
 **required, not cosmetic**. Grafana constructs its OIDC callback from it;
@@ -117,9 +121,9 @@ the pinned chart:
 helm template monitoring prometheus-community/kube-prometheus-stack --version 91.4.1 -n monitoring -f observability/monitoring/values.yaml --show-only charts/grafana/templates/configmap.yaml --show-only charts/grafana/templates/deployment.yaml
 ```
 
-Check `[auth.generic_oauth]`, all three Keycloak URLs and `[server]`
-`root_url`, then the environment variable's Secret reference. The
-ConfigMap must not contain a `client_secret` value.
+Check `[auth.generic_oauth]`, the external `auth_url`, both internal
+back-channel URLs and `[server]` `root_url`, then the environment variable's
+Secret reference. The ConfigMap must not contain a `client_secret` value.
 
 ### Rotating the local admin password
 

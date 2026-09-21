@@ -191,6 +191,13 @@ that the paste succeeded; investigate before repeating the ceremony.
 
 ## Things that will surprise you
 
+**OIDC uses split routing.** A browser reaches the authorization endpoint
+at `https://keycloak.taildf6cd4.ts.net`, but Grafana exchanges the code and
+loads userinfo through `http://keycloak.keycloak.svc.cluster.local:8080`.
+Pods use cluster DNS, which does not resolve the Tailscale MagicDNS name.
+Pointing Grafana's back-channels at the public URL fails before client-secret
+validation with `lookup keycloak.taildf6cd4.ts.net ... no such host`.
+
 **The two rotation traps are silent.** `KC_BOOTSTRAP_ADMIN_PASSWORD` is
 honoured only when no admin exists. Changing Vault updates the Secret but
 does not rotate the live account: rotate in Keycloak first, then update

@@ -235,9 +235,14 @@ grafana:
       # The `groups` scope is what carries group membership into the token.
       # Drop it and role_attribute_path below silently matches nothing.
       scopes: openid profile email groups
+      # The browser follows auth_url, so it must use the tailnet hostname.
+      # token_url and api_url are Grafana back-channels: cluster DNS cannot
+      # resolve Tailscale MagicDNS names, so those use Keycloak's Service.
       auth_url: https://keycloak.taildf6cd4.ts.net/realms/homelab/protocol/openid-connect/auth
-      token_url: https://keycloak.taildf6cd4.ts.net/realms/homelab/protocol/openid-connect/token
-      api_url: https://keycloak.taildf6cd4.ts.net/realms/homelab/protocol/openid-connect/userinfo
+      token_url: "http://keycloak.keycloak.svc.cluster.local:8080/realms\
+        /homelab/protocol/openid-connect/token"
+      api_url: "http://keycloak.keycloak.svc.cluster.local:8080/realms\
+        /homelab/protocol/openid-connect/userinfo"
       role_attribute_path: contains(groups[*], 'homelab-admins') && 'Admin' || 'Viewer'
       # false so a user in neither group lands as Viewer rather than being
       # refused outright.

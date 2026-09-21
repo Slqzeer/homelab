@@ -1053,6 +1053,13 @@ refuse la connexion avec `user email is not found`. Les groupes OIDC sont
 traduits explicitement en permissions locales : `homelab-admins` devient
 Admin d'organisation dans Grafana, les autres comptes Viewer.
 
+Le routage OIDC sépare le front-channel du back-channel : le navigateur
+utilise l'URL HTTPS tailnet pour l'autorisation, tandis que Grafana appelle
+les endpoints token et userinfo via le Service interne
+`keycloak.keycloak.svc.cluster.local:8080`. CoreDNS ne résout pas le nom
+MagicDNS Tailscale depuis les pods ; l'utiliser pour le back-channel fait
+échouer l'échange du code avant même la validation du secret client.
+
 **`resetPasswordAllowed` est false, car il n'y a pas de SMTP** — un cas que
 le plan initial n'avait pas anticipé. `master` ne contient qu'un admin de
 récupération, sans TOTP : exiger l'appareil perdu pour récupérer le compte
