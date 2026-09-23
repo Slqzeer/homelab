@@ -86,6 +86,7 @@ class ApplicationOnboardingTests(unittest.TestCase):
             "metadata": {"name": "default-deny", "namespace": "example"},
             "spec": {"podSelector": {}, "policyTypes": ["Ingress", "Egress"]},
         }
+        self.additional_policies = []
         self.ingress = {
             "apiVersion": "networking.k8s.io/v1",
             "kind": "Ingress",
@@ -117,7 +118,9 @@ class ApplicationOnboardingTests(unittest.TestCase):
         ingress_path = self.root / "ingress.yaml"
         application_path.write_text(yaml.safe_dump(self.application), encoding="utf-8")
         rendered_path.write_text(
-            yaml.safe_dump_all([self.namespace, self.deployment, self.service, self.vso, self.policy]),
+            yaml.safe_dump_all(
+                [self.namespace, self.deployment, self.service, self.vso, self.policy, *self.additional_policies]
+            ),
             encoding="utf-8",
         )
         ingress_path.write_text(yaml.safe_dump(self.ingress), encoding="utf-8")
@@ -222,6 +225,45 @@ class ApplicationOnboardingTests(unittest.TestCase):
         self.application["metadata"]["annotations"]["homelab.io/state"] = ["stateless"]
         self.assertIn("application requires homelab.io/state: stateless or durable", self.validate())
 
+
+    def test_rejects_statefulset_volume_claim_template_as_stateless(self):
+        self.deployment["kind"] = "StatefulSet"
+        self.deployment["spec"]["volumeClaimTemplates"] = [{"metadata": {"name": "data"}}]
+        self.assertIn("durable state requires homelab.io/state: durable", self.validate())
+
+    def test_rejects_allow_all_policy_even_with_default_deny(self):
+        self.additional_policies.append({
+            "kind": "NetworkPolicy",
+            "metadata": {"name": "allow-all", "namespace": "example"},
+            "spec": {"podSelector": {}, "policyTypes": ["Ingress", "Egress"], "ingress": [{}], "egress": [{}]},
+        })
+        self.assertIn("network policy must not allow all ingress or egress", self.validate())
+
+    def test_rejects_all_port_allow_rule(self):
+        self.additional_policies.append({
+            "kind": "NetworkPolicy",
+            "metadata": {"name": "all-ports", "namespace": "example"},
+            "spec": {"podSelector": {}, "ingress": [{"from": [{"podSelector": {"matchLabels": {"app": "proxy"}}}]}]},
+        })
+        self.assertIn("network policy must not allow all ingress or egress", self.validate())
+
+    def test_rejects_unrestricted_peer_allow_rule(self):
+        self.additional_policies.append({
+            "kind": "NetworkPolicy",
+            "metadata": {"name": "all-namespaces", "namespace": "example"},
+            "spec": {"podSelector": {}, "ingress": [{"from": [{"namespaceSelector": {}}], "ports": [{"port": 8080}]}]},
+        })
+        self.assertIn("network policy must not allow all ingress or egress", self.validate())
+
+    def test_rejects_operations_service_port_on_another_number(self):
+        self.service["spec"]["ports"][1]["port"] = 9443
+        self.ingress["spec"]["defaultBackend"]["service"]["port"] = {"number": 9443}
+        self.assertIn("ingress must not expose an operations port", self.validate())
+
+
+    def test_rejects_public_service_port_targeting_operations(self):
+        self.service["spec"]["ports"][0]["targetPort"] = "operations"
+        self.assertIn("ingress must not expose an operations port", self.validate())
 
 if __name__ == "__main__":
     unittest.main()

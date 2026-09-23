@@ -12,6 +12,7 @@ IMAGE = re.compile(r"^[^\s@]+:(?:v)?\d+\.\d+\.\d+(?:[-+][A-Za-z0-9_.-]+)?@sha256
 RELEASE = re.compile(r"^(?:v)?\d+\.\d+\.\d+(?:[-+][A-Za-z0-9_.-]+)?$")
 COMMIT = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 POD_SECURITY = ("enforce", "audit", "warn")
+UNSAFE_PORT_NAMES = {"operations", "metrics", "health", "admin"}
 
 
 def _map(value):
@@ -79,6 +80,33 @@ def _default_denies(documents: list[dict], namespace: str) -> set[str]:
     return denied
 
 
+def _unrestricted_peer(peer: object) -> bool:
+    peer = _map(peer)
+    if not peer:
+        return True
+    if _map(peer.get("ipBlock")).get("cidr") in {"0.0.0.0/0", "::/0"}:
+        return True
+    if peer.get("namespaceSelector") == {} and not _map(peer.get("podSelector")):
+        return True
+    return peer.get("podSelector") == {} and "namespaceSelector" not in peer
+
+
+def _has_unrestricted_policy(documents: list[dict], namespace: str) -> bool:
+    for document in documents:
+        if document.get("kind") != "NetworkPolicy" or _map(document.get("metadata")).get("namespace") != namespace:
+            continue
+        spec = _map(document.get("spec"))
+        for direction, peer_field in (("ingress", "from"), ("egress", "to")):
+            for rule in spec.get(direction) or []:
+                rule = _map(rule)
+                ports = rule.get("ports") or []
+                peers = rule.get(peer_field) or []
+                if (not ports or any(_map(port).get("port") is None for port in ports)
+                        or not peers or any(_unrestricted_peer(peer) for peer in peers)):
+                    return True
+    return False
+
+
 def _ingress_backends(ingress: dict) -> list[dict]:
     spec = _map(ingress.get("spec"))
     backends = [_map(spec.get("defaultBackend"))]
@@ -86,6 +114,29 @@ def _ingress_backends(ingress: dict) -> list[dict]:
         for path in _map(_map(rule).get("http")).get("paths") or []:
             backends.append(_map(_map(path).get("backend")))
     return [_map(backend.get("service")) for backend in backends if backend]
+
+
+def _exposes_operations_port(backend: dict, namespace: str, documents: list[dict]) -> bool:
+    reference = _map(backend.get("port"))
+    name, number = reference.get("name"), reference.get("number")
+    if name in UNSAFE_PORT_NAMES or number == 9000:
+        return True
+    for document in documents:
+        if document.get("kind") != "Service":
+            continue
+        metadata = _map(document.get("metadata"))
+        if metadata.get("namespace") != namespace or metadata.get("name") != backend.get("name"):
+            continue
+        for declared in _map(document.get("spec")).get("ports") or []:
+            declared = _map(declared)
+            if (name and declared.get("name") == name) or (number is not None and declared.get("port") == number):
+                return (
+                    declared.get("name") in UNSAFE_PORT_NAMES
+                    or declared.get("targetPort") in UNSAFE_PORT_NAMES
+                    or declared.get("port") == 9000
+                    or declared.get("targetPort") == 9000
+                )
+    return False
 
 
 def validate_application(
@@ -127,7 +178,11 @@ def validate_application(
             if (path.is_absolute() or not candidate.is_relative_to(REPOSITORY_ROOT)
                     or not candidate.is_file() or not _checked_in(candidate)):
                 errors.append("restore runbook must be a checked-in repository path")
-    elif any(doc.get("kind") == "PersistentVolumeClaim" for doc in rendered):
+    elif any(
+        doc.get("kind") == "PersistentVolumeClaim"
+        or (doc.get("kind") == "StatefulSet" and _map(doc.get("spec")).get("volumeClaimTemplates"))
+        for doc in rendered
+    ):
         errors.append("durable state requires homelab.io/state: durable")
 
     spec = _map(application.get("spec"))
@@ -183,6 +238,8 @@ def validate_application(
 
     if _default_denies(rendered, namespace) != {"Ingress", "Egress"}:
         errors.append("namespace requires default-deny ingress and egress NetworkPolicy")
+    if _has_unrestricted_policy(rendered, namespace):
+        errors.append("network policy must not allow all ingress or egress")
 
     matching_ingresses = [
         doc for doc in ingresses if doc.get("kind") == "Ingress" and _map(doc.get("metadata")).get("namespace") == namespace
@@ -196,8 +253,7 @@ def validate_application(
         if ingress_annotations.get("tailscale.com/proxy-class") != "homelab":
             errors.append("ingress must use tailscale.com/proxy-class: homelab")
         for backend in _ingress_backends(ingress):
-            port = _map(backend.get("port"))
-            if port.get("name") in {"operations", "metrics", "health", "admin"} or port.get("number") == 9000:
+            if _exposes_operations_port(backend, namespace, rendered):
                 errors.append("ingress must not expose an operations port")
         if ingress_annotations.get("portal.homelab.io/enabled") == "true":
             access = ingress_annotations.get("portal.homelab.io/access")
