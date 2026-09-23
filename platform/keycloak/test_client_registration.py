@@ -114,7 +114,7 @@ if args[:2] == ["kv", "get"]:
         print(f"No value found at {path}")
         sys.exit(2)
     if field is not None and field not in state[path]:
-        print(f"Field {field} not present in secret", file=sys.stderr)
+        print(f'Field "{field}" not present in secret', file=sys.stderr)
         sys.exit(2)
     if field is not None:
         sys.stdout.write(state[path][field])
@@ -362,6 +362,65 @@ class ClientRegistrationTests(unittest.TestCase):
             self.assertEqual(writes, events_path.read_text().splitlines())
             self.assertNotIn("new-canary", first.stdout + first.stderr + second.stdout + second.stderr)
             self.assertNotIn("previous-canary", first.stdout + first.stderr + second.stdout + second.stderr)
+
+    def test_vault_missing_fields_recover_and_keep_other_values(self):
+        source = (ROOT / "platform/vault/configure-vault.sh").read_text(encoding="utf-8")
+        seed = source.split('echo "==> seeding homelab/keycloak-portal and homelab/portal"', 1)[1]
+        seed = seed.split('echo "==> policy vso-keycloak-read"', 1)[0]
+        cases = (
+            ("clientSecret",
+             {"homelab/keycloak-portal": {},
+              "homelab/portal": {"oidc-client-secret": "portal-canary",
+                                 "session-current-key": "session-canary",
+                                 "session-previous-key": "previous-canary"}},
+             "homelab/keycloak-portal", "clientSecret", "portal-canary", "put"),
+            ("oidc-client-secret",
+             {"homelab/keycloak-portal": {"clientSecret": "keycloak-canary"},
+              "homelab/portal": {"session-current-key": "session-canary",
+                                 "session-previous-key": "previous-canary"}},
+             "homelab/portal", "oidc-client-secret", "keycloak-canary", "patch"),
+            ("session-current-key",
+             {"homelab/keycloak-portal": {"clientSecret": "keycloak-canary"},
+              "homelab/portal": {"oidc-client-secret": "keycloak-canary",
+                                 "session-previous-key": "previous-canary"}},
+             "homelab/portal", "session-current-key", None, "patch"),
+        )
+        for missing, initial, path, key, expected, operation in cases:
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as directory:
+                temp = Path(directory)
+                vault = temp / "vault"
+                vault.write_text(FAKE_VAULT, encoding="utf-8")
+                vault.chmod(0o700)
+                script = temp / "seed.sh"
+                script.write_text('set -eu\necho "==> seeding homelab/keycloak-portal and homelab/portal"' + seed,
+                                  encoding="utf-8")
+                state_path = temp / "vault.json"
+                state_path.write_text(json.dumps(initial), encoding="utf-8")
+                events_path = temp / "vault-events.jsonl"
+                env = dict(os.environ, PATH=f"{temp}:{os.environ['PATH']}",
+                           FAKE_VAULT_STATE=str(state_path), FAKE_VAULT_EVENTS=str(events_path))
+                first = subprocess.run(["/bin/sh", str(script)], env=env, text=True,
+                                       capture_output=True, check=False)
+                self.assertEqual(0, first.returncode, first.stderr)
+                state = json.loads(state_path.read_text())
+                self.assertTrue(state[path][key])
+                if expected is not None:
+                    self.assertEqual(expected, state[path][key])
+                self.assertEqual("previous-canary",
+                                 state["homelab/portal"]["session-previous-key"])
+                for other_path, fields in initial.items():
+                    for other_key, value in fields.items():
+                        self.assertEqual(value, state[other_path][other_key])
+                events = [json.loads(line) for line in events_path.read_text().splitlines()]
+                self.assertEqual([{"operation": operation, "path": path, "keys": [key]}], events)
+                second = subprocess.run(["/bin/sh", str(script)], env=env, text=True,
+                                        capture_output=True, check=False)
+                self.assertEqual(0, second.returncode, second.stderr)
+                self.assertEqual(state, json.loads(state_path.read_text()))
+                self.assertEqual(events, [json.loads(line) for line in events_path.read_text().splitlines()])
+                for canary in ("portal-canary", "keycloak-canary", "session-canary",
+                               "previous-canary"):
+                    self.assertNotIn(canary, first.stdout + first.stderr + second.stdout + second.stderr)
 
     def test_vault_transient_reads_abort_without_writes(self):
         source = (ROOT / "platform/vault/configure-vault.sh").read_text(encoding="utf-8")

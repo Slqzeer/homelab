@@ -412,8 +412,8 @@ vault_optional_get() {
     return 0
   fi
   if [ "$read_field" != "-" ] &&
-     { grep -Fqx "Field $read_field not present in secret" "$PORTAL_READ_ERROR_FILE" ||
-       grep -Fqx "Field $read_field not present in secret" "$read_output"; }; then
+     { grep -Fqx "Field \"$read_field\" not present in secret" "$PORTAL_READ_ERROR_FILE" ||
+       grep -Fqx "Field \"$read_field\" not present in secret" "$read_output"; }; then
     VAULT_READ_STATUS=absent
     return 0
   fi
