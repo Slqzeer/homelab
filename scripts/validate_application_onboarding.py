@@ -86,12 +86,11 @@ def _unrestricted_peer(peer: object) -> bool:
         return True
     if _map(peer.get("ipBlock")).get("cidr") in {"0.0.0.0/0", "::/0"}:
         return True
-    for selector_name in ("namespaceSelector", "podSelector"):
-        if selector_name in peer:
-            selector = _map(peer[selector_name])
-            if not selector.get("matchLabels") and not selector.get("matchExpressions"):
-                return True
-    return False
+    selectors = [_map(peer[name]) for name in ("namespaceSelector", "podSelector") if name in peer]
+    return bool(selectors) and all(
+        not selector.get("matchLabels") and not selector.get("matchExpressions")
+        for selector in selectors
+    )
 
 
 def _unrestricted_port(port: object) -> bool:

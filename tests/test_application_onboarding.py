@@ -275,6 +275,40 @@ class ApplicationOnboardingTests(unittest.TestCase):
         })
         self.assertIn("network policy must not allow all ingress or egress", self.validate())
 
+    def test_accepts_all_namespaces_with_selected_pods(self):
+        self.additional_policies.append({
+            "kind": "NetworkPolicy",
+            "metadata": {"name": "selected-proxies", "namespace": "example"},
+            "spec": {"podSelector": {}, "ingress": [
+                {"from": [{"namespaceSelector": {}, "podSelector": {"matchLabels": {"app": "proxy"}}}],
+                 "ports": [{"port": 8080}]}
+            ]},
+        })
+        self.assertEqual([], self.validate())
+
+    def test_accepts_selected_namespace_with_all_its_pods(self):
+        self.additional_policies.append({
+            "kind": "NetworkPolicy",
+            "metadata": {"name": "monitoring-namespace", "namespace": "example"},
+            "spec": {"podSelector": {}, "egress": [
+                {"to": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "monitoring"}},
+                         "podSelector": {}}],
+                 "ports": [{"port": 443}]}
+            ]},
+        })
+        self.assertEqual([], self.validate())
+
+    def test_rejects_combined_unrestricted_selectors(self):
+        self.additional_policies.append({
+            "kind": "NetworkPolicy",
+            "metadata": {"name": "universal-peer", "namespace": "example"},
+            "spec": {"podSelector": {}, "ingress": [
+                {"from": [{"namespaceSelector": {"matchLabels": {}}, "podSelector": {"matchLabels": {}}}],
+                 "ports": [{"port": 8080}]}
+            ]},
+        })
+        self.assertIn("network policy must not allow all ingress or egress", self.validate())
+
     def test_rejects_protocol_wide_full_port_range(self):
         self.additional_policies.append({
             "kind": "NetworkPolicy",
