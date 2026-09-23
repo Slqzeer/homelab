@@ -255,6 +255,37 @@ class ApplicationOnboardingTests(unittest.TestCase):
         })
         self.assertIn("network policy must not allow all ingress or egress", self.validate())
 
+    def test_rejects_semantically_empty_namespace_selector(self):
+        self.additional_policies.append({
+            "kind": "NetworkPolicy",
+            "metadata": {"name": "empty-namespace-labels", "namespace": "example"},
+            "spec": {"podSelector": {}, "ingress": [
+                {"from": [{"namespaceSelector": {"matchLabels": {}}}], "ports": [{"port": 8080}]}
+            ]},
+        })
+        self.assertIn("network policy must not allow all ingress or egress", self.validate())
+
+    def test_rejects_semantically_empty_pod_selector(self):
+        self.additional_policies.append({
+            "kind": "NetworkPolicy",
+            "metadata": {"name": "empty-pod-labels", "namespace": "example"},
+            "spec": {"podSelector": {}, "egress": [
+                {"to": [{"podSelector": {"matchLabels": {}}}], "ports": [{"port": 443}]}
+            ]},
+        })
+        self.assertIn("network policy must not allow all ingress or egress", self.validate())
+
+    def test_rejects_protocol_wide_full_port_range(self):
+        self.additional_policies.append({
+            "kind": "NetworkPolicy",
+            "metadata": {"name": "full-tcp-range", "namespace": "example"},
+            "spec": {"podSelector": {}, "ingress": [
+                {"from": [{"podSelector": {"matchLabels": {"app": "proxy"}}}],
+                 "ports": [{"protocol": "TCP", "port": 1, "endPort": 65535}]}
+            ]},
+        })
+        self.assertIn("network policy must not allow all ingress or egress", self.validate())
+
     def test_rejects_operations_service_port_on_another_number(self):
         self.service["spec"]["ports"][1]["port"] = 9443
         self.ingress["spec"]["defaultBackend"]["service"]["port"] = {"number": 9443}

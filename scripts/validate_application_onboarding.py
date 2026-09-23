@@ -86,9 +86,17 @@ def _unrestricted_peer(peer: object) -> bool:
         return True
     if _map(peer.get("ipBlock")).get("cidr") in {"0.0.0.0/0", "::/0"}:
         return True
-    if peer.get("namespaceSelector") == {} and not _map(peer.get("podSelector")):
-        return True
-    return peer.get("podSelector") == {} and "namespaceSelector" not in peer
+    for selector_name in ("namespaceSelector", "podSelector"):
+        if selector_name in peer:
+            selector = _map(peer[selector_name])
+            if not selector.get("matchLabels") and not selector.get("matchExpressions"):
+                return True
+    return False
+
+
+def _unrestricted_port(port: object) -> bool:
+    port = _map(port)
+    return port.get("port") is None or (port.get("port") == 1 and port.get("endPort") == 65535)
 
 
 def _has_unrestricted_policy(documents: list[dict], namespace: str) -> bool:
@@ -101,7 +109,7 @@ def _has_unrestricted_policy(documents: list[dict], namespace: str) -> bool:
                 rule = _map(rule)
                 ports = rule.get("ports") or []
                 peers = rule.get(peer_field) or []
-                if (not ports or any(_map(port).get("port") is None for port in ports)
+                if (not ports or any(_unrestricted_port(port) for port in ports)
                         or not peers or any(_unrestricted_peer(peer) for peer in peers)):
                     return True
     return False
