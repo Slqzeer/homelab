@@ -70,7 +70,6 @@ data:
          clientAuthenticatorType, standardFlowEnabled,
          implicitFlowEnabled, directAccessGrantsEnabled,
          serviceAccountsEnabled, redirectUris, webOrigins,
-         defaultClientScopes: (.defaultClientScopes // [] | sort),
          attributes: {"post.logout.redirect.uris": .attributes["post.logout.redirect.uris"]}}
       '
     }
@@ -83,6 +82,14 @@ data:
         exit 1
       fi
       echo 'created homelab-portal client'
+      clients_json=$("$KCADM" get clients -r homelab \
+        -q clientId=homelab-portal --fields id,clientId \
+        --config /tmp/kcadm.config)
+      client_uuid=$(printf '%s' "$clients_json" | "$JQ" -er \
+        --arg client_id "$client_id" \
+        '[.[] | select(.clientId == $client_id)] |
+         if length == 1 then .[0].id
+         else error("created client lookup was not unique") end')
     else
       current_json=$("$KCADM" get "clients/$client_uuid" -r homelab \
         --config /tmp/kcadm.config)
@@ -94,16 +101,57 @@ data:
          [ "$current_secret" = "$PORTAL_CLIENT_SECRET" ]; then
         echo 'homelab-portal client already current'
       else
-        # kcadm merges this small representation with the existing client.
-        # No realm, user, group, or other client endpoint is ever written.
+        # --merge retains unrelated client fields; Keycloak does not apply
+        # default-client-scope mappings through this representation update.
         if ! printf '%s' "$desired_json" | "$KCADM" update "clients/$client_uuid" \
-            -r homelab --config /tmp/kcadm.config -f - >/dev/null 2>&1; then
+            -r homelab --config /tmp/kcadm.config --merge -f - >/dev/null 2>&1; then
           echo 'homelab-portal client update failed' >&2
           exit 1
         fi
         echo 'updated homelab-portal client'
       fi
     fi
+
+    # Client scope mappings are a separate Keycloak resource. Add only the
+    # required defaults; preserve any other scopes operators attached.
+    current_scopes=$("$KCADM" get "clients/$client_uuid/default-client-scopes" \
+      -r homelab --config /tmp/kcadm.config)
+    available_scopes=
+    for scope_name in profile email groups; do
+      if printf '%s' "$current_scopes" | "$JQ" -e \
+          --arg name "$scope_name" 'any(.[]; .name == $name)' >/dev/null; then
+        continue
+      fi
+      if [ -z "$available_scopes" ]; then
+        available_scopes=$("$KCADM" get client-scopes -r homelab \
+          --config /tmp/kcadm.config)
+      fi
+      scope_uuid=$(printf '%s' "$available_scopes" | "$JQ" -er \
+        --arg name "$scope_name" \
+        '[.[] | select(.name == $name)] |
+         if length == 1 then .[0].id
+         else error("required client scope missing or duplicated") end')
+      if ! "$KCADM" update "clients/$client_uuid/default-client-scopes/$scope_uuid" \
+          -r homelab --config /tmp/kcadm.config >/dev/null 2>&1; then
+        echo 'homelab-portal default scope update failed' >&2
+        exit 1
+      fi
+      current_scopes=$("$KCADM" get "clients/$client_uuid/default-client-scopes" \
+        -r homelab --config /tmp/kcadm.config)
+      if ! printf '%s' "$current_scopes" | "$JQ" -e \
+          --arg name "$scope_name" 'any(.[]; .name == $name)' >/dev/null; then
+        echo 'homelab-portal default scope verification failed' >&2
+        exit 1
+      fi
+    done
+    # Verify the complete required set, not merely the most recent add.
+    for scope_name in profile email groups; do
+      if ! printf '%s' "$current_scopes" | "$JQ" -e \
+          --arg name "$scope_name" 'any(.[]; .name == $name)' >/dev/null; then
+        echo 'homelab-portal default scope verification failed' >&2
+        exit 1
+      fi
+    done
 ---
 apiVersion: batch/v1
 kind: Job
@@ -134,7 +182,8 @@ spec:
         - name: copy-verified-jq
           # The upstream jq image is FROM scratch and cannot run cp itself.
           # Kubernetes 1.36 image volumes expose its static binary read-only.
-          image: quay.io/keycloak/keycloak:26.7.4
+          image: "quay.io/keycloak/keycloak:26.7.4@sha256:\
+            82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c"
           command:
             - /bin/sh
             - -ec
@@ -163,7 +212,8 @@ spec:
               drop: [ALL]
       containers:
         - name: reconcile
-          image: quay.io/keycloak/keycloak:26.7.4
+          image: "quay.io/keycloak/keycloak:26.7.4@sha256:\
+            82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c"
           command: [/bin/sh, /scripts/reconcile.sh]
           env:
             - name: KC_ADMIN_USERNAME

@@ -383,12 +383,63 @@ umask 077
 KC_PORTAL_SECRET_FILE=$(mktemp)
 PORTAL_SESSION_FILE=$(mktemp)
 PORTAL_EXISTING_FILE=$(mktemp)
-trap 'rm -f "$KC_PORTAL_SECRET_FILE" "$PORTAL_SESSION_FILE" "$PORTAL_EXISTING_FILE"' EXIT
-if vault kv get -field=clientSecret homelab/keycloak-portal >"$KC_PORTAL_SECRET_FILE" 2>/dev/null &&
-   [ -s "$KC_PORTAL_SECRET_FILE" ]; then
+PORTAL_PATH_FILE=$(mktemp)
+PORTAL_READ_ERROR_FILE=$(mktemp)
+trap 'rm -f "$KC_PORTAL_SECRET_FILE" "$PORTAL_SESSION_FILE" "$PORTAL_EXISTING_FILE" "$PORTAL_PATH_FILE" "$PORTAL_READ_ERROR_FILE"' EXIT
+
+# A failed Vault CLI read is not proof that a path or field is absent. Only
+# Vault's explicit not-found diagnostics permit seeding; all other errors
+# abort before any write. Capture diagnostics privately and never print data.
+vault_optional_get() {
+  read_path=$1
+  read_field=$2
+  read_output=$3
+  if [ "$read_field" = "-" ]; then
+    if vault kv get "$read_path" >"$read_output" 2>"$PORTAL_READ_ERROR_FILE"; then
+      VAULT_READ_STATUS=present
+      return 0
+    fi
+  elif vault kv get "-field=$read_field" "$read_path" >"$read_output" 2>"$PORTAL_READ_ERROR_FILE"; then
+    VAULT_READ_STATUS=present
+    return 0
+  fi
+  data_path="homelab/data/${read_path#homelab/}"
+  if grep -Fqx "No value found at $read_path" "$read_output" ||
+     grep -Fqx "No value found at $data_path" "$read_output" ||
+     grep -Fqx "No value found at $read_path" "$PORTAL_READ_ERROR_FILE" ||
+     grep -Fqx "No value found at $data_path" "$PORTAL_READ_ERROR_FILE"; then
+    VAULT_READ_STATUS=absent
+    return 0
+  fi
+  if [ "$read_field" != "-" ] &&
+     { grep -Fqx "Field $read_field not present in secret" "$PORTAL_READ_ERROR_FILE" ||
+       grep -Fqx "Field $read_field not present in secret" "$read_output"; }; then
+    VAULT_READ_STATUS=absent
+    return 0
+  fi
+  echo "Vault read failed for $read_path" >&2
+  return 1
+}
+
+# Read all existing state before any mutation so a transient error cannot
+# replace a client secret or discard an optional previous rotation key.
+vault_optional_get homelab/keycloak-portal clientSecret "$KC_PORTAL_SECRET_FILE" || exit 1
+kc_secret_status=$VAULT_READ_STATUS
+vault_optional_get homelab/portal - "$PORTAL_PATH_FILE" || exit 1
+portal_path_status=$VAULT_READ_STATUS
+portal_secret_status=absent
+portal_session_status=absent
+if [ "$portal_path_status" = present ]; then
+  vault_optional_get homelab/portal oidc-client-secret "$PORTAL_EXISTING_FILE" || exit 1
+  portal_secret_status=$VAULT_READ_STATUS
+  vault_optional_get homelab/portal session-current-key "$PORTAL_SESSION_FILE" || exit 1
+  portal_session_status=$VAULT_READ_STATUS
+fi
+
+if [ "$kc_secret_status" = present ] && [ -s "$KC_PORTAL_SECRET_FILE" ]; then
   echo "    Keycloak portal client secret already present"
-elif vault kv get -field=oidc-client-secret homelab/portal >"$KC_PORTAL_SECRET_FILE" 2>/dev/null &&
-     [ -s "$KC_PORTAL_SECRET_FILE" ]; then
+elif [ "$portal_secret_status" = present ] && [ -s "$PORTAL_EXISTING_FILE" ]; then
+  cp "$PORTAL_EXISTING_FILE" "$KC_PORTAL_SECRET_FILE"
   vault kv put homelab/keycloak-portal clientSecret=@"$KC_PORTAL_SECRET_FILE" >/dev/null
   echo "    recovered Keycloak portal client secret from portal path"
 else
@@ -397,14 +448,13 @@ else
   echo "    generated Keycloak portal client secret"
 fi
 
-if vault kv get homelab/portal >/dev/null 2>&1; then
-  if ! vault kv get -field=oidc-client-secret homelab/portal >"$PORTAL_EXISTING_FILE" 2>/dev/null ||
+if [ "$portal_path_status" = present ]; then
+  if [ "$portal_secret_status" = absent ] ||
      ! cmp -s "$PORTAL_EXISTING_FILE" "$KC_PORTAL_SECRET_FILE"; then
     vault kv patch homelab/portal oidc-client-secret=@"$KC_PORTAL_SECRET_FILE" >/dev/null
     echo "    synchronized portal OIDC client secret"
   fi
-  if ! vault kv get -field=session-current-key homelab/portal >"$PORTAL_SESSION_FILE" 2>/dev/null ||
-     [ ! -s "$PORTAL_SESSION_FILE" ]; then
+  if [ "$portal_session_status" = absent ] || [ ! -s "$PORTAL_SESSION_FILE" ]; then
     head -c 512 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 64 >"$PORTAL_SESSION_FILE"
     vault kv patch homelab/portal session-current-key=@"$PORTAL_SESSION_FILE" >/dev/null
     echo "    generated portal session key"
@@ -416,7 +466,7 @@ else
     session-current-key=@"$PORTAL_SESSION_FILE" >/dev/null
   echo "    generated portal OIDC and session keys"
 fi
-rm -f "$KC_PORTAL_SECRET_FILE" "$PORTAL_SESSION_FILE" "$PORTAL_EXISTING_FILE"
+rm -f "$KC_PORTAL_SECRET_FILE" "$PORTAL_SESSION_FILE" "$PORTAL_EXISTING_FILE" "$PORTAL_PATH_FILE" "$PORTAL_READ_ERROR_FILE"
 
 echo "==> policy vso-keycloak-read"
 # Grants all three paths the Keycloak pod needs, so its one ServiceAccount needs

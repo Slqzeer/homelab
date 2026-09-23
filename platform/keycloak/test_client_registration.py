@@ -51,7 +51,15 @@ elif args[0] == "get" and args[1].endswith("/client-secret"):
     print(json.dumps({"value": next(c["secret"] for c in state if c["id"] == uuid)}))
 elif args[0] == "get" and args[1].startswith("clients/"):
     uuid = args[1].split("/")[1]
-    print(json.dumps(next(c for c in state if c["id"] == uuid)))
+    client = next(c for c in state if c["id"] == uuid)
+    if args[1].endswith("/default-client-scopes"):
+        print(json.dumps([{"id": name + "-id", "name": name}
+                          for name in client.get("_default_scopes", [])]))
+    else:
+        print(json.dumps({k: v for k, v in client.items() if not k.startswith("_")}))
+elif args[:2] == ["get", "client-scopes"]:
+    print(json.dumps([{"id": name + "-id", "name": name}
+                      for name in ("profile", "email", "groups")]))
 elif args[:2] == ["create", "clients"]:
     body = json.load(sys.stdin)
     if os.environ.get("FAKE_LEAK_ON_CREATE"):
@@ -59,12 +67,26 @@ elif args[:2] == ["create", "clients"]:
         sys.exit(23)
     event["body_keys"] = sorted(body)
     body["id"] = "created-id"
+    body["_default_scopes"] = ["profile", "email"]
     state.append(body)
 elif args[0] == "update" and args[1].startswith("clients/"):
     uuid = args[1].split("/")[1]
-    body = json.load(sys.stdin)
-    event["body_keys"] = sorted(body)
-    next(c for c in state if c["id"] == uuid).update(body)
+    client = next(c for c in state if c["id"] == uuid)
+    if "/default-client-scopes/" in args[1]:
+        name = args[1].rsplit("/", 1)[1].removesuffix("-id")
+        if not os.environ.get("FAKE_SCOPE_NOOP"):
+            client.setdefault("_default_scopes", []).append(name)
+    else:
+        body = json.load(sys.stdin)
+        event["body_keys"] = sorted(body)
+        scopes = client.get("_default_scopes", [])
+        if "--merge" in args:
+            client.update({k: v for k, v in body.items() if k != "defaultClientScopes"})
+        else:
+            client.clear()
+            client.update({k: v for k, v in body.items() if k != "defaultClientScopes"})
+            client["id"] = uuid
+        client["_default_scopes"] = scopes
 else:
     sys.exit(18)
 state_path.write_text(json.dumps(state))
@@ -85,7 +107,14 @@ args = sys.argv[1:]
 if args[:2] == ["kv", "get"]:
     path = args[-1]
     field = next((arg.split("=", 1)[1] for arg in args[2:] if arg.startswith("-field=")), None)
-    if path not in state or (field is not None and field not in state[path]):
+    if os.environ.get("FAKE_VAULT_FAIL_MATCH") == f"{path}:{field or '-'}":
+        print("transient Vault transport failure", file=sys.stderr)
+        sys.exit(17)
+    if path not in state:
+        print(f"No value found at {path}")
+        sys.exit(2)
+    if field is not None and field not in state[path]:
+        print(f"Field {field} not present in secret", file=sys.stderr)
         sys.exit(2)
     if field is not None:
         sys.stdout.write(state[path][field])
@@ -117,7 +146,7 @@ class ClientRegistrationTests(unittest.TestCase):
         config_map = resource(manifest, "ConfigMap", "keycloak-client-registration")
         return config_map["data"]["reconcile.sh"]
 
-    def run_hook(self, state, *, fail_list=False, leak_on_create=False):
+    def run_hook(self, state, *, fail_list=False, leak_on_create=False, scope_noop=False):
         with tempfile.TemporaryDirectory() as directory:
             temp = Path(directory)
             fake = temp / "kcadm.sh"
@@ -145,6 +174,8 @@ class ClientRegistrationTests(unittest.TestCase):
                 env["FAKE_FAIL_LIST"] = "1"
             if leak_on_create:
                 env["FAKE_LEAK_ON_CREATE"] = "1"
+            if scope_noop:
+                env["FAKE_SCOPE_NOOP"] = "1"
             runs = []
             for _ in range(2 if not fail_list else 1):
                 runs.append(subprocess.run(["/bin/sh", str(script_path)], env=env,
@@ -172,9 +203,10 @@ class ClientRegistrationTests(unittest.TestCase):
         self.assertEqual(["https://portal.taildf6cd4.ts.net"], portal["webOrigins"])
         self.assertEqual("https://portal.taildf6cd4.ts.net/auth/logout",
                          portal["attributes"]["post.logout.redirect.uris"])
-        self.assertIn("groups", portal["defaultClientScopes"])
+        self.assertIn("groups", portal["_default_scopes"])
         writes = [event for event in events if event["args"][0] in ("create", "update")]
-        self.assertEqual(["create"], [event["args"][0] for event in writes])
+        self.assertEqual(["create", "update"], [event["args"][0] for event in writes])
+        self.assertIn("/default-client-scopes/groups-id", writes[1]["args"][1])
         for event in events:
             self.assertNotIn("portal-canary-secret", " ".join(event["args"]))
             self.assertNotIn("admin-canary-secret", " ".join(event["args"]))
@@ -192,8 +224,28 @@ class ClientRegistrationTests(unittest.TestCase):
         self.assertEqual("preserve", state[1]["custom"])
         self.assertEqual("portal-canary-secret", state[1]["secret"])
         writes = [event for event in events if event["args"][0] in ("create", "update")]
-        self.assertEqual(["update"], [event["args"][0] for event in writes])
+        self.assertEqual(["update", "update", "update", "update"],
+                         [event["args"][0] for event in writes])
         self.assertEqual("clients/portal-id", writes[0]["args"][1])
+        self.assertIn("--merge", writes[0]["args"])
+        self.assertEqual(["profile", "email", "groups"], state[1]["_default_scopes"])
+
+    def test_existing_scope_drift_converges(self):
+        portal = {"id": "portal-id", "clientId": "homelab-portal", "secret": "old",
+                  "redirectUris": ["https://wrong.invalid/callback"],
+                  "_default_scopes": ["profile", "email", "custom"]}
+        runs, state, events, _ = self.run_hook([portal])
+        self.assertEqual([0, 0], [run.returncode for run in runs], [run.stderr for run in runs])
+        self.assertEqual(["profile", "email", "custom", "groups"], state[0]["_default_scopes"])
+        writes = [event for event in events if event["args"][0] == "update"]
+        self.assertEqual(2, len(writes), writes)
+        self.assertEqual("clients/portal-id/default-client-scopes/groups-id", writes[1]["args"][1])
+
+    def test_scope_link_must_be_verified(self):
+        runs, state, _, _ = self.run_hook([], scope_noop=True)
+        self.assertNotEqual(0, runs[0].returncode)
+        self.assertNotIn("groups", state[0]["_default_scopes"])
+        self.assertIn("verification failed", runs[0].stderr)
 
     def test_duplicate_client_ids_fail_closed(self):
         portal = {"clientId": "homelab-portal", "secret": "old"}
@@ -224,14 +276,16 @@ class ClientRegistrationTests(unittest.TestCase):
         pod = job["spec"]["template"]["spec"]
         self.assertEqual("Never", pod["restartPolicy"])
         container = pod["containers"][0]
-        self.assertEqual("quay.io/keycloak/keycloak:26.7.4", container["image"])
+        keycloak_image = ("quay.io/keycloak/keycloak:26.7.4@sha256:"
+                          "82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c")
+        self.assertEqual(keycloak_image, container["image"])
         self.assertIn("/tools", [mount["mountPath"] for mount in container["volumeMounts"]])
         self.assertTrue(container["resources"]["requests"])
         self.assertTrue(container["resources"]["limits"])
         image_volume = next(volume["image"] for volume in pod["volumes"] if "image" in volume)
         self.assertRegex(image_volume["reference"], r"^ghcr\.io/jqlang/jq:[^@]+@sha256:[0-9a-f]{64}$")
         init = pod["initContainers"][0]
-        self.assertEqual("quay.io/keycloak/keycloak:26.7.4", init["image"])
+        self.assertEqual(keycloak_image, init["image"])
         init_command = " ".join(init["command"])
         self.assertIn("sha256sum -c", init_command)
         self.assertIn("cp /jq-image/jq /tools/jq", init_command)
@@ -259,7 +313,7 @@ class ClientRegistrationTests(unittest.TestCase):
     def test_vault_policy_is_narrow_and_portal_role_is_bound(self):
         script = (ROOT / "platform/vault/configure-vault.sh").read_text(encoding="utf-8")
         for path in ("homelab/keycloak-portal", "homelab/portal"):
-            self.assertIn(f" {path} >", script)
+            self.assertIn(f"vault_optional_get {path}", script)
             self.assertIn(f"vault kv put {path}", script)
         self.assertIn("clientSecret=@", script)
         self.assertIn("oidc-client-secret=@", script)
@@ -308,6 +362,42 @@ class ClientRegistrationTests(unittest.TestCase):
             self.assertEqual(writes, events_path.read_text().splitlines())
             self.assertNotIn("new-canary", first.stdout + first.stderr + second.stdout + second.stderr)
             self.assertNotIn("previous-canary", first.stdout + first.stderr + second.stdout + second.stderr)
+
+    def test_vault_transient_reads_abort_without_writes(self):
+        source = (ROOT / "platform/vault/configure-vault.sh").read_text(encoding="utf-8")
+        seed = source.split('echo "==> seeding homelab/keycloak-portal and homelab/portal"', 1)[1]
+        seed = seed.split('echo "==> policy vso-keycloak-read"', 1)[0]
+        initial = {
+            "homelab/keycloak-portal": {"clientSecret": "keycloak-canary"},
+            "homelab/portal": {"oidc-client-secret": "portal-canary",
+                               "session-current-key": "current-canary",
+                               "session-previous-key": "previous-canary"},
+        }
+        for failure in ("homelab/keycloak-portal:clientSecret",
+                        "homelab/portal:-",
+                        "homelab/portal:oidc-client-secret",
+                        "homelab/portal:session-current-key"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                temp = Path(directory)
+                vault = temp / "vault"
+                vault.write_text(FAKE_VAULT, encoding="utf-8")
+                vault.chmod(0o700)
+                script = temp / "seed.sh"
+                script.write_text('set -eu\necho "==> seeding homelab/keycloak-portal and homelab/portal"' + seed,
+                                  encoding="utf-8")
+                state_path = temp / "vault.json"
+                state_path.write_text(json.dumps(initial), encoding="utf-8")
+                events_path = temp / "vault-events.jsonl"
+                env = dict(os.environ, PATH=f"{temp}:{os.environ['PATH']}",
+                           FAKE_VAULT_STATE=str(state_path), FAKE_VAULT_EVENTS=str(events_path),
+                           FAKE_VAULT_FAIL_MATCH=failure)
+                run = subprocess.run(["/bin/sh", str(script)], env=env, text=True,
+                                     capture_output=True, check=False)
+                self.assertNotEqual(0, run.returncode, failure)
+                self.assertEqual(initial, json.loads(state_path.read_text()), failure)
+                self.assertFalse(events_path.exists(), failure)
+                for canary in ("keycloak-canary", "portal-canary", "current-canary", "previous-canary"):
+                    self.assertNotIn(canary, run.stdout + run.stderr)
 
     def test_network_policies_grant_only_selected_peers_and_ports(self):
         path = CONFIG / "networkpolicy.yaml"
