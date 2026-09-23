@@ -33,6 +33,9 @@ jobs:
       - name: Validate application onboarding contract
         run: python3 -m unittest -v tests.test_application_onboarding
 
+      - name: Validate Keycloak client registration
+        run: python3 platform/keycloak/test_client_registration.py -v
+
   kubeconform:
     runs-on: ubuntu-latest
     steps:

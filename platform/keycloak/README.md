@@ -6,7 +6,10 @@ The homelab's OIDC identity provider, workstation-plan phase 25. Keycloak
 26.7.4 runs as one Deployment with no PVC; all durable state lives in the
 `keycloak` database on PostgreSQL's existing PVC. Its Application joins
 wave 24 because PostgreSQL is at 23. Grafana is the proving OIDC client;
-its local admin form remains enabled. Argo CD deliberately is not a client
+its local admin form remains enabled. The portal's confidential client is
+reconciled by a PostSync hook with only `homelab-portal` on its allowlist.
+The hook does not change Grafana, users, groups, or realm settings.
+Argo CD deliberately is not a client
 yet, so recovering the deployment system does not depend on this service.
 
 Design: `docs/superpowers/specs/2026-09-20-keycloak-design.md`.
@@ -210,7 +213,9 @@ actual login acceptance pending the procedure above.
 **The realm is reproducible, not reconciled.** `--import-realm` uses
 `IGNORE_EXISTING`: the seed is applied once, then ignored on every later
 boot while that realm exists. Editing `config/realm.yaml` does not change
-a running Keycloak, and console edits do not come back to git. The realm
+a running Keycloak, and console edits do not come back to git. The portal
+client is the sole exception: `config/client-registration.yaml` reconciles
+its allowlisted fields after each Argo sync. The realm
 export below is the only portable realm-configuration record of those
 edits. `keycloak-config-cli` was rejected because its newest build targeted
 26.5.5 against this server's 26.7.4; adding that version dependency to the
@@ -237,7 +242,30 @@ authentication or Secret delivery.
 
 ### Adding a new OIDC client
 
-Create a confidential OpenID Connect client in the `homelab` console with
+The portal client has a separate, repeatable path. Run
+`platform/vault/configure-vault.sh` inside Vault using the procedure in
+`platform/vault-secrets-operator/README.md` before syncing Keycloak. It
+generates one shared OIDC client secret under `homelab/keycloak-portal`
+(`clientSecret`) and `homelab/portal` (`oidc-client-secret`), plus
+`session-current-key` for the portal. It leaves existing values in place;
+if the two OIDC copies differ, the Keycloak copy wins. An existing
+`session-previous-key` survives because the script patches individual
+fields. The `vso-keycloak` role reads only Keycloak's three paths, and
+`vso-portal` is bound only to `homelab-portal` in namespace `portal`.
+
+The `keycloak-client-registration` PostSync Job reads
+`keycloak-admin` and `keycloak-portal-client` from VSO. It creates or
+updates only `homelab-portal`, with callback
+`https://portal.taildf6cd4.ts.net/auth/callback`, logout
+`https://portal.taildf6cd4.ts.net/auth/logout`, exact portal origin,
+authorization-code flow, and the `groups` scope. It fails if duplicate
+client IDs exist. Repeated syncs with the same Vault value make no write.
+Inspect Job success and the VaultStaticSecret status; do not print
+Kubernetes Secret contents. A Keycloak ingress policy permits only its
+selected proxy, Prometheus, registration Job, Grafana, portal, and future
+Nextcloud pods on the ports they use.
+
+For other clients, create a confidential OpenID Connect client in the `homelab` console with
 standard authorization-code flow. Add the `groups` default scope, plus
 `profile` and `email` when required, and restrict `redirectUris` to the
 application's exact domain and callback path. Map the group claim to that
@@ -331,7 +359,10 @@ substitute for it.
 | --- | --- |
 | `config/keycloak.yaml` | Deployment, application and management Service ports, probes, measured limit |
 | `config/realm.yaml` | First-import realm structure, groups, scopes, MFA and Grafana client; no users |
-| `config/vault-secrets.yaml` | Keycloak ServiceAccount, VaultConnection, VaultAuth and two Secrets |
+| `config/vault-secrets.yaml` | Keycloak ServiceAccount, VaultConnection, VaultAuth and three VSO projections |
+| `config/client-registration.yaml` | Portal client allowlist, reconciler and PostSync Job |
+| `config/networkpolicy.yaml` | Namespace ingress deny and selected Keycloak peers/ports |
+| `test_client_registration.py` | Client convergence, security and network-policy tests |
 | `config/database-job.yaml` | Database credential wiring and Sync hook in `databases` |
 | `../../environments/homelab/apps/keycloak.yaml` | Wave-24 Application |
 | `../../infrastructure/ingress/config/keycloak-ingress.yaml` | Tailnet HTTPS entry point |

@@ -374,8 +374,52 @@ else
   echo "    generated placeholder -- Keycloak's real secret replaces it"
 fi
 
+echo "==> seeding homelab/keycloak-portal and homelab/portal"
+# The same OIDC secret is presented by Keycloak and by the portal. Files
+# created by mktemp are private, and Vault receives values via key=@file,
+# never via argv or terminal output. An existing portal path is patched so
+# an optional session-previous-key survives key rotation.
+umask 077
+KC_PORTAL_SECRET_FILE=$(mktemp)
+PORTAL_SESSION_FILE=$(mktemp)
+PORTAL_EXISTING_FILE=$(mktemp)
+trap 'rm -f "$KC_PORTAL_SECRET_FILE" "$PORTAL_SESSION_FILE" "$PORTAL_EXISTING_FILE"' EXIT
+if vault kv get -field=clientSecret homelab/keycloak-portal >"$KC_PORTAL_SECRET_FILE" 2>/dev/null &&
+   [ -s "$KC_PORTAL_SECRET_FILE" ]; then
+  echo "    Keycloak portal client secret already present"
+elif vault kv get -field=oidc-client-secret homelab/portal >"$KC_PORTAL_SECRET_FILE" 2>/dev/null &&
+     [ -s "$KC_PORTAL_SECRET_FILE" ]; then
+  vault kv put homelab/keycloak-portal clientSecret=@"$KC_PORTAL_SECRET_FILE" >/dev/null
+  echo "    recovered Keycloak portal client secret from portal path"
+else
+  head -c 512 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 48 >"$KC_PORTAL_SECRET_FILE"
+  vault kv put homelab/keycloak-portal clientSecret=@"$KC_PORTAL_SECRET_FILE" >/dev/null
+  echo "    generated Keycloak portal client secret"
+fi
+
+if vault kv get homelab/portal >/dev/null 2>&1; then
+  if ! vault kv get -field=oidc-client-secret homelab/portal >"$PORTAL_EXISTING_FILE" 2>/dev/null ||
+     ! cmp -s "$PORTAL_EXISTING_FILE" "$KC_PORTAL_SECRET_FILE"; then
+    vault kv patch homelab/portal oidc-client-secret=@"$KC_PORTAL_SECRET_FILE" >/dev/null
+    echo "    synchronized portal OIDC client secret"
+  fi
+  if ! vault kv get -field=session-current-key homelab/portal >"$PORTAL_SESSION_FILE" 2>/dev/null ||
+     [ ! -s "$PORTAL_SESSION_FILE" ]; then
+    head -c 512 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 64 >"$PORTAL_SESSION_FILE"
+    vault kv patch homelab/portal session-current-key=@"$PORTAL_SESSION_FILE" >/dev/null
+    echo "    generated portal session key"
+  fi
+else
+  head -c 512 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 64 >"$PORTAL_SESSION_FILE"
+  vault kv put homelab/portal \
+    oidc-client-secret=@"$KC_PORTAL_SECRET_FILE" \
+    session-current-key=@"$PORTAL_SESSION_FILE" >/dev/null
+  echo "    generated portal OIDC and session keys"
+fi
+rm -f "$KC_PORTAL_SECRET_FILE" "$PORTAL_SESSION_FILE" "$PORTAL_EXISTING_FILE"
+
 echo "==> policy vso-keycloak-read"
-# Grants BOTH paths the Keycloak pod needs, so its one ServiceAccount needs
+# Grants all three paths the Keycloak pod needs, so its one ServiceAccount needs
 # one role. The data/ segment is REQUIRED and is not a typo -- see the note
 # on vso-canary-read above.
 vault policy write vso-keycloak-read - <<'POLICY'
@@ -384,6 +428,10 @@ path "homelab/data/keycloak" {
 }
 
 path "homelab/data/keycloak-db" {
+  capabilities = ["read"]
+}
+
+path "homelab/data/keycloak-portal" {
   capabilities = ["read"]
 }
 POLICY
@@ -397,6 +445,23 @@ vault write auth/kubernetes/role/vso-keycloak \
     bound_service_account_namespaces=keycloak \
     audience=vault \
     token_policies=vso-keycloak-read \
+    ttl=1h
+
+echo "==> policy vso-portal-read"
+vault policy write vso-portal-read - <<'POLICY'
+path "homelab/data/portal" {
+  capabilities = ["read"]
+}
+POLICY
+
+echo "==> role vso-portal"
+# The portal alone receives its OIDC secret and session key. Do not add
+# keycloak or another namespace to this role's bindings.
+vault write auth/kubernetes/role/vso-portal \
+    bound_service_account_names=homelab-portal \
+    bound_service_account_namespaces=portal \
+    audience=vault \
+    token_policies=vso-portal-read \
     ttl=1h
 
 echo "==> policy vso-keycloak-db-read"

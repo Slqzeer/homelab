@@ -1,0 +1,218 @@
+# Reconcile only the explicitly allowlisted personal-application client.
+# This PostSync hook runs after Keycloak becomes healthy and is safe to rerun.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-client-registration
+  namespace: keycloak
+data:
+  reconcile.sh: |
+    #!/bin/sh
+    set -eu
+    KCADM=/opt/keycloak/bin/kcadm.sh
+    JQ=/tools/jq
+
+    : "${KC_ADMIN_USERNAME:?missing admin username}"
+    : "${KC_CLI_PASSWORD:?missing admin password}"
+    : "${PORTAL_CLIENT_SECRET:?missing portal client secret}"
+
+    # KC_CLI_PASSWORD is Keycloak's supported password input. A private
+    # ephemeral config file holds the resulting session token.
+    "$KCADM" config credentials \
+      --server http://keycloak.keycloak.svc.cluster.local:8080 \
+      --realm master --user "$KC_ADMIN_USERNAME" \
+      --config /tmp/kcadm.config >/dev/null
+
+    # This is the entire mutation allowlist. Query errors and duplicate IDs
+    # abort the hook; neither may be interpreted as an absent client.
+    client_id=homelab-portal
+    clients_json=$("$KCADM" get clients -r homelab \
+      -q clientId=homelab-portal --fields id,clientId \
+      --config /tmp/kcadm.config)
+    client_uuid=$(printf '%s' "$clients_json" | "$JQ" -er \
+      --arg client_id "$client_id" \
+      '[.[] | select(.clientId == $client_id)] |
+       if length == 0 then ""
+       elif length == 1 then .[0].id
+       else error("duplicate client ID: homelab-portal") end')
+
+    # --arg carries only public identifiers and URIs. jq reads the secret
+    # directly from its environment, keeping it out of process arguments.
+    desired_json=$("$JQ" -n \
+      --arg client_id "$client_id" \
+      --arg redirect 'https://portal.taildf6cd4.ts.net/auth/callback' \
+      --arg origin 'https://portal.taildf6cd4.ts.net' \
+      --arg logout 'https://portal.taildf6cd4.ts.net/auth/logout' \
+      '{clientId: $client_id,
+        name: "Homelab Portal",
+        protocol: "openid-connect",
+        enabled: true,
+        publicClient: false,
+        clientAuthenticatorType: "client-secret",
+        standardFlowEnabled: true,
+        implicitFlowEnabled: false,
+        directAccessGrantsEnabled: false,
+        serviceAccountsEnabled: false,
+        redirectUris: [$redirect],
+        webOrigins: [$origin],
+        defaultClientScopes: ["profile", "email", "groups"],
+        attributes: {"post.logout.redirect.uris": $logout},
+        secret: env.PORTAL_CLIENT_SECRET}')
+
+    # Project only fields this hook owns. Keycloak adds server-side fields
+    # and other operators may set unrelated client fields. Never print the
+    # secret-bearing response or desired body during comparison.
+    canonical() {
+      "$JQ" -cS '
+        del(.secret) |
+        {clientId, name, protocol, enabled, publicClient,
+         clientAuthenticatorType, standardFlowEnabled,
+         implicitFlowEnabled, directAccessGrantsEnabled,
+         serviceAccountsEnabled, redirectUris, webOrigins,
+         defaultClientScopes: (.defaultClientScopes // [] | sort),
+         attributes: {"post.logout.redirect.uris": .attributes["post.logout.redirect.uris"]}}
+      '
+    }
+    desired_public=$(printf '%s' "$desired_json" | canonical)
+
+    if [ -z "$client_uuid" ]; then
+      if ! printf '%s' "$desired_json" | "$KCADM" create clients -r homelab \
+          --config /tmp/kcadm.config -f - >/dev/null 2>&1; then
+        echo 'homelab-portal client create failed' >&2
+        exit 1
+      fi
+      echo 'created homelab-portal client'
+    else
+      current_json=$("$KCADM" get "clients/$client_uuid" -r homelab \
+        --config /tmp/kcadm.config)
+      current_public=$(printf '%s' "$current_json" | canonical)
+      current_secret_json=$("$KCADM" get "clients/$client_uuid/client-secret" \
+        -r homelab --config /tmp/kcadm.config)
+      current_secret=$(printf '%s' "$current_secret_json" | "$JQ" -r '.value // ""')
+      if [ "$current_public" = "$desired_public" ] && \
+         [ "$current_secret" = "$PORTAL_CLIENT_SECRET" ]; then
+        echo 'homelab-portal client already current'
+      else
+        # kcadm merges this small representation with the existing client.
+        # No realm, user, group, or other client endpoint is ever written.
+        if ! printf '%s' "$desired_json" | "$KCADM" update "clients/$client_uuid" \
+            -r homelab --config /tmp/kcadm.config -f - >/dev/null 2>&1; then
+          echo 'homelab-portal client update failed' >&2
+          exit 1
+        fi
+        echo 'updated homelab-portal client'
+      fi
+    fi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-client-registration
+  namespace: keycloak
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        job: keycloak-client-registration
+    spec:
+      serviceAccountName: keycloak
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 0
+        fsGroup: 0
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: copy-verified-jq
+          # The upstream jq image is FROM scratch and cannot run cp itself.
+          # Kubernetes 1.36 image volumes expose its static binary read-only.
+          image: quay.io/keycloak/keycloak:26.7.4
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              printf '%s  %s\n' \
+                b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f \
+                /jq-image/jq | sha256sum -c - >/dev/null
+              cp /jq-image/jq /tools/jq
+              chmod 0755 /tools/jq
+          volumeMounts:
+            - name: jq-image
+              mountPath: /jq-image
+              readOnly: true
+            - name: tools
+              mountPath: /tools
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 96Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+      containers:
+        - name: reconcile
+          image: quay.io/keycloak/keycloak:26.7.4
+          command: [/bin/sh, /scripts/reconcile.sh]
+          env:
+            - name: KC_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-admin
+                  key: username
+            - name: KC_CLI_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-admin
+                  key: password
+            - name: PORTAL_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-portal-client
+                  key: clientSecret
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+              readOnly: true
+            - name: tools
+              mountPath: /tools
+              readOnly: true
+            - name: work
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+      volumes:
+        - name: script
+          configMap:
+            name: keycloak-client-registration
+        - name: jq-image
+          image:
+            # Official 1.8.2 multi-platform manifest digest. The amd64
+            # binary is also checked against upstream's release SHA-256.
+            reference: "ghcr.io/jqlang/jq:1.8.2@sha256:\
+              b9c68867e5766576263a222e91db3de422d802069c7af70440e667a95344e486"
+            pullPolicy: IfNotPresent
+        - name: tools
+          emptyDir: {}
+        - name: work
+          emptyDir: {}
