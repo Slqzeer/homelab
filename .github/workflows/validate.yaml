@@ -30,6 +30,9 @@ jobs:
       - name: Validate Grafana OAuth routing
         run: python3 observability/monitoring/test_oauth_routing.py
 
+      - name: Validate application onboarding contract
+        run: python3 -m unittest -v tests.test_application_onboarding
+
   kubeconform:
     runs-on: ubuntu-latest
     steps:

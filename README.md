@@ -25,7 +25,7 @@ manifest ever applied by hand.
 | `observability/monitoring/` | Prometheus, Grafana: Helm values, VSO wiring for the Grafana admin credential, every ServiceMonitor and its exporter. See `observability/monitoring/README.md` |
 | `observability/logging/` | Loki and Grafana Alloy: Helm values for both charts, the Grafana datasource, and the collector pipeline. See `observability/logging/README.md` |
 | `apps` namespace | Created by `bootstrap/namespaces/namespaces.yaml`; holds `beacon` and the GHCR pull Secret it consumes — **not** the same thing as the `apps/` directory below, despite the shared name |
-| `apps/` | Currently unused; reserved for per-application values/manifests, not Application objects |
+| `apps/` | Site-specific application values/manifests and a non-deployed `_template/`; never child Application objects |
 | `artifacts` namespace | Created by `bootstrap/namespaces/namespaces.yaml`; holds Nexus, its PVC and its admin Secret. See `platform/nexus/README.md` |
 
 ## Adding a component
@@ -78,6 +78,13 @@ recurses only that directory. The top-level `apps/` directory is a different
 path and is not watched by anything: an Application placed there is never
 applied, and there is no error. It stays out of Argo CD entirely, so nothing
 reports it as missing or out of sync — the component simply never appears.
+
+Personal applications follow the [onboarding contract](docs/application-onboarding.md).
+It fixes namespace ownership, immutable releases, Vault/VSO delivery, OIDC,
+centralized tailnet exposure, explicit portal publication, isolation, and
+recovery evidence. The [scaffold](apps/_template/README.md) lists file roles;
+it is never an Argo source. The contract validator is exercised in CI by
+`python3 -m unittest -v tests.test_application_onboarding`.
 
 ### A new component can also "never appear" for a reason with nothing in its own manifest
 
