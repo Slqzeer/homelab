@@ -332,7 +332,7 @@ class ApplicationOnboardingTests(unittest.TestCase):
 
 
 class PortalRegistrationTests(unittest.TestCase):
-    portal_revision = "09578b952aa7e187f1391f42c1158d5484b0ecdc"
+    portal_revision = "783b15ef36d9b16b40c27aaff5c0ec17f0d69835"
     portal_tag = "sha-55659f8237fa5a2d0e5b79ab57268c011dc2dea1-36017826392-2"
     portal_digest = "sha256:a566f89422953f2d6365e124415cb29d7eb350ac2ccf4f176fbedbb0f78100ef"
 

@@ -11,7 +11,7 @@ metadata:
     homelab.io/onboarding-contract: v1
     homelab.io/owner: personal-applications
     homelab.io/state: stateless
-    homelab.io/source-revision: 09578b952aa7e187f1391f42c1158d5484b0ecdc
+    homelab.io/source-revision: 783b15ef36d9b16b40c27aaff5c0ec17f0d69835
     homelab.io/image-tag: >-
       sha-55659f8237fa5a2d0e5b79ab57268c011dc2dea1-36017826392-2
     homelab.io/image-digest: >-
@@ -20,7 +20,7 @@ spec:
   project: default
   sources:
     - repoURL: git@github.com:Slqzeer/homelab-portal.git
-      targetRevision: 09578b952aa7e187f1391f42c1158d5484b0ecdc
+      targetRevision: 783b15ef36d9b16b40c27aaff5c0ec17f0d69835
       path: deploy/overlays/homelab
       kustomize:
         # The product base documents the VSO shape with placeholder refs.
