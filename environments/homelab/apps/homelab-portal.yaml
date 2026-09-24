@@ -27,6 +27,16 @@ spec:
         # Site GitOps below is the sole owner of the real projection.
         patches:
           - target:
+              version: v1
+              kind: Namespace
+              name: portal
+            patch: |-
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: portal
+              $patch: delete
+          - target:
               group: secrets.hashicorp.com
               version: v1beta1
               kind: VaultStaticSecret

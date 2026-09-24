@@ -22,10 +22,13 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
       - name: Install yamllint
         run: pip install --quiet yamllint==1.38.0 PyYAML==6.0.3
+      - name: Install Kustomize
+        run: go install sigs.k8s.io/kustomize/kustomize/v5@v5.7.1
+
       - name: Lint
         # --strict makes warnings fail. .yamllint.yaml is tuned so the tree
         # is clean under it; see the argument in that file's header.
-        run: yamllint --strict -c .yamllint.yaml bootstrap environments infrastructure observability platform .github
+        run: yamllint --strict -c .yamllint.yaml apps bootstrap environments infrastructure observability platform .github
 
       - name: Validate Grafana OAuth routing
         run: python3 observability/monitoring/test_oauth_routing.py
@@ -48,6 +51,14 @@ jobs:
           curl -sL https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz -o kc.tgz
           echo "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883  kc.tgz" | sha256sum -c -
           tar xzf kc.tgz kubeconform
+
+      - name: Install Kustomize
+        run: go install sigs.k8s.io/kustomize/kustomize/v5@v5.7.1
+
+      - name: Render application configs
+        run: |
+          mkdir -p rendered
+          kustomize build apps/portal/config > rendered/portal-config.yaml
 
       - name: Validate manifests
         # -strict rejects unknown fields. Without it a typo like `replicaz:`
@@ -83,7 +94,7 @@ jobs:
             -ignore-filename-pattern 'platform/nexus/registries\.yaml$' \
             -schema-location default \
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
-            bootstrap environments infrastructure observability platform
+            bootstrap environments infrastructure observability platform rendered
 
       - name: Fail if any resource was skipped
         # A skipped resource is an UNVALIDATED resource. kubeconform exits 0
@@ -95,6 +106,6 @@ jobs:
             -ignore-filename-pattern 'platform/nexus/registries\.yaml$' \
             -schema-location default \
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
-            bootstrap environments infrastructure observability platform \
+            bootstrap environments infrastructure observability platform rendered \
             | tee summary.txt
           grep -q 'Skipped: 0' summary.txt

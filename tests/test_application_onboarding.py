@@ -1,6 +1,8 @@
 """Contract tests for a rendered personal application and its site integration."""
 
 from pathlib import Path
+import shutil
+import subprocess
 from tempfile import TemporaryDirectory
 import unittest
 
@@ -337,6 +339,19 @@ class PortalRegistrationTests(unittest.TestCase):
     portal_digest = "sha256:a566f89422953f2d6365e124415cb29d7eb350ac2ccf4f176fbedbb0f78100ef"
 
     @staticmethod
+    def render(path):
+        kustomize = shutil.which("kustomize")
+        if kustomize:
+            command = [kustomize, "build", str(path)]
+        else:
+            kubectl = shutil.which("kubectl")
+            if not kubectl:
+                raise AssertionError("kustomize or kubectl is required for manifest tests")
+            command = [kubectl, "kustomize", str(path)]
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
+        return [document for document in yaml.safe_load_all(result.stdout) if document]
+
+    @staticmethod
     def load_documents(path):
         with (REPOSITORY_ROOT / path).open(encoding="utf-8") as stream:
             return [document for document in yaml.safe_load_all(stream) if document]
@@ -363,13 +378,19 @@ class PortalRegistrationTests(unittest.TestCase):
         self.assertEqual(self.portal_revision, portal["targetRevision"])
         self.assertEqual("deploy/overlays/homelab", portal["path"])
         patches = portal["kustomize"]["patches"]
-        self.assertEqual(1, len(patches))
+        self.assertEqual(2, len(patches))
+        patches_by_kind = {patch["target"]["kind"]: patch for patch in patches}
         self.assertEqual(
             {"group": "secrets.hashicorp.com", "version": "v1beta1",
              "kind": "VaultStaticSecret", "name": "homelab-portal"},
-            patches[0]["target"],
+            patches_by_kind["VaultStaticSecret"]["target"],
         )
-        self.assertEqual("delete", yaml.safe_load(patches[0]["patch"])["$patch"])
+        self.assertEqual(
+            {"version": "v1", "kind": "Namespace", "name": "portal"},
+            patches_by_kind["Namespace"]["target"],
+        )
+        for patch in patches:
+            self.assertEqual("delete", yaml.safe_load(patch["patch"])["$patch"])
         site = next(source for source in sources if source["repoURL"].endswith("homelab.git"))
         self.assertEqual("main", site["targetRevision"])
         self.assertEqual("apps/portal/config", site["path"])
@@ -386,6 +407,86 @@ class PortalRegistrationTests(unittest.TestCase):
         self.assertIn("ServerSideApply=true", sync_policy["syncOptions"])
         self.assertNotIn("CreateNamespace=true", sync_policy["syncOptions"])
         self.assertEqual("portal", application["spec"]["destination"]["namespace"])
+
+    def test_ci_lints_apps_and_validates_rendered_portal_config(self):
+        workflow, = self.load_documents(".github/workflows/validate.yaml")
+        lint_steps = workflow["jobs"]["yamllint"]["steps"]
+        lint_install = next(
+            step["run"] for step in lint_steps if step.get("name") == "Install Kustomize"
+        )
+        self.assertEqual("go install sigs.k8s.io/kustomize/kustomize/v5@v5.7.1", lint_install)
+
+        lint_command = next(step["run"] for step in lint_steps if step.get("name") == "Lint")
+        self.assertIn(" apps ", f" {lint_command} ")
+        conform_steps = workflow["jobs"]["kubeconform"]["steps"]
+        conform_install = next(
+            step["run"] for step in conform_steps if step.get("name") == "Install Kustomize"
+        )
+        self.assertEqual(lint_install, conform_install)
+
+        render_command = next(
+            step["run"] for step in conform_steps if step.get("name") == "Render application configs"
+        )
+        self.assertIn("kustomize build apps/portal/config", render_command)
+        self.assertIn("rendered/portal-config.yaml", render_command)
+        for name in ("Validate manifests", "Fail if any resource was skipped"):
+            command = next(step["run"] for step in conform_steps if step.get("name") == name)
+            self.assertIn(" rendered", command)
+
+    def test_portal_inline_patches_remove_product_owned_resources_without_duplicates(self):
+        """Exercise pinned-source patch semantics locally without private Git access."""
+        application, = self.load_documents("environments/homelab/apps/homelab-portal.yaml")
+        source = next(
+            item for item in application["spec"]["sources"]
+            if item["repoURL"].endswith("homelab-portal.git")
+        )
+        self.assertEqual(self.portal_revision, source["targetRevision"])
+        annotations = application["metadata"]["annotations"]
+        self.assertEqual(self.portal_tag, annotations["homelab.io/image-tag"])
+        self.assertEqual(self.portal_digest, annotations["homelab.io/image-digest"])
+
+        fixture = [
+            {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": "portal"}},
+            {
+                "apiVersion": "secrets.hashicorp.com/v1beta1",
+                "kind": "VaultStaticSecret",
+                "metadata": {"name": "homelab-portal", "namespace": "portal"},
+                "spec": {"mount": "replace-with-kv-mount", "path": "replace-with-portal-secret-path"},
+            },
+            {
+                "apiVersion": "v1",
+                "kind": "ConfigMap",
+                "metadata": {"name": "retained", "namespace": "portal"},
+                "data": {"proof": "kept"},
+            },
+        ]
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "fixture.yaml").write_text(yaml.safe_dump_all(fixture), encoding="utf-8")
+            kustomization = {
+                "apiVersion": "kustomize.config.k8s.io/v1beta1",
+                "kind": "Kustomization",
+                "resources": ["fixture.yaml"],
+                "patches": source["kustomize"]["patches"],
+            }
+            (root / "kustomization.yaml").write_text(yaml.safe_dump(kustomization), encoding="utf-8")
+            product = self.render(root)
+
+        product_ids = [
+            (item["apiVersion"], item["kind"], item.get("metadata", {}).get("namespace", ""),
+             item["metadata"]["name"])
+            for item in product
+        ]
+        self.assertEqual([("v1", "ConfigMap", "portal", "retained")], product_ids)
+
+        site = self.render(REPOSITORY_ROOT / "apps/portal/config")
+        site_ids = [
+            (item["apiVersion"], item["kind"], item.get("metadata", {}).get("namespace", ""),
+             item["metadata"]["name"])
+            for item in site
+        ]
+        combined_ids = product_ids + site_ids
+        self.assertEqual(len(combined_ids), len(set(combined_ids)))
 
     def test_portal_vso_projects_only_required_secret_keys(self):
         resources = self.load_documents("apps/portal/config/vault-secrets.yaml")
@@ -414,6 +515,7 @@ class PortalRegistrationTests(unittest.TestCase):
             [{"kind": "Deployment", "name": "homelab-portal"}],
             portal_secret["spec"]["rolloutRestartTargets"],
         )
+        self.assertIs(True, portal_secret["spec"]["hmacSecretData"])
 
 if __name__ == "__main__":
     unittest.main()
