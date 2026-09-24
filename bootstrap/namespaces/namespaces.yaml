@@ -115,3 +115,18 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: keycloak
+---
+# Homelab Portal, the first conforming personal application. Its generic
+# package deliberately deletes its own Namespace in the homelab overlay so
+# bootstrap remains the sole namespace owner.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: portal
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: v1.36
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: v1.36
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: v1.36

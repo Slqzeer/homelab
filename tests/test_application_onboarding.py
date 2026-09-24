@@ -330,5 +330,90 @@ class ApplicationOnboardingTests(unittest.TestCase):
         self.service["spec"]["ports"][0]["targetPort"] = "operations"
         self.assertIn("ingress must not expose an operations port", self.validate())
 
+
+class PortalRegistrationTests(unittest.TestCase):
+    portal_revision = "09578b952aa7e187f1391f42c1158d5484b0ecdc"
+    portal_tag = "sha-55659f8237fa5a2d0e5b79ab57268c011dc2dea1-36017826392-2"
+    portal_digest = "sha256:a566f89422953f2d6365e124415cb29d7eb350ac2ccf4f176fbedbb0f78100ef"
+
+    @staticmethod
+    def load_documents(path):
+        with (REPOSITORY_ROOT / path).open(encoding="utf-8") as stream:
+            return [document for document in yaml.safe_load_all(stream) if document]
+
+    def test_portal_namespace_is_restricted_to_kubernetes_136(self):
+        namespaces = self.load_documents("bootstrap/namespaces/namespaces.yaml")
+        portal = next(document for document in namespaces if document.get("metadata", {}).get("name") == "portal")
+        labels = portal["metadata"]["labels"]
+        for mode in ("enforce", "audit", "warn"):
+            self.assertEqual("restricted", labels[f"pod-security.kubernetes.io/{mode}"])
+            self.assertEqual("v1.36", labels[f"pod-security.kubernetes.io/{mode}-version"])
+
+    def test_portal_application_pins_release_and_site_values(self):
+        application, = self.load_documents("environments/homelab/apps/homelab-portal.yaml")
+        metadata = application["metadata"]
+        self.assertEqual("25", metadata["annotations"]["argocd.argoproj.io/sync-wave"])
+        self.assertEqual("v1", metadata["annotations"]["homelab.io/onboarding-contract"])
+        self.assertEqual("personal-applications", metadata["annotations"]["homelab.io/owner"])
+        self.assertEqual("stateless", metadata["annotations"]["homelab.io/state"])
+
+        sources = application["spec"]["sources"]
+        self.assertEqual(2, len(sources))
+        portal = next(source for source in sources if source["repoURL"].endswith("homelab-portal.git"))
+        self.assertEqual(self.portal_revision, portal["targetRevision"])
+        self.assertEqual("deploy/overlays/homelab", portal["path"])
+        patches = portal["kustomize"]["patches"]
+        self.assertEqual(1, len(patches))
+        self.assertEqual(
+            {"group": "secrets.hashicorp.com", "version": "v1beta1",
+             "kind": "VaultStaticSecret", "name": "homelab-portal"},
+            patches[0]["target"],
+        )
+        self.assertEqual("delete", yaml.safe_load(patches[0]["patch"])["$patch"])
+        site = next(source for source in sources if source["repoURL"].endswith("homelab.git"))
+        self.assertEqual("main", site["targetRevision"])
+        self.assertEqual("apps/portal/config", site["path"])
+        self.assertEqual(self.portal_revision, metadata["annotations"]["homelab.io/source-revision"])
+        self.assertEqual(self.portal_tag, metadata["annotations"]["homelab.io/image-tag"])
+        self.assertEqual(self.portal_digest, metadata["annotations"]["homelab.io/image-digest"])
+
+        serialized = yaml.safe_dump(application, sort_keys=True)
+        for placeholder in ("192.0.2.1", "198.51.100.1", "registry.example", "example.ts.net"):
+            self.assertNotIn(placeholder, serialized)
+
+        sync_policy = application["spec"]["syncPolicy"]
+        self.assertEqual({"prune": True, "selfHeal": True}, sync_policy["automated"])
+        self.assertIn("ServerSideApply=true", sync_policy["syncOptions"])
+        self.assertNotIn("CreateNamespace=true", sync_policy["syncOptions"])
+        self.assertEqual("portal", application["spec"]["destination"]["namespace"])
+
+    def test_portal_vso_projects_only_required_secret_keys(self):
+        resources = self.load_documents("apps/portal/config/vault-secrets.yaml")
+        by_kind = {resource["kind"]: resource for resource in resources}
+        vault_auth = by_kind["VaultAuth"]
+        portal_secret = by_kind["VaultStaticSecret"]
+
+        self.assertNotIn("ServiceAccount", by_kind)
+        self.assertEqual("vso-portal", vault_auth["spec"]["kubernetes"]["role"])
+        self.assertEqual("homelab-portal", vault_auth["spec"]["kubernetes"]["serviceAccount"])
+        self.assertEqual("portal", portal_secret["spec"]["path"])
+        self.assertEqual("60s", portal_secret["spec"]["refreshAfter"])
+        destination = portal_secret["spec"]["destination"]
+        self.assertEqual("homelab-portal-secrets", destination["name"])
+        transformation = destination["transformation"]
+        self.assertIs(True, transformation["excludeRaw"])
+        self.assertEqual(
+            {"oidc-client-secret", "session-current-key"},
+            set(transformation["templates"]),
+        )
+        self.assertLessEqual(
+            set(transformation["templates"]),
+            {"oidc-client-secret", "session-current-key", "session-previous-key"},
+        )
+        self.assertEqual(
+            [{"kind": "Deployment", "name": "homelab-portal"}],
+            portal_secret["spec"]["rolloutRestartTargets"],
+        )
+
 if __name__ == "__main__":
     unittest.main()

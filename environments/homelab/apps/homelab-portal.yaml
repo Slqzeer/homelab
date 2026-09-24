@@ -1,0 +1,51 @@
+# Homelab Portal depends on the wave-24 Keycloak client reconciler. The
+# product repository owns its generic package and immutable image; this
+# repository supplies the namespace and least-privilege Vault projection.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: homelab-portal
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "25"
+    homelab.io/onboarding-contract: v1
+    homelab.io/owner: personal-applications
+    homelab.io/state: stateless
+    homelab.io/source-revision: 09578b952aa7e187f1391f42c1158d5484b0ecdc
+    homelab.io/image-tag: >-
+      sha-55659f8237fa5a2d0e5b79ab57268c011dc2dea1-36017826392-2
+    homelab.io/image-digest: >-
+      sha256:a566f89422953f2d6365e124415cb29d7eb350ac2ccf4f176fbedbb0f78100ef
+spec:
+  project: default
+  sources:
+    - repoURL: git@github.com:Slqzeer/homelab-portal.git
+      targetRevision: 09578b952aa7e187f1391f42c1158d5484b0ecdc
+      path: deploy/overlays/homelab
+      kustomize:
+        # The product base documents the VSO shape with placeholder refs.
+        # Site GitOps below is the sole owner of the real projection.
+        patches:
+          - target:
+              group: secrets.hashicorp.com
+              version: v1beta1
+              kind: VaultStaticSecret
+              name: homelab-portal
+            patch: |-
+              apiVersion: secrets.hashicorp.com/v1beta1
+              kind: VaultStaticSecret
+              metadata:
+                name: homelab-portal
+              $patch: delete
+    - repoURL: git@github.com:Slqzeer/homelab.git
+      targetRevision: main
+      path: apps/portal/config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: portal
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
