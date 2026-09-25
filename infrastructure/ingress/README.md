@@ -98,6 +98,57 @@ everything else, not beside `platform/vault/`. Argo CD's own Ingress lives
 here for the same reason, on top of the wave -1 bootstrapping problem
 described in the comment in `config/argocd-ingress.yaml`.
 
+## Portal publication
+
+An Ingress is absent from the Homelab Portal catalogue unless it carries the
+complete `portal.homelab.io/*` annotation contract. Publication controls only
+whether the portal reveals a card; the target service continues to enforce its
+own authentication and authorization.
+
+Published metadata requires `enabled: "true"`, a non-empty `name`,
+`description`, and `category`, a bundled icon identifier, an integer `order`
+from 0 through 9999, and one of these access modes:
+
+- `public`: visible without a portal session;
+- `authenticated`: visible to any valid portal session;
+- `groups`: visible only to an exact group named in the unique, non-empty CSV
+  `portal.homelab.io/groups` value;
+- `admin`: visible only to the exact Keycloak group `portal-admin`.
+
+Only `groups` may set `portal.homelab.io/groups`. Administrative targets must
+never use `public`. Unknown icons fall back in the application, but manifests
+in this repository use only the portal's bundled identifiers so mistakes are
+caught before reconciliation.
+
+The initial catalogue is intentionally narrow:
+
+| Target | Portal access | Policy basis |
+| --- | --- | --- |
+| Vault | `groups: homelab-admins` | root-token administrative UI |
+| Argo CD | `groups: homelab-admins` | local administrator only; Dex is disabled |
+| Grafana | `groups` | exact `homelab-admins,homelab-users` Keycloak groups |
+| Nexus | `groups: homelab-admins` | local authentication remains authoritative; the separate Docker endpoint is unlisted |
+| Keycloak | `groups: homelab-admins` | identity administration console |
+
+Credential-free checks on 2026-09-24 confirmed that the Vault, Grafana,
+Nexus, and Keycloak administrative APIs reject anonymous requests. Argo CD's
+session endpoint returned an explicitly logged-out identity. Those checks
+used no token, cookie, or Secret. The checked-in service policies above are
+the source of each catalogue access decision; change the metadata only with a
+matching policy review and a fresh authentication check.
+
+The four administrative cards use the existing exact `homelab-admins` group
+rather than portal `admin` access. Portal `admin` is reserved for the separate
+`portal-admin` diagnostic role, which is not part of the checked-in realm
+seed. Card visibility does not grant access to a target: in particular, Nexus
+continues to use its local authentication and is not changed by this metadata.
+
+`config/portal-ingress.yaml` is intentionally unlisted, even though it meets
+the same Tailscale exposure rules. It routes only `/` to Service
+`homelab-portal`'s named `public` port. The `operations` port is never an
+Ingress backend, and the portal must not publish a card that redirects to
+itself.
+
 ## The `operator-oauth` Secret
 
 The operator authenticates to the Tailscale API with an OAuth client

@@ -1,0 +1,28 @@
+# Homelab Portal on the tailnet at https://portal.taildf6cd4.ts.net.
+#
+# This Ingress is intentionally not annotated for portal publication: the
+# portal excludes itself from its catalogue. Only the user-facing named port
+# is routed; the operations listener remains cluster-local.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: homelab-portal
+  namespace: portal
+  annotations:
+    tailscale.com/proxy-class: homelab
+spec:
+  ingressClassName: tailscale
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: homelab-portal
+                port:
+                  name: public
+  tls:
+    # Short name only. Becomes portal.taildf6cd4.ts.net via MagicDNS.
+    - hosts:
+        - portal

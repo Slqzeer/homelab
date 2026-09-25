@@ -517,5 +517,112 @@ class PortalRegistrationTests(unittest.TestCase):
         )
         self.assertIs(True, portal_secret["spec"]["hmacSecretData"])
 
+
+class PortalIngressPublicationTests(unittest.TestCase):
+    approved_catalogue = {
+        ("vault", "vault"): ("Vault", "groups", "homelab-admins"),
+        ("argocd", "argocd"): ("Argo CD", "groups", "homelab-admins"),
+        ("monitoring", "grafana"): (
+            "Grafana",
+            "groups",
+            "homelab-admins,homelab-users",
+        ),
+        ("artifacts", "nexus"): ("Nexus", "groups", "homelab-admins"),
+        ("keycloak", "keycloak"): ("Keycloak", "groups", "homelab-admins"),
+    }
+
+    @staticmethod
+    def load_ingresses():
+        ingresses = []
+        for path in sorted((REPOSITORY_ROOT / "infrastructure/ingress/config").glob("*-ingress.yaml")):
+            with path.open(encoding="utf-8") as stream:
+                ingresses.extend(
+                    document
+                    for document in yaml.safe_load_all(stream)
+                    if document and document.get("kind") == "Ingress"
+                )
+        return ingresses
+
+    def test_portal_ingress_exposes_only_the_named_public_port(self):
+        ingresses = self.load_ingresses()
+        matching = [
+            ingress
+            for ingress in ingresses
+            if ingress.get("metadata", {}).get("namespace") == "portal"
+            and ingress.get("metadata", {}).get("name") == "homelab-portal"
+        ]
+        self.assertEqual(1, len(matching))
+        portal = matching[0]
+        annotations = portal["metadata"]["annotations"]
+        self.assertEqual("homelab", annotations["tailscale.com/proxy-class"])
+        self.assertFalse(any(key.startswith("portal.homelab.io/") for key in annotations))
+        self.assertEqual("tailscale", portal["spec"]["ingressClassName"])
+        self.assertEqual([{"hosts": ["portal"]}], portal["spec"]["tls"])
+
+        rules = portal["spec"]["rules"]
+        self.assertEqual(1, len(rules))
+        paths = rules[0]["http"]["paths"]
+        self.assertEqual(1, len(paths))
+        self.assertEqual("/", paths[0]["path"])
+        self.assertEqual("Prefix", paths[0]["pathType"])
+        self.assertEqual(
+            {"name": "homelab-portal", "port": {"name": "public"}},
+            paths[0]["backend"]["service"],
+        )
+        self.assertNotIn("operations", yaml.safe_dump(portal))
+
+    def test_catalogue_contains_only_the_approved_authenticated_targets(self):
+        published = {}
+        for ingress in self.load_ingresses():
+            metadata = ingress.get("metadata", {})
+            annotations = metadata.get("annotations", {})
+            if annotations.get("portal.homelab.io/enabled") != "true":
+                continue
+            key = (metadata.get("namespace"), metadata.get("name"))
+            published[key] = (
+                annotations.get("portal.homelab.io/name"),
+                annotations.get("portal.homelab.io/access"),
+                annotations.get("portal.homelab.io/groups"),
+            )
+
+        self.assertEqual(self.approved_catalogue, published)
+        self.assertNotIn("public", {access for _, access, _ in published.values()})
+
+    def test_published_ingresses_follow_the_portal_metadata_schema(self):
+        known_icons = {
+            "argocd", "generic", "grafana", "keycloak", "kubernetes",
+            "prometheus", "tailscale", "vault",
+        }
+        allowed_access = {"public", "authenticated", "groups", "admin"}
+        published_count = 0
+
+        for ingress in self.load_ingresses():
+            annotations = ingress.get("metadata", {}).get("annotations", {})
+            if annotations.get("portal.homelab.io/enabled") != "true":
+                continue
+            published_count += 1
+            name = annotations.get("portal.homelab.io/name", "").strip()
+            description = annotations.get("portal.homelab.io/description", "").strip()
+            category = annotations.get("portal.homelab.io/category", "").strip()
+            icon = annotations.get("portal.homelab.io/icon")
+            access = annotations.get("portal.homelab.io/access")
+            order = annotations.get("portal.homelab.io/order", "")
+            groups = annotations.get("portal.homelab.io/groups")
+
+            self.assertTrue(0 < len(name) <= 80)
+            self.assertLessEqual(len(description), 240)
+            self.assertTrue(0 < len(category) <= 40)
+            self.assertIn(icon, known_icons)
+            self.assertIn(access, allowed_access)
+            self.assertTrue(order.isdigit() and 0 <= int(order) <= 9999)
+            if access == "groups":
+                parsed = [group.strip() for group in (groups or "").split(",")]
+                self.assertTrue(all(parsed))
+                self.assertEqual(len(parsed), len(set(parsed)))
+            else:
+                self.assertIsNone(groups)
+
+        self.assertEqual(len(self.approved_catalogue), published_count)
+
 if __name__ == "__main__":
     unittest.main()

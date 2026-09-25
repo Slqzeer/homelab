@@ -26,6 +26,14 @@ metadata:
   namespace: monitoring
   annotations:
     tailscale.com/proxy-class: homelab
+    portal.homelab.io/enabled: "true"
+    portal.homelab.io/name: Grafana
+    portal.homelab.io/description: Dashboards and operational metrics
+    portal.homelab.io/category: Observability
+    portal.homelab.io/icon: grafana
+    portal.homelab.io/access: groups
+    portal.homelab.io/groups: homelab-admins,homelab-users
+    portal.homelab.io/order: "30"
 spec:
   ingressClassName: tailscale
   defaultBackend:

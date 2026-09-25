@@ -37,6 +37,14 @@ metadata:
   namespace: artifacts
   annotations:
     tailscale.com/proxy-class: homelab
+    portal.homelab.io/enabled: "true"
+    portal.homelab.io/name: Nexus
+    portal.homelab.io/description: Artifact repositories and package caches
+    portal.homelab.io/category: Development
+    portal.homelab.io/icon: generic
+    portal.homelab.io/access: groups
+    portal.homelab.io/groups: homelab-admins
+    portal.homelab.io/order: "40"
 spec:
   ingressClassName: tailscale
   defaultBackend:

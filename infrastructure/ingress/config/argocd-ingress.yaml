@@ -32,6 +32,14 @@ metadata:
   namespace: argocd
   annotations:
     tailscale.com/proxy-class: homelab
+    portal.homelab.io/enabled: "true"
+    portal.homelab.io/name: Argo CD
+    portal.homelab.io/description: GitOps delivery and application health
+    portal.homelab.io/category: Infrastructure
+    portal.homelab.io/icon: argocd
+    portal.homelab.io/access: groups
+    portal.homelab.io/groups: homelab-admins
+    portal.homelab.io/order: "20"
 spec:
   ingressClassName: tailscale
   defaultBackend:
