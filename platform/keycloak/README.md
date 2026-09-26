@@ -353,6 +353,38 @@ running, and exports omit some server state. The full database dump is
 the durable-state backup; even a user-inclusive realm export is not a
 substitute for it.
 
+## The Last Exam operator roles
+
+The Last Exam's operators sign in through the confidential client
+`tle-operator`. Each operator capability is a client role on it, named
+exactly like the capability (for example `admin.auth.keys.rotate`), and
+the composites `support`, `operator` and `admin` bundle them. The TLE
+services read only `resource_access.tle-operator.roles`; realm roles grant
+nothing there. Do not reuse the realm role `admin`, which is the homelab
+administrator.
+
+The TLE server repo publishes the list as its role manifest
+(`deploy-info/role-manifest.json`). Until a hook reconciles it
+automatically, this is a manual, rerunnable operator step:
+
+1. Take a database backup using the atomic recipe above.
+2. Regenerate the script from the release's manifest:
+   `python3 platform/keycloak/tle-operator/generate.py <role-manifest.json>`.
+3. Dry run, which is read-only and the default:
+   `sg k3s-admin -c 'kubectl -n keycloak exec -i deploy/keycloak -- sh -s' < platform/keycloak/tle-operator/reconcile-roles.sh`
+4. Apply with `sh -s apply`. The script re-reads Keycloak and exits 1 if any
+   role or composite differs from the manifest.
+5. Grant a composite to operators, preferably through a group, then give
+   the TLE services `KEYCLOAK_OPERATOR_CLIENT_ID=tle-operator`.
+
+The script runs inside the Keycloak pod with the bootstrap admin
+credentials already in its environment, so the password never leaves the
+pod or appears in arguments. It only adds client roles and composite
+members; extras are reported and left in place. Its one deletion is the
+unused realm roles `support` and `operator`, and only when they are not
+composite, not assigned, and not in the default roles. Redirect URIs are
+added when the TLE admin portal's sign-in lands.
+
 ## Files
 
 | File | Purpose |
@@ -363,6 +395,8 @@ substitute for it.
 | `config/client-registration.yaml` | Portal client allowlist, reconciler and PostSync Job |
 | `config/networkpolicy.yaml` | Namespace ingress deny and selected Keycloak peers/ports |
 | `test_client_registration.py` | Client convergence, security and network-policy tests |
+| `tle-operator/generate.py` | Builds `reconcile-roles.sh` from The Last Exam's role manifest |
+| `tle-operator/reconcile-roles.sh` | Manual, rerunnable `tle-operator` client, role and composite reconciliation (generated) |
 | `config/database-job.yaml` | Database credential wiring and Sync hook in `databases` |
 | `../../environments/homelab/apps/keycloak.yaml` | Wave-24 Application |
 | `../../infrastructure/ingress/config/keycloak-ingress.yaml` | Tailnet HTTPS entry point |
