@@ -4,8 +4,13 @@
 # the dedicated edge, which applies the JWT plugin + strip set and forwards
 # only operator-authorized paths to the internal gateways. Admin tooling
 # itself (internal-admin-gateway / internal-ops-gateway Services) is never
-# exposed directly. Unlisted by default: portal publication stays off until
-# #3 live sign-in acceptance passes.
+# exposed directly.
+#
+# Deliberately NOT a `/` catch-all: like the player Ingress this is an
+# allow-list, so /auth/admin/* stays unreachable through any tailnet
+# Ingress (#4) and operators reach rotation in-cluster until the admin
+# tool deployment pins its exact UI paths here. Unlisted by default:
+# portal publication stays off until #3 live sign-in acceptance passes.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -18,7 +23,14 @@ spec:
   rules:
     - http:
         paths:
-          - path: /
+          - path: /admin/
+            pathType: Prefix
+            backend:
+              service:
+                name: tle-dev-edge
+                port:
+                  name: http
+          - path: /ops/
             pathType: Prefix
             backend:
               service:

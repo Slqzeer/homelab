@@ -73,6 +73,10 @@ data:
   nats-url: "nats://tle-dev-nats.tle-dev.svc.cluster.local:4222"
   valkey-addr: "tle-dev-valkey.tle-dev.svc.cluster.local:6379"
   postgres-host: "postgres.databases.svc.cluster.local"
+  # Ed25519 JWT verification key (config-keys.json: AUTH_JWT_ED25519_PUBLIC_KEY_PEM,
+  # secret: false, and METADATA_JWT_PUBLIC_KEY for metadata-service). Pinned
+  # from the TLE release before promotion; never `latest`-adjacent.
+  auth-jwt-ed25519-public-key-pem: "fill in at release"
 ---
 # Edge Deployment placeholder. The product repository publishes the gateway
 # image per release; the runbook pins the real tag@digest before promotion.
@@ -95,7 +99,6 @@ spec:
     metadata:
       labels:
         app: tle-dev-edge
-        app-group: tle-dev-service
         metrics: tle-dev
     spec:
       serviceAccountName: tle-dev-edge

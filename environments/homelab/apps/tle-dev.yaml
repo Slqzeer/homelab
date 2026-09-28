@@ -19,6 +19,7 @@ metadata:
     homelab.io/onboarding-contract: v1
     homelab.io/owner: personal-applications
     homelab.io/state: durable
+    backup.homelab.io/restore-runbook: docs/runbooks/tle-dev-recovery.md
 spec:
   project: default
   source:

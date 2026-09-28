@@ -1,11 +1,12 @@
 # TLE-local Valkey + NATS (issue #2, ticket 4).
 #
-# Single-node dev scope: 1 replica each, local-path PVC for Valkey (append-
-# only cache/state the services address via VALKEY_ADDR), ephemeral emptyDir
-# for NATS (reconstructible bus via NATS_URL). Shared `databases` Redis is
-# untouched. Both Services are cluster-local only; no Ingress ever points
-# at them. Resource numbers follow the repo's measure-after-rollout rule;
-# the runbook records idle/peak after rollout.
+# Single-node dev scope: 1 replica each, local-path PVCs. Valkey runs
+# append-only (cache/state the services address via VALKEY_ADDR); NATS runs
+# JetStream on its PVC (bus via NATS_URL). Both are reconstructible, not
+# durable: recreation replays from Postgres/upstream. Shared `databases`
+# Redis is untouched. Both Services are cluster-local only; no Ingress ever
+# points at them. Resource numbers follow the repo's measure-after-rollout
+# rule; the runbook records idle/peak after rollout.
 ---
 apiVersion: v1
 kind: Service
@@ -14,7 +15,6 @@ metadata:
   namespace: tle-dev
   labels:
     app: tle-dev-valkey
-    metrics: tle-dev
 spec:
   selector:
     app: tle-dev-valkey
@@ -22,9 +22,6 @@ spec:
     - name: client
       port: 6379
       targetPort: client
-    - name: metrics
-      port: 9000
-      targetPort: metrics
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -41,7 +38,6 @@ spec:
     metadata:
       labels:
         app: tle-dev-valkey
-        metrics: tle-dev
     spec:
       serviceAccountName: tle-dev-valkey
       securityContext:
@@ -159,9 +155,8 @@ spec:
             - name: data
               mountPath: /data
           startupProbe:
-            httpGet:
-              path: /
-              port: metrics
+            tcpSocket:
+              port: client
             failureThreshold: 30
             periodSeconds: 10
           readinessProbe:

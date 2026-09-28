@@ -4,6 +4,10 @@
 # no matching Service yet is valid and simply has no targets until one
 # appears. All scrape the in-cluster metrics port (9000), never the
 # tailnet Ingress.
+#
+# No Valkey target: Valkey ships no metrics endpoint without an exporter
+# sidecar (deferred to the workload rollout); scraping a dead port would
+# only add a permanently red target.
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -15,22 +19,6 @@ spec:
   selector:
     matchLabels:
       app: tle-dev-edge
-  endpoints:
-    - port: metrics
-      path: /metrics
-      interval: 30s
----
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: tle-dev-valkey
-  namespace: tle-dev
-  labels:
-    app: tle-dev-valkey
-spec:
-  selector:
-    matchLabels:
-      app: tle-dev-valkey
   endpoints:
     - port: metrics
       path: /metrics
