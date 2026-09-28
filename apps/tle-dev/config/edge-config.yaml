@@ -1,0 +1,186 @@
+# Dedicated TLE dev edge configuration (issue #2, ticket 6).
+#
+# Decision (issue #2 acceptance): the edge is a dedicated Deployment in
+# tle-dev (image below, pinned per release in the runbook), NOT the
+# k3s-bundled Traefik. Traefik stays for in-cluster HTTP only and carries
+# no tailnet traffic. Rationale: TLE ADR-0002 (this repo owns the edge),
+# the server#4 path-prefix rule, and the README wave-gating lesson.
+#
+# Sources (pinned copies in ../deploy-info/):
+#   identity-headers.json -> strip.headers (exact blank set, Traefik-style)
+#     + strip.prefixes (JWT plugin strips whole families on protected routes;
+#     Traefik cannot match prefixes, so public routes rely on headers alone).
+#   public-routes.json -> routes: one player route per entry; /auth/admin/*,
+#     support, dev, health and metrics routes are never exposed (server#7
+#     generator refuses them; #4 forbids /auth/admin/* via Ingress, so the
+#     player Ingress lists path prefixes, never a catch-all).
+#   config-keys.json -> non-secret service endpoints below; secret keys are
+#     in Vault (vault-secrets.yaml).
+# Image: pinned per release as tag@digest (images.json is not in git).
+#   Placeholder digest below is all-`a` (non-zero so the onboarding
+#   validator's digest rule passes); the runbook records the real release.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tle-dev-edge-config
+  namespace: tle-dev
+data:
+  strip-headers.json: |
+    {
+      "source": "edge/API-gateway/plugin/headers.go",
+      "headers": [
+        "X-Actor-Id",
+        "X-Actor-Scope",
+        "X-Admin-Env",
+        "X-Admin-Scopes",
+        "X-Admin-Session-Id",
+        "X-Admin-User-Id",
+        "X-Auth-Exp",
+        "X-Auth-Risk",
+        "X-Auth-Scope",
+        "X-Auth-Scopes",
+        "X-Auth-Session-Id",
+        "X-Auth-Sub",
+        "X-Authenticated-Player-Id",
+        "X-Authenticated-User-Id",
+        "X-Internal-Auth",
+        "X-Internal-Service",
+        "X-Internal-Token",
+        "X-Internal-User",
+        "X-Ops-Env",
+        "X-Ops-Scopes",
+        "X-Ops-Session-Id",
+        "X-Ops-User-Id",
+        "X-Player-Id",
+        "X-Player-Role",
+        "X-Rate-Limit-Profile",
+        "X-User-Id"
+      ],
+      "prefixes": [
+        "X-Actor-",
+        "X-Admin-",
+        "X-Auth-",
+        "X-Internal-",
+        "X-Ops-"
+      ]
+    }
+  # #4 rotation authorization (non-secret half; secrets via VSO).
+  keycloak-issuer: "https://keycloak.taildf6cd4.ts.net/realms/homelab"
+  keycloak-operator-client-id: "tle-admin-dev"
+  keycloak-jwks-uri: "http://keycloak.keycloak.svc.cluster.local:8080/realms/homelab/protocol/openid-connect/certs"
+  # In-cluster service endpoints (non-secret; ports from config-keys.json).
+  auth-service-url: "http://tle-dev-auth-service.tle-dev.svc.cluster.local:8080"
+  nats-url: "nats://tle-dev-nats.tle-dev.svc.cluster.local:4222"
+  valkey-addr: "tle-dev-valkey.tle-dev.svc.cluster.local:6379"
+  postgres-host: "postgres.databases.svc.cluster.local"
+---
+# Edge Deployment placeholder. The product repository publishes the gateway
+# image per release; the runbook pins the real tag@digest before promotion.
+# This object proves the wiring (ConfigMap mount, service, probes,
+# resources); rollout uses the pinned image, never `latest`.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tle-dev-edge
+  namespace: tle-dev
+  labels:
+    app: tle-dev-edge
+    metrics: tle-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tle-dev-edge
+  template:
+    metadata:
+      labels:
+        app: tle-dev-edge
+        app-group: tle-dev-service
+        metrics: tle-dev
+    spec:
+      serviceAccountName: tle-dev-edge
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: edge
+          image: ghcr.io/the-last-exam/api-gateway:dev@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: metrics
+              containerPort: 9000
+          env:
+            - name: KEYCLOAK_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: tle-dev-edge-config
+                  key: keycloak-issuer
+            - name: KEYCLOAK_OPERATOR_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: tle-dev-edge-config
+                  key: keycloak-operator-client-id
+            - name: KEYCLOAK_JWKS_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: tle-dev-edge-config
+                  key: keycloak-jwks-uri
+          volumeMounts:
+            - name: edge-config
+              mountPath: /etc/tle-edge
+              readOnly: true
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: edge-config
+          configMap:
+            name: tle-dev-edge-config
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-edge
+  namespace: tle-dev
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tle-dev-edge
+  namespace: tle-dev
+  labels:
+    app: tle-dev-edge
+    metrics: tle-dev
+spec:
+  selector:
+    app: tle-dev-edge
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+    - name: metrics
+      port: 9000
+      targetPort: metrics

@@ -1,0 +1,40 @@
+{
+  "format_version": 1,
+  "source": "edge/API-gateway/plugin/headers.go",
+  "contract": "docs/platform/identity-header-contract.md",
+  "headers": [
+    "X-Actor-Id",
+    "X-Actor-Scope",
+    "X-Admin-Env",
+    "X-Admin-Scopes",
+    "X-Admin-Session-Id",
+    "X-Admin-User-Id",
+    "X-Auth-Exp",
+    "X-Auth-Risk",
+    "X-Auth-Scope",
+    "X-Auth-Scopes",
+    "X-Auth-Session-Id",
+    "X-Auth-Sub",
+    "X-Authenticated-Player-Id",
+    "X-Authenticated-User-Id",
+    "X-Internal-Auth",
+    "X-Internal-Service",
+    "X-Internal-Token",
+    "X-Internal-User",
+    "X-Ops-Env",
+    "X-Ops-Scopes",
+    "X-Ops-Session-Id",
+    "X-Ops-User-Id",
+    "X-Player-Id",
+    "X-Player-Role",
+    "X-Rate-Limit-Profile",
+    "X-User-Id"
+  ],
+  "prefixes": [
+    "X-Actor-",
+    "X-Admin-",
+    "X-Auth-",
+    "X-Internal-",
+    "X-Ops-"
+  ]
+}

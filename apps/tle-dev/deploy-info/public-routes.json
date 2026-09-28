@@ -1,0 +1,642 @@
+{
+  "format_version": 1,
+  "release": null,
+  "services": [
+    {
+      "service": "auth-service",
+      "source": "services/auth-service/public-routes.json",
+      "public_prefix": "",
+      "service_prefix": "",
+      "routes": [
+        {
+          "path": "/.well-known/jwks.json",
+          "methods": [
+            "GET"
+          ],
+          "bearer_required": false,
+          "websocket": false,
+          "service_path": "/.well-known/jwks.json"
+        },
+        {
+          "path": "/auth/api-keys",
+          "methods": [
+            "GET",
+            "POST"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/auth/api-keys"
+        },
+        {
+          "path": "/auth/api-keys/{key_id}",
+          "methods": [
+            "DELETE"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/auth/api-keys/{key_id}"
+        },
+        {
+          "path": "/auth/credentials",
+          "methods": [
+            "GET"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/auth/credentials"
+        },
+        {
+          "path": "/auth/credentials/link/begin",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/auth/credentials/link/begin"
+        },
+        {
+          "path": "/auth/credentials/link/complete",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/auth/credentials/link/complete"
+        },
+        {
+          "path": "/auth/login",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": false,
+          "websocket": false,
+          "service_path": "/auth/login"
+        },
+        {
+          "path": "/auth/oauth/callback/{provider}",
+          "methods": [
+            "GET"
+          ],
+          "bearer_required": false,
+          "websocket": false,
+          "service_path": "/auth/oauth/callback/{provider}"
+        },
+        {
+          "path": "/auth/oauth/par",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": false,
+          "websocket": false,
+          "service_path": "/auth/oauth/par"
+        },
+        {
+          "path": "/auth/passkey/authenticate/begin",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": false,
+          "websocket": false,
+          "service_path": "/auth/passkey/authenticate/begin"
+        },
+        {
+          "path": "/auth/passkey/authenticate/complete",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": false,
+          "websocket": false,
+          "service_path": "/auth/passkey/authenticate/complete"
+        },
+        {
+          "path": "/auth/passkey/register/begin",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/auth/passkey/register/begin"
+        },
+        {
+          "path": "/auth/passkey/register/complete",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/auth/passkey/register/complete"
+        },
+        {
+          "path": "/auth/register",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": false,
+          "websocket": false,
+          "service_path": "/auth/register"
+        },
+        {
+          "path": "/auth/resend-verification",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": false,
+          "websocket": false,
+          "service_path": "/auth/resend-verification"
+        },
+        {
+          "path": "/auth/sessions",
+          "methods": [
+            "DELETE"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/auth/sessions"
+        },
+        {
+          "path": "/auth/sessions/{session_id}",
+          "methods": [
+            "DELETE"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/auth/sessions/{session_id}"
+        },
+        {
+          "path": "/auth/token",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": false,
+          "websocket": false,
+          "service_path": "/auth/token"
+        },
+        {
+          "path": "/auth/token/refresh",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": false,
+          "websocket": false,
+          "service_path": "/auth/token/refresh"
+        },
+        {
+          "path": "/auth/verify-email",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": false,
+          "websocket": false,
+          "service_path": "/auth/verify-email"
+        }
+      ]
+    },
+    {
+      "service": "lobby-service",
+      "source": "services/lobby-service/public-routes.json",
+      "public_prefix": "/lobby/v1",
+      "service_prefix": "/lobby",
+      "routes": [
+        {
+          "path": "/lobby/v1/connect-info",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/lobby/connect-info"
+        }
+      ]
+    },
+    {
+      "service": "matchmaking-service",
+      "source": "services/matchmaking-service/public-routes.json",
+      "public_prefix": "/matchmaking/v1",
+      "service_prefix": "/matchmaking",
+      "routes": [
+        {
+          "path": "/matchmaking/v1/direct-launch",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/matchmaking/direct-launch"
+        },
+        {
+          "path": "/matchmaking/v1/queue",
+          "methods": [
+            "DELETE",
+            "POST"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/matchmaking/queue"
+        },
+        {
+          "path": "/matchmaking/v1/queue/status",
+          "methods": [
+            "GET"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/matchmaking/queue/status"
+        }
+      ]
+    },
+    {
+      "service": "metadata-service",
+      "source": "services/metadata-service/public-routes.json",
+      "public_prefix": "/metadata/v1/bundle",
+      "service_prefix": "/metadata",
+      "routes": [
+        {
+          "path": "/metadata/v1/bundle/latest.json",
+          "methods": [
+            "GET"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/metadata/latest.json"
+        },
+        {
+          "path": "/metadata/v1/bundle/{versionID}/{bundleName}",
+          "methods": [
+            "GET"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/metadata/{versionID}/{bundleName}"
+        }
+      ]
+    },
+    {
+      "service": "notification-service",
+      "source": "services/notification-service/public-routes.json",
+      "public_prefix": "/notification/v1/inbox",
+      "service_prefix": "/internal/notification/inbox",
+      "routes": [
+        {
+          "path": "/notification/v1/inbox/{entry_id}/read",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/internal/notification/inbox/{entry_id}/read"
+        },
+        {
+          "path": "/notification/v1/inbox/{user_id}",
+          "methods": [
+            "GET"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/internal/notification/inbox/{user_id}"
+        }
+      ]
+    },
+    {
+      "service": "player-service",
+      "source": "services/player-service/public-routes.json",
+      "public_prefix": "/player/v1",
+      "service_prefix": "",
+      "routes": [
+        {
+          "path": "/player/v1/players/{player_id}",
+          "methods": [
+            "GET",
+            "PATCH"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/players/{player_id}"
+        },
+        {
+          "path": "/player/v1/players/{player_id}/inventory",
+          "methods": [
+            "GET"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/players/{player_id}/inventory"
+        },
+        {
+          "path": "/player/v1/players/{player_id}/inventory/summary",
+          "methods": [
+            "GET"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/players/{player_id}/inventory/summary"
+        },
+        {
+          "path": "/player/v1/players/{player_id}/wall",
+          "methods": [
+            "GET"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/players/{player_id}/wall"
+        }
+      ]
+    },
+    {
+      "service": "quest-service",
+      "source": "services/quest-service/public-routes.json",
+      "public_prefix": "/quest/v1",
+      "service_prefix": "",
+      "routes": [
+        {
+          "path": "/quest/v1/quests",
+          "methods": [
+            "GET"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/quests"
+        },
+        {
+          "path": "/quest/v1/quests/{quest_id}/occurrences/{occurrence_id}",
+          "methods": [
+            "GET"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/quests/{quest_id}/occurrences/{occurrence_id}"
+        },
+        {
+          "path": "/quest/v1/quests/{quest_id}/occurrences/{occurrence_id}/claim",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/quests/{quest_id}/occurrences/{occurrence_id}/claim"
+        }
+      ]
+    },
+    {
+      "service": "social-service",
+      "source": "services/social-service/public-routes.json",
+      "public_prefix": "/social/v1",
+      "service_prefix": "",
+      "routes": [
+        {
+          "path": "/social/v1/blocks",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/blocks"
+        },
+        {
+          "path": "/social/v1/blocks/{player_id}",
+          "methods": [
+            "DELETE"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/blocks/{player_id}"
+        },
+        {
+          "path": "/social/v1/friends",
+          "methods": [
+            "GET"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/friends"
+        },
+        {
+          "path": "/social/v1/friends/requests",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/friends/requests"
+        },
+        {
+          "path": "/social/v1/friends/requests/incoming",
+          "methods": [
+            "GET"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/friends/requests/incoming"
+        },
+        {
+          "path": "/social/v1/friends/requests/outgoing",
+          "methods": [
+            "GET"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/friends/requests/outgoing"
+        },
+        {
+          "path": "/social/v1/friends/requests/{id}",
+          "methods": [
+            "DELETE",
+            "PATCH"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/friends/requests/{id}"
+        },
+        {
+          "path": "/social/v1/friends/{player_id}",
+          "methods": [
+            "DELETE"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/friends/{player_id}"
+        },
+        {
+          "path": "/social/v1/guilds",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/guilds"
+        },
+        {
+          "path": "/social/v1/guilds/{id}",
+          "methods": [
+            "DELETE",
+            "PATCH"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/guilds/{id}"
+        },
+        {
+          "path": "/social/v1/guilds/{id}/alliances",
+          "methods": [
+            "GET",
+            "POST"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/guilds/{id}/alliances"
+        },
+        {
+          "path": "/social/v1/guilds/{id}/alliances/requests/{request_id}",
+          "methods": [
+            "PATCH"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/guilds/{id}/alliances/requests/{request_id}"
+        },
+        {
+          "path": "/social/v1/guilds/{id}/alliances/{alliance_id}",
+          "methods": [
+            "DELETE"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/guilds/{id}/alliances/{alliance_id}"
+        },
+        {
+          "path": "/social/v1/guilds/{id}/audit-log",
+          "methods": [
+            "GET"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/guilds/{id}/audit-log"
+        },
+        {
+          "path": "/social/v1/guilds/{id}/invites",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/guilds/{id}/invites"
+        },
+        {
+          "path": "/social/v1/guilds/{id}/invites/{invite_id}",
+          "methods": [
+            "PATCH"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/guilds/{id}/invites/{invite_id}"
+        },
+        {
+          "path": "/social/v1/guilds/{id}/join",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/guilds/{id}/join"
+        },
+        {
+          "path": "/social/v1/guilds/{id}/join-requests/{request_id}",
+          "methods": [
+            "PATCH"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/guilds/{id}/join-requests/{request_id}"
+        },
+        {
+          "path": "/social/v1/guilds/{id}/members",
+          "methods": [
+            "GET"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/guilds/{id}/members"
+        },
+        {
+          "path": "/social/v1/guilds/{id}/members/me",
+          "methods": [
+            "DELETE"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/guilds/{id}/members/me"
+        },
+        {
+          "path": "/social/v1/guilds/{id}/members/{player_id}",
+          "methods": [
+            "DELETE"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/guilds/{id}/members/{player_id}"
+        },
+        {
+          "path": "/social/v1/guilds/{id}/members/{player_id}/reputation",
+          "methods": [
+            "PATCH"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/guilds/{id}/members/{player_id}/reputation"
+        },
+        {
+          "path": "/social/v1/guilds/{id}/members/{player_id}/role",
+          "methods": [
+            "PATCH"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/guilds/{id}/members/{player_id}/role"
+        },
+        {
+          "path": "/social/v1/guilds/{id}/my-audit-events",
+          "methods": [
+            "GET"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/guilds/{id}/my-audit-events"
+        },
+        {
+          "path": "/social/v1/guilds/{id}/ownership",
+          "methods": [
+            "PATCH"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/guilds/{id}/ownership"
+        },
+        {
+          "path": "/social/v1/players/{uid}",
+          "methods": [
+            "GET"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/players/{uid}"
+        }
+      ]
+    },
+    {
+      "service": "wsterminator",
+      "source": "edge/WebSocket-terminator/public-routes.json",
+      "public_prefix": "/lobby/v1",
+      "service_prefix": "",
+      "routes": [
+        {
+          "path": "/lobby/v1/ws",
+          "methods": [
+            "GET"
+          ],
+          "bearer_required": true,
+          "websocket": true,
+          "service_path": "/ws"
+        }
+      ]
+    }
+  ]
+}

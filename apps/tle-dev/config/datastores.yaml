@@ -1,0 +1,196 @@
+# TLE-local Valkey + NATS (issue #2, ticket 4).
+#
+# Single-node dev scope: 1 replica each, local-path PVC for Valkey (append-
+# only cache/state the services address via VALKEY_ADDR), ephemeral emptyDir
+# for NATS (reconstructible bus via NATS_URL). Shared `databases` Redis is
+# untouched. Both Services are cluster-local only; no Ingress ever points
+# at them. Resource numbers follow the repo's measure-after-rollout rule;
+# the runbook records idle/peak after rollout.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tle-dev-valkey
+  namespace: tle-dev
+  labels:
+    app: tle-dev-valkey
+    metrics: tle-dev
+spec:
+  selector:
+    app: tle-dev-valkey
+  ports:
+    - name: client
+      port: 6379
+      targetPort: client
+    - name: metrics
+      port: 9000
+      targetPort: metrics
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: tle-dev-valkey
+  namespace: tle-dev
+spec:
+  serviceName: tle-dev-valkey
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tle-dev-valkey
+  template:
+    metadata:
+      labels:
+        app: tle-dev-valkey
+        metrics: tle-dev
+    spec:
+      serviceAccountName: tle-dev-valkey
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: valkey
+          image: valkey/valkey:9.0.1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          ports:
+            - name: client
+              containerPort: 6379
+          args:
+            - valkey-server
+            - --appendonly
+            - "yes"
+            - --save
+            - "60 1"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          startupProbe:
+            tcpSocket:
+              port: client
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: client
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: client
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 2Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-valkey
+  namespace: tle-dev
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tle-dev-nats
+  namespace: tle-dev
+  labels:
+    app: tle-dev-nats
+    metrics: tle-dev
+spec:
+  selector:
+    app: tle-dev-nats
+  ports:
+    - name: client
+      port: 4222
+      targetPort: client
+    - name: metrics
+      port: 9000
+      targetPort: metrics
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: tle-dev-nats
+  namespace: tle-dev
+spec:
+  serviceName: tle-dev-nats
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tle-dev-nats
+  template:
+    metadata:
+      labels:
+        app: tle-dev-nats
+        metrics: tle-dev
+    spec:
+      serviceAccountName: tle-dev-nats
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: nats
+          image: nats:2.11.6-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          ports:
+            - name: client
+              containerPort: 4222
+            - name: metrics
+              containerPort: 8222
+          args:
+            - --jetstream
+            - --store_dir=/data/jetstream
+            - --monitor
+            - 0.0.0.0:8222
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          startupProbe:
+            httpGet:
+              path: /
+              port: metrics
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /connz
+              port: metrics
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: client
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              memory: 512Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 2Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-nats
+  namespace: tle-dev

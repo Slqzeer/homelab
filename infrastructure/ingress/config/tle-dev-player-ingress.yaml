@@ -1,0 +1,149 @@
+# TLE dev player Ingress (issue #2, ticket 7).
+#
+# Routes the dedicated edge Service (tle-dev-edge:8080), never a service
+# directly. Path list is built from apps/tle-dev/deploy-info/public-routes.json:
+# one Prefix entry per player-reachable prefix. Deliberately NO `/` catch-all
+# and NO /auth/admin/* entry: a Kubernetes Ingress cannot exclude a sub-path
+# (#4), so the player surface is an allow-list of prefixes. /auth/admin/*,
+# metrics, health and admin ports stay in-cluster only.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tle-dev-player
+  namespace: tle-dev
+  annotations:
+    tailscale.com/proxy-class: homelab
+spec:
+  ingressClassName: tailscale
+  rules:
+    - http:
+        paths:
+          - path: /.well-known/jwks.json
+            pathType: Prefix
+            backend:
+              service:
+                name: tle-dev-edge
+                port:
+                  name: http
+          - path: /auth/api-keys
+            pathType: Prefix
+            backend:
+              service:
+                name: tle-dev-edge
+                port:
+                  name: http
+          - path: /auth/credentials
+            pathType: Prefix
+            backend:
+              service:
+                name: tle-dev-edge
+                port:
+                  name: http
+          - path: /auth/login
+            pathType: Prefix
+            backend:
+              service:
+                name: tle-dev-edge
+                port:
+                  name: http
+          - path: /auth/oauth
+            pathType: Prefix
+            backend:
+              service:
+                name: tle-dev-edge
+                port:
+                  name: http
+          - path: /auth/passkey
+            pathType: Prefix
+            backend:
+              service:
+                name: tle-dev-edge
+                port:
+                  name: http
+          - path: /auth/register
+            pathType: Prefix
+            backend:
+              service:
+                name: tle-dev-edge
+                port:
+                  name: http
+          - path: /auth/resend-verification
+            pathType: Prefix
+            backend:
+              service:
+                name: tle-dev-edge
+                port:
+                  name: http
+          - path: /auth/sessions
+            pathType: Prefix
+            backend:
+              service:
+                name: tle-dev-edge
+                port:
+                  name: http
+          - path: /auth/token
+            pathType: Prefix
+            backend:
+              service:
+                name: tle-dev-edge
+                port:
+                  name: http
+          - path: /auth/verify-email
+            pathType: Prefix
+            backend:
+              service:
+                name: tle-dev-edge
+                port:
+                  name: http
+          - path: /lobby/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: tle-dev-edge
+                port:
+                  name: http
+          - path: /matchmaking/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: tle-dev-edge
+                port:
+                  name: http
+          - path: /metadata/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: tle-dev-edge
+                port:
+                  name: http
+          - path: /notification/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: tle-dev-edge
+                port:
+                  name: http
+          - path: /player/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: tle-dev-edge
+                port:
+                  name: http
+          - path: /quest/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: tle-dev-edge
+                port:
+                  name: http
+          - path: /social/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: tle-dev-edge
+                port:
+                  name: http
+  tls:
+    - hosts:
+        - tle-dev

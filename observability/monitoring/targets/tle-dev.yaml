@@ -1,0 +1,53 @@
+# TLE dev -- ServiceMonitors. Shipped by `monitoring-config` (wave 24),
+# not by the `tle-dev` Application (wave 25): they need the CRDs the
+# kube-prometheus-stack chart installs at wave 23. A ServiceMonitor with
+# no matching Service yet is valid and simply has no targets until one
+# appears. All scrape the in-cluster metrics port (9000), never the
+# tailnet Ingress.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: tle-dev-edge
+  namespace: tle-dev
+  labels:
+    app: tle-dev-edge
+spec:
+  selector:
+    matchLabels:
+      app: tle-dev-edge
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: tle-dev-valkey
+  namespace: tle-dev
+  labels:
+    app: tle-dev-valkey
+spec:
+  selector:
+    matchLabels:
+      app: tle-dev-valkey
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: tle-dev-nats
+  namespace: tle-dev
+  labels:
+    app: tle-dev-nats
+spec:
+  selector:
+    matchLabels:
+      app: tle-dev-nats
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s

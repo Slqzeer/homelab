@@ -1,0 +1,30 @@
+# TLE dev operator Ingress (issue #2, ticket 7).
+#
+# Operators reach the admin/ops tooling through this host; it also routes
+# the dedicated edge, which applies the JWT plugin + strip set and forwards
+# only operator-authorized paths to the internal gateways. Admin tooling
+# itself (internal-admin-gateway / internal-ops-gateway Services) is never
+# exposed directly. Unlisted by default: portal publication stays off until
+# #3 live sign-in acceptance passes.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tle-dev-operator
+  namespace: tle-dev
+  annotations:
+    tailscale.com/proxy-class: homelab
+spec:
+  ingressClassName: tailscale
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tle-dev-edge
+                port:
+                  name: http
+  tls:
+    - hosts:
+        - tle-dev-operator
