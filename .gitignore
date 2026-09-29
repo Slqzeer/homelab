@@ -1,2 +1,9 @@
 .superpowers/
 summary.txt
+# Real tle-dev Vault seed values; only *.env.example templates are committed.
+apps/tle-dev/vault-seed/.env.*
+!apps/tle-dev/vault-seed/.env.tle-dev-auth.example
+!apps/tle-dev/vault-seed/.env.tle-dev-data.example
+!apps/tle-dev/vault-seed/.env.tle-dev-misc.example
+apps/tle-dev/vault-seed/*.pem
+apps/tle-dev/vault-seed/*.json

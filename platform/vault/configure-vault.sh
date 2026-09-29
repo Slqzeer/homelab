@@ -540,4 +540,149 @@ vault write auth/kubernetes/role/vso-keycloak-db \
     token_policies=vso-keycloak-db-read \
     ttl=1h
 
+echo "==> policy vso-tle-dev-auth-read"
+# Vault holds only tle-dev passwords and keys, never URLs: the full
+# DATABASE_URLs are composed in apps/tle-dev/config/vault-secrets.yaml
+# from public parts plus these passwords. Seed values come from
+# apps/tle-dev/vault-seed/ (templates) via seed-tle-dev-vault.sh.
+vault policy write vso-tle-dev-auth-read - <<'POLICY'
+path "homelab/data/tle-dev/auth" {
+  capabilities = ["read"]
+}
+POLICY
+
+echo "==> policy vso-tle-dev-data-read"
+vault policy write vso-tle-dev-data-read - <<'POLICY'
+path "homelab/data/tle-dev/data" {
+  capabilities = ["read"]
+}
+POLICY
+
+echo "==> policy vso-tle-dev-misc-read"
+vault policy write vso-tle-dev-misc-read - <<'POLICY'
+path "homelab/data/tle-dev/misc" {
+  capabilities = ["read"]
+}
+POLICY
+
+echo "==> policy vso-tle-dev-db-read"
+# A separate policy object from vso-tle-dev-data-read on purpose, even
+# though both read homelab/data/tle-dev/data: the Job in `databases`
+# must not gain anything else the data policy may grow, and vice versa.
+vault policy write vso-tle-dev-db-read - <<'POLICY'
+path "homelab/data/tle-dev/data" {
+  capabilities = ["read"]
+}
+POLICY
+
+echo "==> role vso-tle-dev-auth"
+# bound_service_account_names must match the ServiceAccount created in
+# apps/tle-dev/config/vault-secrets.yaml, and audience must match that
+# file's VaultAuth spec.kubernetes.audiences.
+vault write auth/kubernetes/role/vso-tle-dev-auth \
+    bound_service_account_names=tle-dev-auth \
+    bound_service_account_namespaces=tle-dev \
+    audience=vault \
+    token_policies=vso-tle-dev-auth-read \
+    ttl=1h
+
+echo "==> role vso-tle-dev-data"
+vault write auth/kubernetes/role/vso-tle-dev-data \
+    bound_service_account_names=tle-dev-data \
+    bound_service_account_namespaces=tle-dev \
+    audience=vault \
+    token_policies=vso-tle-dev-data-read \
+    ttl=1h
+
+echo "==> role vso-tle-dev-misc"
+vault write auth/kubernetes/role/vso-tle-dev-misc \
+    bound_service_account_names=tle-dev-misc \
+    bound_service_account_namespaces=tle-dev \
+    audience=vault \
+    token_policies=vso-tle-dev-misc-read \
+    ttl=1h
+
+echo "==> role vso-tle-dev-db"
+# A SECOND role rather than adding `databases` to vso-tle-dev-data's
+# namespaces. Vault's kubernetes auth matches the CROSS-PRODUCT of
+# bound_service_account_names and bound_service_account_namespaces, so one
+# role naming both SAs and both namespaces would additionally authorize
+# `tle-dev-data` in `databases` and `tle-dev-db` in `tle-dev` -- two
+# identities nobody intended. Same reasoning as vso-keycloak-db above.
+#
+# bound_service_account_names must match the ServiceAccount created in
+# apps/tle-dev/config/postgres-job.yaml.
+vault write auth/kubernetes/role/vso-tle-dev-db \
+    bound_service_account_names=tle-dev-db \
+    bound_service_account_namespaces=databases \
+    audience=vault \
+    token_policies=vso-tle-dev-db-read \
+    ttl=1h
+
+echo "==> seeding homelab/tle-dev/{auth,data,misc}"
+# Every field is seeded exactly once and never overwritten: generated
+# passwords for the databases, `disabled` placeholders for product-issued
+# keys the human has not provided yet. Placeholders let every
+# VaultStaticSecret sync; the human replaces them with
+# apps/tle-dev/vault-seed/seed-tle-dev-vault.sh (which patches, so it
+# cannot clobber generated values). An existing path is patched so a
+# previous seed survives; a missing path is created. Values travel via
+# key=@file, never via argv or terminal output.
+umask 077
+TLE_READ=$(mktemp)
+TLE_VAL=$(mktemp)
+trap 'rm -f "$KC_PORTAL_SECRET_FILE" "$PORTAL_SESSION_FILE" "$PORTAL_EXISTING_FILE" "$PORTAL_PATH_FILE" "$PORTAL_READ_ERROR_FILE" "$TLE_READ" "$TLE_VAL"' EXIT
+tle_ensure_field() {
+  # $1 = vault path, $2 = field, $3 = "generated"|"placeholder".
+  # $TLE_VAL already holds the value to seed when absent.
+  vault_optional_get "$1" "$2" "$TLE_READ" || exit 1
+  if [ "$VAULT_READ_STATUS" = present ] && [ -s "$TLE_READ" ]; then
+    echo "    $1/$2 already present"
+    return 0
+  fi
+  vault_optional_get "$1" "-" "$TLE_READ" || exit 1
+  if [ "$VAULT_READ_STATUS" = present ]; then
+    vault kv patch "$1" "$2"@"$TLE_VAL" >/dev/null
+  else
+    vault kv put "$1" "$2"@"$TLE_VAL" >/dev/null
+  fi
+  echo "    seeded $1/$2 ($3)"
+}
+tle_generate() {
+  # $1 = length. Alphanumeric only: these passwords are composed into
+  # postgres:// URLs, where a / or @ breaks parsing far from the cause.
+  head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c "$1" >"$TLE_VAL"
+}
+tle_placeholder() {
+  printf 'disabled' >"$TLE_VAL"
+}
+for f in password metadata_password quest_password; do
+  tle_generate 32
+  tle_ensure_field homelab/tle-dev/data "$f" "generated"
+done
+for spec in "CSRF_SECRET 48" "METADATA_GRPC_INTERNAL_TOKEN 32" \
+  "NOTIFICATION_WEBHOOK_SIGNING_SECRET 32"; do
+  set -- $spec
+  tle_generate "$2"
+  tle_ensure_field homelab/tle-dev/misc "$1" "generated"
+done
+for f in MINIO_ACCESS_KEY MINIO_SECRET_KEY NOTIFICATION_APNS_PRIVATE_KEY \
+  NOTIFICATION_FCM_CREDENTIALS_JSON AUTH_JWT_ED25519_PRIVATE_KEY_PEM \
+  AUTH_JWT_ED25519_STAGED_PRIVATE_KEY_PEM APPLE_PRIVATE_KEY \
+  APPLE_CLIENT_SECRET_OVERRIDE DISCORD_CLIENT_SECRET GOOGLE_CLIENT_SECRET; do
+  case "$f" in
+    MINIO_*|AUTH_JWT_ED25519_PRIVATE_KEY_PEM) kind="placeholder REQUIRED" ;;
+    *) kind="placeholder optional" ;;
+  esac
+  tle_placeholder
+  case "$f" in
+    MINIO_*|NOTIFICATION_APNS*|NOTIFICATION_FCM*) tle_ensure_field homelab/tle-dev/misc "$f" "$kind" ;;
+    *) tle_ensure_field homelab/tle-dev/auth "$f" "$kind" ;;
+  esac
+done
+rm -f "$TLE_READ" "$TLE_VAL"
+echo "    NOTE: placeholders marked REQUIRED (JWT private key, MinIO pair)"
+echo "    must be replaced via apps/tle-dev/vault-seed/seed-tle-dev-vault.sh"
+echo "    before the workloads can actually run; sync alone is not enough"
+
 echo "==> done"

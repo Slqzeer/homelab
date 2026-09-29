@@ -35,19 +35,26 @@ git (a digest exists only after a push); record the values here at promotion.
 
 ## Vault ceremony extension
 
-`platform/vault/configure-vault.sh` needs, before first sync:
+`platform/vault/configure-vault.sh` carries the tle-dev extension: 4
+policies/roles (`vso-tle-dev-auth/data/misc` in `tle-dev`, `vso-tle-dev-db`
+in `databases`), generated db passwords + CSRF/internal/webhook secrets,
+and `disabled` placeholders for product-issued keys. Run it first (see
+the script header for the vault-0 exec flow); it never overwrites.
+
+Product-issued values (JWT private key, MinIO pair, enabled OAuth/push
+providers) are then patched over the placeholders, never typed on a
+command line:
 
 ```bash
-# policies vso-tle-dev-auth, vso-tle-dev-data, vso-tle-dev-misc, vso-tle-dev-db
-# roles bound to SA tle-dev-auth/data/misc (ns tle-dev) and tle-dev-db (ns databases)
-# kv put homelab/tle-dev/auth  AUTH_JWT_ED25519_PRIVATE_KEY_PEM=... ...
-# kv put homelab/tle-dev/data  password=... metadata_password=... quest_password=...
-# kv put homelab/tle-dev/misc  MINIO_ACCESS_KEY=... MINIO_SECRET_KEY=... ...
-# (Vault holds only per-database passwords, never URLs: the full
-# DATABASE_URLs are composed in apps/tle-dev/config/vault-secrets.yaml
-# from public parts + these passwords. Same for tle-dev/auth, which
-# holds signing keys only; auth-service reads tle_dev via tle-dev-data.)
+cp apps/tle-dev/vault-seed/.env.tle-dev-{auth,misc}.example \
+  apps/tle-dev/vault-seed/.env.tle-dev-{auth,misc}  # fill values in
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+./apps/tle-dev/vault-seed/seed-tle-dev-vault.sh
 ```
+
+Per-key sources are documented in the `.env.example` templates. The
+`*- REQUIRED` placeholders (JWT key, MinIO pair) must be replaced before
+workloads can run; sync alone is not enough.
 
 ## Upgrade / rollback
 
