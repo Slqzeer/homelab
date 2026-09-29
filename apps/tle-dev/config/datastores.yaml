@@ -50,6 +50,11 @@ spec:
         - name: valkey
           image: >-
             valkey/valkey:9.0.1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           ports:
             - name: client
               containerPort: 6379
@@ -143,6 +148,11 @@ spec:
         - name: nats
           image: >-
             nats:2.11.6-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           ports:
             - name: client
               containerPort: 4222
