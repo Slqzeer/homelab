@@ -48,7 +48,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: valkey
-          image: valkey/valkey:9.0.1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          image: >-
+            valkey/valkey:9.0.1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           ports:
             - name: client
               containerPort: 6379
@@ -140,7 +141,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: nats
-          image: nats:2.11.6-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          image: >-
+            nats:2.11.6-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           ports:
             - name: client
               containerPort: 4222

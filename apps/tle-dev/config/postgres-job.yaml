@@ -102,7 +102,9 @@ spec:
                 echo "waiting for postgres"; sleep 2
               done
               for role in tle_dev tle_dev_metadata tle_dev_quest; do
-                if [ "$(psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_roles WHERE rolname='$role'")" = 1 ]; then
+                role_exists=$(psql -v ON_ERROR_STOP=1 -tAc \
+                  "SELECT 1 FROM pg_roles WHERE rolname='$role'")
+                if [ "$role_exists" = 1 ]; then
                   echo "role $role exists"
                 else
                   psql -v ON_ERROR_STOP=1 -c "CREATE ROLE $role LOGIN"
@@ -127,7 +129,8 @@ spec:
                   tle_dev_quest) owner="tle_dev_quest" ;;
                   *) owner="tle_dev" ;;
                 esac
-                if [ "$(psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_database WHERE datname='$db'")" = 1 ]; then
+                if [ "$(psql -v ON_ERROR_STOP=1 -tAc \
+                  "SELECT 1 FROM pg_database WHERE datname='$db'")" = 1 ]; then
                   echo "database $db exists"
                 else
                   psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE $db OWNER $owner"

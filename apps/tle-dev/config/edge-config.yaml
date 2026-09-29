@@ -67,7 +67,8 @@ data:
   # #4 rotation authorization (non-secret half; secrets via VSO).
   keycloak-issuer: "https://keycloak.taildf6cd4.ts.net/realms/homelab"
   keycloak-operator-client-id: "tle-admin-dev"
-  keycloak-jwks-uri: "http://keycloak.keycloak.svc.cluster.local:8080/realms/homelab/protocol/openid-connect/certs"
+  keycloak-jwks-uri: >-
+    http://keycloak.keycloak.svc.cluster.local:8080/realms/homelab/protocol/openid-connect/certs
   # In-cluster service endpoints (non-secret; ports from config-keys.json).
   auth-service-url: "http://tle-dev-auth-service.tle-dev.svc.cluster.local:8080"
   nats-url: "nats://tle-dev-nats.tle-dev.svc.cluster.local:4222"
@@ -109,7 +110,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: edge
-          image: ghcr.io/the-last-exam/api-gateway:dev@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          image: >-
+            ghcr.io/the-last-exam/api-gateway:dev@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
