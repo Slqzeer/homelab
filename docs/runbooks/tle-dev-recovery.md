@@ -40,11 +40,13 @@ git (a digest exists only after a push); record the values here at promotion.
 ```bash
 # policies vso-tle-dev-auth, vso-tle-dev-data, vso-tle-dev-misc, vso-tle-dev-db
 # roles bound to SA tle-dev-auth/data/misc (ns tle-dev) and tle-dev-db (ns databases)
-# kv put homelab/tle-dev/auth  DATABASE_URL=... AUTH_JWT_ED25519_PRIVATE_KEY_PEM=... ...
-# kv put homelab/tle-dev/data  DATABASE_URL=... QUEST_DATABASE_URL=... password=...
+# kv put homelab/tle-dev/auth  AUTH_JWT_ED25519_PRIVATE_KEY_PEM=... ...
+# kv put homelab/tle-dev/data  password=... metadata_password=... quest_password=...
 # kv put homelab/tle-dev/misc  MINIO_ACCESS_KEY=... MINIO_SECRET_KEY=... ...
-# (`password` in tle-dev/data feeds the postgres-job ALTER ROLE; it may
-# share the DATABASE_URL credential or be its own value.)
+# (Vault holds only per-database passwords, never URLs: the full
+# DATABASE_URLs are composed in apps/tle-dev/config/vault-secrets.yaml
+# from public parts + these passwords. Same for tle-dev/auth, which
+# holds signing keys only; auth-service reads tle_dev via tle-dev-data.)
 ```
 
 ## Upgrade / rollback

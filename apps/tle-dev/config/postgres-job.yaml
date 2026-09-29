@@ -56,6 +56,10 @@ spec:
       templates:
         password:
           text: '{{ get .Secrets "password" }}'
+        metadata_password:
+          text: '{{ get .Secrets "metadata_password" }}'
+        quest_password:
+          text: '{{ get .Secrets "quest_password" }}'
 ---
 apiVersion: batch/v1
 kind: Job
@@ -98,6 +102,16 @@ spec:
                 secretKeyRef:
                   name: tle-dev-db
                   key: password
+            - name: TLE_DEV_METADATA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-db
+                  key: metadata_password
+            - name: TLE_DEV_QUEST_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-db
+                  key: quest_password
           command:
             - /bin/sh
             - -c
@@ -116,15 +130,17 @@ spec:
                   echo "role $role created"
                 fi
               done
-              # The password travels through a psql variable, never
+              # The passwords travel through psql variables, never
               # interpolated into SQL text or argv (same \getenv pattern as
-              # platform/keycloak/config/database-job.yaml). Runs
-              # unconditionally so a rotated password in Vault reaches the
-              # roles on the next sync.
+              # platform/keycloak/config/database-job.yaml). Each role has
+              # its own password from Vault; all three run unconditionally
+              # so a rotated password reaches its role on the next sync.
               psql -v ON_ERROR_STOP=1 <<'SQL'
               \getenv pw TLE_DEV_PASSWORD
               ALTER ROLE tle_dev WITH PASSWORD :'pw';
+              \getenv pw TLE_DEV_METADATA_PASSWORD
               ALTER ROLE tle_dev_metadata WITH PASSWORD :'pw';
+              \getenv pw TLE_DEV_QUEST_PASSWORD
               ALTER ROLE tle_dev_quest WITH PASSWORD :'pw';
               SQL
               for db in tle_dev tle_dev_metadata tle_dev_quest; do
