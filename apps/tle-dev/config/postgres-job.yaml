@@ -1,0 +1,146 @@
+# TLE dev databases in the shared PostgreSQL (issue #2, ticket 3).
+#
+# Same arrangement as platform/keycloak/config/database-job.yaml: objects
+# below state `namespace: databases` explicitly and land outside this
+# Application's destination namespace. Sync hook (not plain Job) so a
+# changed script reaches the cluster; label `job: postgres-client` is
+# selected by the databases NetworkPolicy.
+#
+# One role + database per state owner: tle_dev (shared dev database for
+# auth/player/social/notification services, which all read DATABASE_URL),
+# tle_dev_metadata (DATABASE_URL for metadata-service), tle_dev_quest
+# (QUEST_DATABASE_URL). Vault paths tle-dev/data (passwords) are seeded by
+# the configure ceremony extension documented in the runbook.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-db
+  namespace: databases
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultAuth
+metadata:
+  name: tle-dev-db
+  namespace: databases
+spec:
+  vaultConnectionRef: vault
+  method: kubernetes
+  mount: kubernetes
+  kubernetes:
+    role: vso-tle-dev-db
+    serviceAccount: tle-dev-db
+    audiences:
+      - vault
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultStaticSecret
+metadata:
+  name: tle-dev-db
+  namespace: databases
+spec:
+  vaultAuthRef: tle-dev-db
+  mount: homelab
+  type: kv-v2
+  path: tle-dev/data
+  refreshAfter: 60s
+  destination:
+    name: tle-dev-db
+    create: true
+    transformation:
+      # Templates add keys; explicitly exclude every raw Vault key so this
+      # projection cannot silently widen if the backing path grows.
+      excludeRaw: true
+      excludes:
+        - ".*"
+      templates:
+        password:
+          text: '{{ get .Secrets "password" }}'
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tle-dev-database
+  namespace: databases
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        job: postgres-client
+    spec:
+      serviceAccountName: tle-dev-db
+      restartPolicy: Never
+      containers:
+        - name: psql
+          image: postgres:18.6-alpine
+          env:
+            - name: PGHOST
+              value: postgres.databases.svc.cluster.local
+            - name: PGUSER
+              value: postgres
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+            - name: TLE_DEV_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-db
+                  key: password
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              until pg_isready -q; do
+                echo "waiting for postgres"; sleep 2
+              done
+              for role in tle_dev tle_dev_metadata tle_dev_quest; do
+                role_exists=$(psql -v ON_ERROR_STOP=1 -tAc \
+                  "SELECT 1 FROM pg_roles WHERE rolname='$role'")
+                if [ "$role_exists" = 1 ]; then
+                  echo "role $role exists"
+                else
+                  psql -v ON_ERROR_STOP=1 -c "CREATE ROLE $role LOGIN"
+                  echo "role $role created"
+                fi
+              done
+              # The password travels through a psql variable, never
+              # interpolated into SQL text or argv (same \getenv pattern as
+              # platform/keycloak/config/database-job.yaml). Runs
+              # unconditionally so a rotated password in Vault reaches the
+              # roles on the next sync.
+              psql -v ON_ERROR_STOP=1 <<'SQL'
+              \getenv pw TLE_DEV_PASSWORD
+              ALTER ROLE tle_dev WITH PASSWORD :'pw';
+              ALTER ROLE tle_dev_metadata WITH PASSWORD :'pw';
+              ALTER ROLE tle_dev_quest WITH PASSWORD :'pw';
+              SQL
+              for db in tle_dev tle_dev_metadata tle_dev_quest; do
+                owner="$db"
+                case "$db" in
+                  tle_dev_metadata) owner="tle_dev_metadata" ;;
+                  tle_dev_quest) owner="tle_dev_quest" ;;
+                  *) owner="tle_dev" ;;
+                esac
+                if [ "$(psql -v ON_ERROR_STOP=1 -tAc \
+                  "SELECT 1 FROM pg_database WHERE datname='$db'")" = 1 ]; then
+                  echo "database $db exists"
+                else
+                  psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE $db OWNER $owner"
+                  echo "database $db created"
+                fi
+              done
+              echo "done"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi

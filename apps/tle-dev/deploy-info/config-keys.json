@@ -1,0 +1,2391 @@
+{
+  "format_version": 1,
+  "release": null,
+  "services": [
+    {
+      "service": "admin-audit-writer",
+      "source": "services/admin-audit-writer/config-keys.json",
+      "example": "services/admin-audit-writer/.env.example",
+      "keys": [
+        {
+          "name": "AUDIT_WRITER_ENV",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "AUDIT_WRITER_LISTEN_ADDR",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Overrides AUDIT_WRITER_PORT when set."
+        },
+        {
+          "name": "AUDIT_WRITER_PORT",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "DATABASE_URL",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "LOG_LEVEL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        }
+      ]
+    },
+    {
+      "service": "auth-service",
+      "source": "services/auth-service/config-keys.json",
+      "example": "services/auth-service/.env.example",
+      "keys": [
+        {
+          "name": "APPLE_CLIENT_ID",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Read on each Apple sign-in; Apple sign-in fails while unset."
+        },
+        {
+          "name": "APPLE_CLIENT_SECRET_OVERRIDE",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "APPLE_JWKS_URI_OVERRIDE",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "APPLE_KEY_ID",
+          "required": false,
+          "required_when": {
+            "APPLE_CLIENT_ID": "*"
+          },
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "APPLE_PAR_ENDPOINT_OVERRIDE",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "APPLE_PRIVATE_KEY",
+          "required": false,
+          "required_when": {
+            "APPLE_CLIENT_ID": "*"
+          },
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "APPLE_REDIRECT_URI",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "APPLE_TEAM_ID",
+          "required": false,
+          "required_when": {
+            "APPLE_CLIENT_ID": "*"
+          },
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "APPLE_TOKEN_ENDPOINT_OVERRIDE",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "AUTH_JWT_ED25519_PRIVATE_KEY_PEM",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "AUTH_JWT_ED25519_PUBLIC_KEY_PEM",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "AUTH_JWT_ED25519_STAGED_PRIVATE_KEY_PEM",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "AUTH_JWT_ED25519_STAGED_PUBLIC_KEY_PEM",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "AUTH_SERVICE_GRPC_PORT",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "AUTH_SERVICE_HOST",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "AUTH_SERVICE_LOG_LEVEL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "AUTH_SERVICE_NAME",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "AUTH_SERVICE_PORT",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "AUTH_TRUSTED_PROXIES",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "DATABASE_URL",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "DISCORD_CLIENT_ID",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Read on each Discord sign-in; Discord sign-in fails while unset."
+        },
+        {
+          "name": "DISCORD_CLIENT_SECRET",
+          "required": false,
+          "required_when": {
+            "DISCORD_CLIENT_ID": "*"
+          },
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "DISCORD_REDIRECT_URI",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "DISCORD_TOKEN_ENDPOINT_OVERRIDE",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "DISCORD_USERS_API_OVERRIDE",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GOOGLE_CLIENT_ID",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Read on each Google sign-in; Google sign-in fails while unset."
+        },
+        {
+          "name": "GOOGLE_CLIENT_SECRET",
+          "required": false,
+          "required_when": {
+            "GOOGLE_CLIENT_ID": "*"
+          },
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GOOGLE_DISCOVERY_URL_OVERRIDE",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GOOGLE_REDIRECT_URI",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "KEYCLOAK_ISSUER",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Operator sign-in is disabled unless this and KEYCLOAK_OPERATOR_CLIENT_ID are set."
+        },
+        {
+          "name": "KEYCLOAK_JWKS_URI",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "KEYCLOAK_OPERATOR_CLIENT_ID",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Operator sign-in is disabled unless this and KEYCLOAK_ISSUER are set."
+        },
+        {
+          "name": "NATS_URL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_URL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "WEBAUTHN_ALLOWED_ORIGINS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "WEBAUTHN_CHALLENGE_TTL_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "WEBAUTHN_COUNTER_POLICY",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "WEBAUTHN_RP_ID",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Passkeys are disabled while unset."
+        },
+        {
+          "name": "WEBAUTHN_RP_NAME",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "WEBAUTHN_RP_ORIGIN",
+          "required": false,
+          "required_when": {
+            "WEBAUTHN_RP_ID": "*"
+          },
+          "secret": false,
+          "points_to": null,
+          "description": null
+        }
+      ]
+    },
+    {
+      "service": "game-master",
+      "source": "services/game-master/config-keys.json",
+      "example": "services/game-master/.env.example",
+      "keys": [
+        {
+          "name": "GAME_MASTER_ENV",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GAME_MASTER_GRPC_PORT",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GAME_MASTER_HTTP_PORT",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GAME_MASTER_NAMESPACE",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GAME_MASTER_POOL_MAX",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GAME_MASTER_POOL_MIN",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GAME_MASTER_SPAWN_AHEAD",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GAME_POD_IMAGE",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "LOG_LEVEL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NATS_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "PLAYER_SERVICE_GRPC_TARGET",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": {
+            "service": "player-service",
+            "key": "PLAYER_GRPC_PORT"
+          },
+          "description": null
+        }
+      ]
+    },
+    {
+      "service": "game-service",
+      "source": "services/game-service/config-keys.json",
+      "example": "services/game-service/.env.example",
+      "keys": [
+        {
+          "name": "GAME_MASTER_GRPC_TARGET",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": {
+            "service": "game-master",
+            "key": "GAME_MASTER_GRPC_PORT"
+          },
+          "description": null
+        },
+        {
+          "name": "GAME_METADATA_SERVICE_BASE_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": {
+            "service": "metadata-service",
+            "key": "METADATA_PORT"
+          },
+          "description": null
+        },
+        {
+          "name": "GAME_METADATA_SERVICE_TIMEOUT_MS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GAME_POD_HTTP_HOST",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GAME_POD_HTTP_PORT",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GAME_POD_ID",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Set per pod by game-master."
+        },
+        {
+          "name": "GAME_POD_LOG_LEVEL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GAME_POD_MATCH_RESULT_PUBLISH_ATTEMPTS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GAME_POD_MATCH_RESULT_PUBLISH_RETRY_DELAY_MS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GAME_POD_READY_TIMEOUT_MS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GAME_POD_SERVICE_NAME",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GAME_POD_SHUTDOWN_DRAIN_TIMEOUT_MS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GAME_POD_SHUTDOWN_GRPC_TIMEOUT_MS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GAME_POD_SHUTDOWN_NATS_FLUSH_TIMEOUT_MS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GAME_POD_SNAPSHOT_INTERVAL_MS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GAME_POD_WS_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Set per pod by game-master."
+        },
+        {
+          "name": "NATS_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_URL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        }
+      ]
+    },
+    {
+      "service": "internal-admin-gateway",
+      "source": "services/internal-admin-gateway/config-keys.json",
+      "example": "services/internal-admin-gateway/.env.example",
+      "keys": [
+        {
+          "name": "ADMIN_GATEWAY_ENV",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "ADMIN_GATEWAY_LISTEN_ADDR",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "AUDIT_WRITER_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": {
+            "service": "admin-audit-writer",
+            "key": "AUDIT_WRITER_PORT"
+          },
+          "description": null
+        },
+        {
+          "name": "AUTH_SERVICE_GRPC_ADDR",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": {
+            "service": "auth-service",
+            "key": "AUTH_SERVICE_GRPC_PORT"
+          },
+          "description": null
+        },
+        {
+          "name": "CSRF_SECRET",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "LOG_LEVEL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "PORTAL_CONFIG_PATH",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "PROJECTION_WRITER_URL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": {
+            "service": "projection-writer",
+            "key": "PROJECTION_WRITER_LISTEN_ADDR"
+          },
+          "description": null
+        },
+        {
+          "name": "TOOL_REGISTRY_PATH",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        }
+      ]
+    },
+    {
+      "service": "internal-ops-gateway",
+      "source": "services/internal-ops-gateway/config-keys.json",
+      "example": "services/internal-ops-gateway/.env.example",
+      "keys": [
+        {
+          "name": "AUDIT_WRITER_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": {
+            "service": "admin-audit-writer",
+            "key": "AUDIT_WRITER_PORT"
+          },
+          "description": null
+        },
+        {
+          "name": "AUTH_CONTROL_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": {
+            "service": "auth-service",
+            "key": "AUTH_SERVICE_PORT"
+          },
+          "description": null
+        },
+        {
+          "name": "AUTH_SERVICE_GRPC_ADDR",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": {
+            "service": "auth-service",
+            "key": "AUTH_SERVICE_GRPC_PORT"
+          },
+          "description": null
+        },
+        {
+          "name": "GAME_MASTER_CONTROL_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": {
+            "service": "game-master",
+            "key": "GAME_MASTER_HTTP_PORT"
+          },
+          "description": null
+        },
+        {
+          "name": "LOG_LEVEL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "MATCHMAKING_CONTROL_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": {
+            "service": "matchmaking-service",
+            "key": "MATCHMAKING_PORT"
+          },
+          "description": null
+        },
+        {
+          "name": "OPS_GATEWAY_ENV",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "OPS_GATEWAY_LISTEN_ADDR",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "OPS_GATEWAY_TOOL_ID",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        }
+      ]
+    },
+    {
+      "service": "lobby-service",
+      "source": "services/lobby-service/config-keys.json",
+      "example": "services/lobby-service/.env.example",
+      "keys": [
+        {
+          "name": "CORS_ALLOWED_ORIGINS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "LOBBY_CHAT_RATE_LIMIT",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "LOBBY_DEFAULT_ROOM_ID",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "LOBBY_ENV",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "LOBBY_MUTE_DURATION_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "LOBBY_PING_RATE_LIMIT",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "LOBBY_PORT",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "LOBBY_RATE_WINDOW_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "LOBBY_READINESS_TIMEOUT_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "LOBBY_WRITE_BUFFER_SIZE",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "LOBBY_WS_URL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "LOG_LEVEL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NATS_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "PRESENCE_TTL_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "REPLAY_BUFFER_DEPTH",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_ADDR",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        }
+      ]
+    },
+    {
+      "service": "matchmaking-service",
+      "source": "services/matchmaking-service/config-keys.json",
+      "example": "services/matchmaking-service/.env.example",
+      "keys": [
+        {
+          "name": "GAME_MASTER_GRPC_ADDR",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": {
+            "service": "game-master",
+            "key": "GAME_MASTER_GRPC_PORT"
+          },
+          "description": null
+        },
+        {
+          "name": "LOG_LEVEL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "MATCHMAKING_BRACKET_EXPANSION_INTERVAL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "MATCHMAKING_BRACKET_EXPANSION_RATE",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "MATCHMAKING_BRACKET_WIDTH",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "MATCHMAKING_ENV",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "MATCHMAKING_GUILD_AFFINITY_WEIGHT",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "MATCHMAKING_HELD_GROUP_LEASE_TTL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "MATCHMAKING_HELD_GROUP_RETRY_INTERVAL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "MATCHMAKING_POOL_EXHAUSTED_RETRY_INITIAL_BACKOFF",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "MATCHMAKING_POOL_EXHAUSTED_RETRY_MAX_BACKOFF",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "MATCHMAKING_PORT",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "MATCHMAKING_RETRY_GAME_MODE_IDS",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NATS_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NOTIFICATION_GRPC_ADDR",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Checked at startup but never dialled: notification-service serves no gRPC."
+        },
+        {
+          "name": "PARTY_RESOLVE_SUBJECT",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "PARTY_RESOLVE_TIMEOUT",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_GRPC_ADDR",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": {
+            "service": "social-service",
+            "key": "SOCIAL_GRPC_PORT"
+          },
+          "description": null
+        },
+        {
+          "name": "SOCIAL_GRPC_TIMEOUT",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_ADDR",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        }
+      ]
+    },
+    {
+      "service": "metadata-service",
+      "source": "services/metadata-service/config-keys.json",
+      "example": "services/metadata-service/.env.example",
+      "keys": [
+        {
+          "name": "DATABASE_URL",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "LOG_LEVEL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "METADATA_ARCHIVAL_INTERVAL_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "METADATA_CDN_ALIAS_TTL_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "METADATA_ENV",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "METADATA_GRPC_INTERNAL_TOKEN",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "METADATA_GRPC_PORT",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "METADATA_INTEGRITY_INTERVAL_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "METADATA_JWT_PUBLIC_KEY",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "METADATA_PORT",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "METADATA_PUBLISH_RATE_LIMIT",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "METADATA_PUBLISH_RATE_WINDOW_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "METADATA_READINESS_TIMEOUT_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "METADATA_READ_RATE_LIMIT",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "METADATA_READ_RATE_WINDOW_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "METADATA_STALE_AFTER_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "METADATA_VALIDATION_WORKER_COUNT",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "MINIO_ACCESS_KEY",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "MINIO_BUCKET",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "MINIO_ENDPOINT",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "MINIO_SECRET_KEY",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "MINIO_USE_SSL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NATS_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_ADDR",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        }
+      ]
+    },
+    {
+      "service": "notification-service",
+      "source": "services/notification-service/config-keys.json",
+      "example": "services/notification-service/.env.example",
+      "keys": [
+        {
+          "name": "DATABASE_URL",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "LOG_LEVEL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NATS_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NOTIFICATION_APNS_BUNDLE_ID",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Read when NOTIFICATION_PROVIDER_APNS_ENABLED is true."
+        },
+        {
+          "name": "NOTIFICATION_APNS_KEY_ID",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Read when NOTIFICATION_PROVIDER_APNS_ENABLED is true."
+        },
+        {
+          "name": "NOTIFICATION_APNS_PRIVATE_KEY",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": "Read when NOTIFICATION_PROVIDER_APNS_ENABLED is true."
+        },
+        {
+          "name": "NOTIFICATION_APNS_TEAM_ID",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Read when NOTIFICATION_PROVIDER_APNS_ENABLED is true."
+        },
+        {
+          "name": "NOTIFICATION_EMAIL_FROM",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Read when NOTIFICATION_PROVIDER_EMAIL_ENABLED is true."
+        },
+        {
+          "name": "NOTIFICATION_EMAIL_PROVIDER",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Read when NOTIFICATION_PROVIDER_EMAIL_ENABLED is true."
+        },
+        {
+          "name": "NOTIFICATION_ENV",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NOTIFICATION_FCM_CREDENTIALS_JSON",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": "Read when NOTIFICATION_PROVIDER_FCM_ENABLED is true."
+        },
+        {
+          "name": "NOTIFICATION_FCM_PROJECT_ID",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Read when NOTIFICATION_PROVIDER_FCM_ENABLED is true."
+        },
+        {
+          "name": "NOTIFICATION_PORT",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NOTIFICATION_PROVIDER_APNS_ENABLED",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NOTIFICATION_PROVIDER_EMAIL_ENABLED",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NOTIFICATION_PROVIDER_FCM_ENABLED",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NOTIFICATION_PROVIDER_WEBHOOK_ENABLED",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NOTIFICATION_READINESS_TIMEOUT_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NOTIFICATION_RETRY_BATCH_SIZE",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NOTIFICATION_RETRY_FIRST_WINDOW_CADENCE_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NOTIFICATION_RETRY_FIRST_WINDOW_DURATION_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NOTIFICATION_RETRY_LEASE_TTL_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NOTIFICATION_RETRY_MAX_AGE_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NOTIFICATION_RETRY_POLL_INTERVAL_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NOTIFICATION_RETRY_SECOND_WINDOW_CADENCE_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NOTIFICATION_WEBHOOK_SIGNING_SECRET",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": "Read when NOTIFICATION_PROVIDER_WEBHOOK_ENABLED is true."
+        },
+        {
+          "name": "VALKEY_ADDR",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        }
+      ]
+    },
+    {
+      "service": "player-service",
+      "source": "services/player-service/config-keys.json",
+      "example": "services/player-service/.env.example",
+      "keys": [
+        {
+          "name": "DATABASE_URL",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "LOG_LEVEL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NATS_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "PLAYER_ENV",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "PLAYER_GRPC_PORT",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "PLAYER_MIGRATIONS_PATH",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "PLAYER_PORT",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_GRPC_ADDR",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": {
+            "service": "social-service",
+            "key": "SOCIAL_GRPC_PORT"
+          },
+          "description": null
+        },
+        {
+          "name": "VALKEY_ADDR",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        }
+      ]
+    },
+    {
+      "service": "projection-writer",
+      "source": "services/projection-writer/config-keys.json",
+      "example": "services/projection-writer/.env.example",
+      "keys": [
+        {
+          "name": "DATABASE_URL",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "LOG_LEVEL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NATS_CONSUMER",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NATS_STREAM",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NATS_SUBJECT",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NATS_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "PROJECTION_WRITER_ENV",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "PROJECTION_WRITER_LISTEN_ADDR",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SSE_BROADCAST_TIMEOUT_MS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "STALE_ACTIVE_TTL_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "STALE_COMPLETED_TTL_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        }
+      ]
+    },
+    {
+      "service": "quest-service",
+      "source": "services/quest-service/config-keys.json",
+      "example": "services/quest-service/.env.example",
+      "keys": [
+        {
+          "name": "QUEST_ADMIN_APPROVAL_REQUIRED_ACTIONS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_ADMIN_AUDIT_DEFAULT_LIMIT",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_ADMIN_AUDIT_MAX_LIMIT",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_ADMIN_AUTH_SOURCE",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_COMPLETION_PENDING_BUFFER_CAPACITY",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_COMPLETION_RELEASE_BATCH_SIZE",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_COMPLETION_RELEASE_INTERVAL_MS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_DATABASE_URL",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_ENV",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_EVALUATOR_IDLE_WAIT_MS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_EVALUATOR_LOCK_WAIT_MS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_EVALUATOR_MAX_RETRIES",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_EVALUATOR_QUARANTINE_THRESHOLD",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_EVALUATOR_WORKER_COUNT",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_GRANT_RECONCILIATION_THRESHOLD_SECS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_GRPC_PORT",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_HTTP_PORT",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_HYDRATION_POLL_INTERVAL_MS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_HYDRATION_SOURCE_FILE",
+          "required": false,
+          "required_when": {
+            "QUEST_ROLE": "quest-operations"
+          },
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_INGRESS_BATCH_SIZE",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_INGRESS_CAPABILITY_ID",
+          "required": false,
+          "required_when": {
+            "QUEST_ROLE": "quest-ingress"
+          },
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_INGRESS_FETCH_TIMEOUT_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_INGRESS_IDLE_WAIT_MS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_LOG_LEVEL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_METRICS_NAMESPACE",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_MIGRATION_STALE_CLAIM_AFTER_MS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_MIGRATION_WORKER_COUNT",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_MIGRATION_WORKER_SHARD_INDEX",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_NATS_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_OTLP_ENABLED",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_OTLP_EXPORTER_URL",
+          "required": false,
+          "required_when": {
+            "QUEST_OTLP_ENABLED": "true"
+          },
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_PLAYER_JWT_AUDIENCE",
+          "required": false,
+          "required_when": {
+            "QUEST_ROLE": "quest-api"
+          },
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_PLAYER_JWT_ISSUER",
+          "required": false,
+          "required_when": {
+            "QUEST_ROLE": "quest-api"
+          },
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_PLAYER_JWT_PUBLIC_KEY_PEM",
+          "required": false,
+          "required_when": {
+            "QUEST_ROLE": "quest-api"
+          },
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_PRODUCT_AGGREGATE_MIN_COHORT_SIZE",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_READINESS_TIMEOUT_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_ROLE",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_SHUTDOWN_TIMEOUT_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_SUBJECT_SHARD_COUNT",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_SUSPENSION_BUFFER_CAPACITY",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_SUSPENSION_RESUME_INTERVAL_MS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        }
+      ]
+    },
+    {
+      "service": "social-service",
+      "source": "services/social-service/config-keys.json",
+      "example": "services/social-service/.env.example",
+      "keys": [
+        {
+          "name": "DATABASE_URL",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NATS_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_ACCOUNT_DELETION_BATCH_SIZE",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_ACCOUNT_DELETION_DURABLE",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_ACCOUNT_DELETION_POLL_INTERVAL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_ACCOUNT_DELETION_SUBJECT",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_ALLIANCE_CAP",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_AUDIT_LOG_HARD_DELETE_DAYS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_AUDIT_LOG_RETENTION_HOT_DAYS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_AUDIT_RETENTION_POLL_INTERVAL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_AUTH_BOOTSTRAP_DURABLE",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_AUTH_BOOTSTRAP_SUBJECT",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_BLOCK_QUIET_PERIOD_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_BLOCK_UNBLOCK_PER_ACTOR_PER_HOUR",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_ENV",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_FRIEND_CAP",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_FRIEND_REQUESTS_PER_RECIPIENT_PER_DAY",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_FRIEND_REQUESTS_PER_SENDER_PER_HOUR",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_GRPC_PORT",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_GUILD_INVITES_PER_GUILD_PER_HOUR",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_GUILD_LEAVE_GLOBAL_HOP_COOLDOWN_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_GUILD_LEAVE_PER_GUILD_COOLDOWN_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_GUILD_MEMBER_CAP",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "SOCIAL_PORT",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_ADDR",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        }
+      ]
+    },
+    {
+      "service": "wsterminator",
+      "source": "edge/WebSocket-terminator/config-keys.json",
+      "example": "edge/WebSocket-terminator/.env.example",
+      "keys": [
+        {
+          "name": "INFLIGHT_SEM_SIZE",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "JWKS_ENDPOINT",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": {
+            "service": "auth-service",
+            "key": "AUTH_SERVICE_PORT"
+          },
+          "description": null
+        },
+        {
+          "name": "LOBBY_SERVICE_ADDR",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": {
+            "service": "lobby-service",
+            "key": "LOBBY_PORT"
+          },
+          "description": null
+        },
+        {
+          "name": "LOG_LEVEL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NATS_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "PENDING_SEM_SIZE",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "PORT",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_ADDR",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "WS_ALLOWED_ORIGIN_PATTERNS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        }
+      ]
+    }
+  ]
+}

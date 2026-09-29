@@ -1,0 +1,37 @@
+# The Last Exam dev environment (issue #2).
+#
+# Single-source Application: this repository owns the Kubernetes deployment
+# (TLE ADR-0002). The product repository publishes only deployment info
+# (apps/tle-dev/deploy-info/); images are pinned per release in the runbook
+# and rendered here as tag@digest (digest exists only after a push, so
+# images.json itself is never in git).
+#
+# Wave 25 -- above Keycloak (24), like the portal: services need the
+# in-cluster Keycloak JWKS endpoint and the tle-admin-dev client from #1.
+# Nothing sits behind TLE dev, so it gates nothing.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tle-dev
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "25"
+    homelab.io/onboarding-contract: v1
+    homelab.io/owner: personal-applications
+    homelab.io/state: durable
+    backup.homelab.io/restore-runbook: docs/runbooks/tle-dev-recovery.md
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:Slqzeer/homelab.git
+    targetRevision: main
+    path: apps/tle-dev/config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tle-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

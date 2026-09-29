@@ -1,0 +1,726 @@
+{
+  "manifest_version": 1,
+  "release": null,
+  "source": "ops/internal-admin-tools.json",
+  "registry_schema_version": "1.3",
+  "capabilities": [
+    {
+      "name": "admin.auth.api_keys.manage",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "auth-administration"
+      ]
+    },
+    {
+      "name": "admin.auth.keys.rotate",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "auth-administration"
+      ]
+    },
+    {
+      "name": "admin.auth.kill_switch",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "auth-administration"
+      ]
+    },
+    {
+      "name": "admin.auth.read",
+      "access": [
+        "read"
+      ],
+      "tools": [
+        "auth-administration"
+      ]
+    },
+    {
+      "name": "admin.auth.sessions.read",
+      "access": [
+        "read"
+      ],
+      "tools": [
+        "auth-administration"
+      ]
+    },
+    {
+      "name": "admin.auth.sessions.revoke",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "auth-administration"
+      ]
+    },
+    {
+      "name": "admin.game.match.terminate",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "game-pod-administration"
+      ]
+    },
+    {
+      "name": "admin.game.read",
+      "access": [
+        "read"
+      ],
+      "tools": [
+        "game-pod-administration"
+      ]
+    },
+    {
+      "name": "admin.game.snapshot.read",
+      "access": [
+        "read"
+      ],
+      "tools": [
+        "game-pod-administration"
+      ]
+    },
+    {
+      "name": "admin.gamemaster.capacity.write",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "game-master-administration"
+      ]
+    },
+    {
+      "name": "admin.gamemaster.pod.drain",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "game-master-administration"
+      ]
+    },
+    {
+      "name": "admin.gamemaster.read",
+      "access": [
+        "read"
+      ],
+      "tools": [
+        "game-master-administration"
+      ]
+    },
+    {
+      "name": "admin.gateway.policy.write",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "gateway-security-operations"
+      ]
+    },
+    {
+      "name": "admin.gateway.read",
+      "access": [
+        "read"
+      ],
+      "tools": [
+        "gateway-security-operations"
+      ]
+    },
+    {
+      "name": "admin.k8s.drain",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "kubernetes-operations"
+      ]
+    },
+    {
+      "name": "admin.k8s.logs.read",
+      "access": [
+        "read"
+      ],
+      "tools": [
+        "kubernetes-operations"
+      ]
+    },
+    {
+      "name": "admin.k8s.read",
+      "access": [
+        "read"
+      ],
+      "tools": [
+        "kubernetes-operations"
+      ]
+    },
+    {
+      "name": "admin.k8s.restart",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "kubernetes-operations"
+      ]
+    },
+    {
+      "name": "admin.k8s.scale",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "kubernetes-operations"
+      ]
+    },
+    {
+      "name": "admin.lobby.moderate",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "lobby-administration"
+      ]
+    },
+    {
+      "name": "admin.lobby.read",
+      "access": [
+        "read"
+      ],
+      "tools": [
+        "lobby-administration"
+      ]
+    },
+    {
+      "name": "admin.lobby.session.disconnect",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "lobby-administration"
+      ]
+    },
+    {
+      "name": "admin.matchmaking.queue.intervene",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "matchmaking-administration"
+      ]
+    },
+    {
+      "name": "admin.matchmaking.read",
+      "access": [
+        "read"
+      ],
+      "tools": [
+        "matchmaking-administration"
+      ]
+    },
+    {
+      "name": "admin.matchmaking.replay",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "matchmaking-administration"
+      ]
+    },
+    {
+      "name": "admin.metadata.activate",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "metadata-administration"
+      ]
+    },
+    {
+      "name": "admin.metadata.dependency.write",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "metadata-administration"
+      ]
+    },
+    {
+      "name": "admin.metadata.entity.create",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "metadata-administration"
+      ]
+    },
+    {
+      "name": "admin.metadata.entity.delete",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "metadata-administration"
+      ]
+    },
+    {
+      "name": "admin.metadata.entity.update",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "metadata-administration"
+      ]
+    },
+    {
+      "name": "admin.metadata.publish",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "metadata-administration"
+      ]
+    },
+    {
+      "name": "admin.metadata.read",
+      "access": [
+        "read"
+      ],
+      "tools": [
+        "metadata-administration"
+      ]
+    },
+    {
+      "name": "admin.metadata.retire",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "metadata-administration"
+      ]
+    },
+    {
+      "name": "admin.metadata.validate",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "metadata-administration"
+      ]
+    },
+    {
+      "name": "admin.nats.consumer.manage",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "nats-administration"
+      ]
+    },
+    {
+      "name": "admin.nats.read",
+      "access": [
+        "read"
+      ],
+      "tools": [
+        "nats-administration"
+      ]
+    },
+    {
+      "name": "admin.nats.replay",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "nats-administration"
+      ]
+    },
+    {
+      "name": "admin.notification.preference.write",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "notification-administration"
+      ]
+    },
+    {
+      "name": "admin.notification.read",
+      "access": [
+        "read"
+      ],
+      "tools": [
+        "notification-administration"
+      ]
+    },
+    {
+      "name": "admin.notification.replay",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "notification-administration"
+      ]
+    },
+    {
+      "name": "admin.notification.template.write",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "notification-administration"
+      ]
+    },
+    {
+      "name": "admin.player.economy.adjust",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "player-administration"
+      ]
+    },
+    {
+      "name": "admin.player.inventory.adjust",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "player-administration"
+      ]
+    },
+    {
+      "name": "admin.player.progression.adjust",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "player-administration"
+      ]
+    },
+    {
+      "name": "admin.player.read",
+      "access": [
+        "read"
+      ],
+      "tools": [
+        "player-administration"
+      ]
+    },
+    {
+      "name": "admin.quest.compensation.resolve",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "quest-administration"
+      ]
+    },
+    {
+      "name": "admin.quest.control.write",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "quest-administration"
+      ]
+    },
+    {
+      "name": "admin.quest.definition.activate",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "quest-administration"
+      ]
+    },
+    {
+      "name": "admin.quest.definition.create",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "quest-administration"
+      ]
+    },
+    {
+      "name": "admin.quest.definition.delete",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "quest-administration"
+      ]
+    },
+    {
+      "name": "admin.quest.definition.publish",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "quest-administration"
+      ]
+    },
+    {
+      "name": "admin.quest.definition.update",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "quest-administration"
+      ]
+    },
+    {
+      "name": "admin.quest.migration.execute",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "quest-administration"
+      ]
+    },
+    {
+      "name": "admin.quest.quarantine.replay",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "quest-administration"
+      ]
+    },
+    {
+      "name": "admin.quest.read",
+      "access": [
+        "read"
+      ],
+      "tools": [
+        "quest-administration"
+      ]
+    },
+    {
+      "name": "admin.security.rate_limit.write",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "gateway-security-operations"
+      ]
+    },
+    {
+      "name": "admin.social.guild.manage",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "social-administration"
+      ]
+    },
+    {
+      "name": "admin.social.moderate",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "social-administration"
+      ]
+    },
+    {
+      "name": "admin.social.outbox.replay",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "social-administration"
+      ]
+    },
+    {
+      "name": "admin.social.read",
+      "access": [
+        "read"
+      ],
+      "tools": [
+        "social-administration"
+      ]
+    },
+    {
+      "name": "admin.timeline.read",
+      "access": [
+        "read"
+      ],
+      "tools": [
+        "timeline-administration"
+      ]
+    },
+    {
+      "name": "admin.timeline.replay",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "timeline-administration"
+      ]
+    },
+    {
+      "name": "admin.valkey.evict",
+      "access": [
+        "write"
+      ],
+      "tools": [
+        "valkey-administration"
+      ]
+    },
+    {
+      "name": "admin.valkey.read",
+      "access": [
+        "read"
+      ],
+      "tools": [
+        "valkey-administration"
+      ]
+    }
+  ],
+  "composites": [
+    {
+      "name": "support",
+      "description": "Player support and moderation: reads player-facing state, revokes player sessions, moderates lobby and social.",
+      "capabilities": [
+        "admin.auth.read",
+        "admin.auth.sessions.read",
+        "admin.auth.sessions.revoke",
+        "admin.game.read",
+        "admin.lobby.moderate",
+        "admin.lobby.read",
+        "admin.matchmaking.read",
+        "admin.metadata.read",
+        "admin.notification.read",
+        "admin.player.read",
+        "admin.quest.read",
+        "admin.social.moderate",
+        "admin.social.read",
+        "admin.timeline.read"
+      ]
+    },
+    {
+      "name": "operator",
+      "description": "Day-to-day live operations: support plus infrastructure reads, player corrections, queue and match interventions, content drafting and replays.",
+      "capabilities": [
+        "admin.auth.read",
+        "admin.auth.sessions.read",
+        "admin.auth.sessions.revoke",
+        "admin.game.match.terminate",
+        "admin.game.read",
+        "admin.game.snapshot.read",
+        "admin.gamemaster.capacity.write",
+        "admin.gamemaster.read",
+        "admin.gateway.read",
+        "admin.k8s.logs.read",
+        "admin.k8s.read",
+        "admin.lobby.moderate",
+        "admin.lobby.read",
+        "admin.lobby.session.disconnect",
+        "admin.matchmaking.queue.intervene",
+        "admin.matchmaking.read",
+        "admin.matchmaking.replay",
+        "admin.metadata.dependency.write",
+        "admin.metadata.entity.create",
+        "admin.metadata.entity.update",
+        "admin.metadata.read",
+        "admin.metadata.validate",
+        "admin.nats.read",
+        "admin.nats.replay",
+        "admin.notification.preference.write",
+        "admin.notification.read",
+        "admin.notification.replay",
+        "admin.player.economy.adjust",
+        "admin.player.inventory.adjust",
+        "admin.player.progression.adjust",
+        "admin.player.read",
+        "admin.quest.compensation.resolve",
+        "admin.quest.control.write",
+        "admin.quest.definition.create",
+        "admin.quest.definition.update",
+        "admin.quest.quarantine.replay",
+        "admin.quest.read",
+        "admin.social.guild.manage",
+        "admin.social.moderate",
+        "admin.social.outbox.replay",
+        "admin.social.read",
+        "admin.timeline.read",
+        "admin.timeline.replay",
+        "admin.valkey.read"
+      ]
+    },
+    {
+      "name": "admin",
+      "description": "Platform owner: every operator capability, including key rotation, kill switch, publishing and activation, destructive infrastructure actions and policy changes.",
+      "capabilities": [
+        "admin.auth.api_keys.manage",
+        "admin.auth.keys.rotate",
+        "admin.auth.kill_switch",
+        "admin.auth.read",
+        "admin.auth.sessions.read",
+        "admin.auth.sessions.revoke",
+        "admin.game.match.terminate",
+        "admin.game.read",
+        "admin.game.snapshot.read",
+        "admin.gamemaster.capacity.write",
+        "admin.gamemaster.pod.drain",
+        "admin.gamemaster.read",
+        "admin.gateway.policy.write",
+        "admin.gateway.read",
+        "admin.k8s.drain",
+        "admin.k8s.logs.read",
+        "admin.k8s.read",
+        "admin.k8s.restart",
+        "admin.k8s.scale",
+        "admin.lobby.moderate",
+        "admin.lobby.read",
+        "admin.lobby.session.disconnect",
+        "admin.matchmaking.queue.intervene",
+        "admin.matchmaking.read",
+        "admin.matchmaking.replay",
+        "admin.metadata.activate",
+        "admin.metadata.dependency.write",
+        "admin.metadata.entity.create",
+        "admin.metadata.entity.delete",
+        "admin.metadata.entity.update",
+        "admin.metadata.publish",
+        "admin.metadata.read",
+        "admin.metadata.retire",
+        "admin.metadata.validate",
+        "admin.nats.consumer.manage",
+        "admin.nats.read",
+        "admin.nats.replay",
+        "admin.notification.preference.write",
+        "admin.notification.read",
+        "admin.notification.replay",
+        "admin.notification.template.write",
+        "admin.player.economy.adjust",
+        "admin.player.inventory.adjust",
+        "admin.player.progression.adjust",
+        "admin.player.read",
+        "admin.quest.compensation.resolve",
+        "admin.quest.control.write",
+        "admin.quest.definition.activate",
+        "admin.quest.definition.create",
+        "admin.quest.definition.delete",
+        "admin.quest.definition.publish",
+        "admin.quest.definition.update",
+        "admin.quest.migration.execute",
+        "admin.quest.quarantine.replay",
+        "admin.quest.read",
+        "admin.security.rate_limit.write",
+        "admin.social.guild.manage",
+        "admin.social.moderate",
+        "admin.social.outbox.replay",
+        "admin.social.read",
+        "admin.timeline.read",
+        "admin.timeline.replay",
+        "admin.valkey.evict",
+        "admin.valkey.read"
+      ]
+    }
+  ]
+}

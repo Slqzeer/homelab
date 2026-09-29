@@ -1,0 +1,295 @@
+# Fence around tle-dev (issue #2, ticket 5). Default-deny both directions;
+# every flow below names a contract party and a port. Follows the
+# platform/keycloak/config/networkpolicy.yaml shape.
+#
+# Parties: tailnet proxy -> edge; edge -> services; auth-service ->
+# Keycloak 8080 back-channel (tailnet DNS unresolvable in-cluster, same as
+# Grafana); services -> postgres.databases 5432, valkey 6379, nats 4222;
+# Prometheus (monitoring ns) scrapes edge + services metrics ports.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: tle-dev
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: tle-dev
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+---
+# DNS + Kubernetes API for every pod (egress foundation).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-dns-api
+  namespace: tle-dev
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: default
+      ports:
+        - protocol: TCP
+          port: 443
+---
+# Tailnet proxy -> edge HTTP only. Metrics/admin ports stay in-cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-edge-tailnet
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchLabels:
+      app: tle-dev-edge
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tailscale
+          podSelector:
+            matchLabels:
+              tailscale.com/managed: "true"
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# Edge -> player-facing services (in-cluster service ports).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-edge-to-services
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchLabels:
+      app-group: tle-dev-service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-edge
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-edge-egress-services
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchLabels:
+      app: tle-dev-edge
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app-group: tle-dev-service
+      ports:
+        - protocol: TCP
+          port: 8080
+    # JWKS fetch for the JWT plugin (Keycloak back-channel).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: keycloak
+          podSelector:
+            matchLabels:
+              app: keycloak
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# auth-service -> Keycloak 8080 (#4 rotation JWKS + #1 admin namespace flow).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-auth-to-keycloak
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchLabels:
+      app: tle-dev-auth-service
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: keycloak
+          podSelector:
+            matchLabels:
+              app: keycloak
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-keycloak-from-auth
+  namespace: keycloak
+spec:
+  podSelector:
+    matchLabels:
+      app: keycloak
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tle-dev
+          podSelector:
+            matchLabels:
+              app: tle-dev-auth-service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tle-dev
+          podSelector:
+            matchLabels:
+              app: tle-dev-edge
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# Services -> shared Postgres 5432, local Valkey 6379, local NATS 4222.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-services-to-state
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchLabels:
+      app-group: tle-dev-service
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: databases
+          podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-valkey
+      ports:
+        - protocol: TCP
+          port: 6379
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-nats
+      ports:
+        - protocol: TCP
+          port: 4222
+---
+# Intra-namespace client access to Valkey / NATS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-valkey-clients
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchLabels:
+      app: tle-dev-valkey
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app-group: tle-dev-service
+        - podSelector:
+            matchLabels:
+              app: tle-dev-edge
+      ports:
+        - protocol: TCP
+          port: 6379
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-nats-clients
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchLabels:
+      app: tle-dev-nats
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app-group: tle-dev-service
+        - podSelector:
+            matchLabels:
+              app: tle-dev-edge
+      ports:
+        - protocol: TCP
+          port: 4222
+---
+# Prometheus scrapes edge + service metrics (port 9000, in-cluster only).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-metrics
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchLabels:
+      metrics: tle-dev
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+              operator.prometheus.io/name: monitoring-kube-prometheus-prometheus
+      ports:
+        - protocol: TCP
+          port: 9000

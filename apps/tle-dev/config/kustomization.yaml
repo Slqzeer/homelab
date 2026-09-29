@@ -1,0 +1,17 @@
+# NOTE: no `namespace:` field here on purpose. Two objects in this
+# kustomization land outside the destination namespace (the postgres-job
+# ServiceAccount/VaultAuth/VaultStaticSecret/Job state `namespace:
+# databases`, the keycloak ingress rule states `namespace: keycloak`).
+# Kustomize rewrites even explicit namespaces, so a default here would
+# silently move those objects into tle-dev (same trap as
+# platform/keycloak, which keeps cross-namespace objects in a separate
+# kustomization). In-namespace objects inherit the Application's
+# destination namespace (tle-dev) at apply time.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - vault-secrets.yaml
+  - networkpolicy.yaml
+  - edge-config.yaml
+  - datastores.yaml
+  - postgres-job.yaml
