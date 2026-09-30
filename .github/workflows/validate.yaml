@@ -59,6 +59,10 @@ jobs:
         run: |
           mkdir -p rendered
           kustomize build apps/portal/config > rendered/portal-config.yaml
+          # tle-dev renders into the same directory so the kubeconform steps
+          # below schema-check it; cross-namespace objects (databases,
+          # keycloak) are expected and kept as-is (see its kustomization).
+          kustomize build apps/tle-dev/config > rendered/tle-dev-config.yaml
 
       - name: Validate manifests
         # -strict rejects unknown fields. Without it a typo like `replicaz:`

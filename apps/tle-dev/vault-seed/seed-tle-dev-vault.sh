@@ -8,8 +8,9 @@
 # Empty or absent keys are skipped, so generated values are never clobbered.
 #
 # Usage:
-#   1. cp apps/tle-dev/vault-seed/tle-dev-auth.env.example \
-#        apps/tle-dev/vault-seed/tle-dev-auth.env   # and -misc.env
+#   1. cp apps/tle-dev/vault-seed/.env.tle-dev-auth.example \
+#        apps/tle-dev/vault-seed/.env.tle-dev-auth   # and -data/-misc
+#      (same for .env.tle-dev-data.example / .env.tle-dev-misc.example)
 #   2. fill the values (KEY=@file for the PEM/JSON file payloads)
 #   3. export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 #   4. ./seed-tle-dev-vault.sh

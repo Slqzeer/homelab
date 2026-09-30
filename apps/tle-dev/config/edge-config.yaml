@@ -17,8 +17,10 @@
 #   config-keys.json -> non-secret service endpoints below; secret keys are
 #     in Vault (vault-secrets.yaml).
 # Image: pinned per release as tag@digest (images.json is not in git).
-#   Placeholder digest below is all-`a` (non-zero so the onboarding
-#   validator's digest rule passes); the runbook records the real release.
+#   Placeholder digest below is all-`a`: it satisfies NEITHER the pull
+#   (no such digest exists) NOR the onboarding validator's immutable-image
+#   rule (`:dev` is not a semver tag). The runbook promotion gate must
+#   replace it with the real release tag@digest before Argo syncs this.
 apiVersion: v1
 kind: ConfigMap
 metadata:
