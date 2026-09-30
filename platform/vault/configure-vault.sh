@@ -642,9 +642,9 @@ tle_ensure_field() {
   fi
   vault_optional_get "$1" "-" "$TLE_READ" || exit 1
   if [ "$VAULT_READ_STATUS" = present ]; then
-    vault kv patch "$1" "$2"@"$TLE_VAL" >/dev/null
+    vault kv patch "$1" "$2=@$TLE_VAL" >/dev/null
   else
-    vault kv put "$1" "$2"@"$TLE_VAL" >/dev/null
+    vault kv put "$1" "$2=@$TLE_VAL" >/dev/null
   fi
   echo "    seeded $1/$2 ($3)"
 }

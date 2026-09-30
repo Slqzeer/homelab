@@ -44,7 +44,7 @@ remote_patch() {
     trap "rm -f \"$f\"" EXIT
     cat >"$f" || exit 1
     [ -s "$f" ] || exit 0
-    vault kv patch "$p" "$k"@"$f" >/dev/null || exit 1
+    vault kv patch "$p" "$k=@$f" >/dev/null || exit 1
   ' sh "$1" "$2"
 }
 
