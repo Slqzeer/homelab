@@ -49,7 +49,7 @@ spec:
       containers:
         - name: valkey
           image: >-
-            valkey/valkey:9.0.1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            valkey/valkey:9.0.1@sha256:546304417feac0874c3dd576e0952c6bb8f06bb4093ea0c9ca303c73cf458f63
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -147,7 +147,7 @@ spec:
       containers:
         - name: nats
           image: >-
-            nats:2.11.6-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            nats:2.11.6-alpine@sha256:7dec3f8f1ff181975dbdfc0d903d2a9724659648294dbc2ebb2fa3a294d573a6
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
