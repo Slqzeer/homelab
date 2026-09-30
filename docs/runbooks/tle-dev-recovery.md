@@ -16,6 +16,8 @@ re-vendor on each TLE release with `gh api repos/The-Last-Exam/server/...`).
 | Role manifest version | `1` (registry schema `1.3`) |
 | Identity headers | 26 headers + 5 prefixes (see `edge-config.yaml`) |
 | Public routes | 62 routes across 9 services (see `public-routes.json`) |
+| Object storage (S3 endpoint) | _open_: deploy MinIO in-cluster (`tle-dev` + PVC + Service + bucket job) or point `MINIO_ENDPOINT` at an external MinIO; then create the access pair in its console and seed `MINIO_*`. Blocks metadata-service only — nothing deployed today consumes it. |
+| Non-secret service config | Convention (do not put these in Vault): every `config-keys.json` entry with `"secret": false` (OAuth client IDs, `MINIO_BUCKET/ENDPOINT/USE_SSL`, ports, URLs) becomes a plain env var from a per-service ConfigMap (same `configMapKeyRef` shape as `edge-config.yaml`) when the service Deployments are authored. `"secret": true` entries go to Vault via VSO + `secretKeyRef`. |
 
 Every Deployment uses `tag@digest`, never `latest`. `images.json` is not in
 git (a digest exists only after a push); record the values here at promotion.
