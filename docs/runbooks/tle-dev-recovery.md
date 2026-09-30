@@ -35,22 +35,18 @@ git (a digest exists only after a push); record the values here at promotion.
 
 ## Vault ceremony extension
 
+Canonical ordered checklist: `docs/runbooks/tle-dev-vault-ceremony.md`
+(this section is only a summary — follow that page step by step).
+
 `platform/vault/configure-vault.sh` carries the tle-dev extension: 4
 policies/roles (`vso-tle-dev-auth/data/misc` in `tle-dev`, `vso-tle-dev-db`
 in `databases`), generated db passwords + CSRF/internal/webhook secrets,
-and `disabled` placeholders for product-issued keys. Run it first (see
-the script header for the vault-0 exec flow); it never overwrites.
+and `disabled` placeholders for product-issued keys. Run it first (inside
+vault-0); it never overwrites.
 
 Product-issued values (JWT private key, MinIO pair, enabled OAuth/push
 providers) are then patched over the placeholders, never typed on a
-command line:
-
-```bash
-cp apps/tle-dev/vault-seed/.env.tle-dev-{auth,misc}.example \
-  apps/tle-dev/vault-seed/.env.tle-dev-{auth,misc}  # fill values in
-export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-./apps/tle-dev/vault-seed/seed-tle-dev-vault.sh
-```
+command line — see the ceremony page for the exact commands.
 
 Per-key sources are documented in the `.env.example` templates. The
 `*- REQUIRED` placeholders (JWT key, MinIO pair) must be replaced before
