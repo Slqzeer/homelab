@@ -36,8 +36,9 @@ provider credentials and client keys. Back up Vault and the PVC together.
   allowlisting proxy (`platform/egress-proxy`, see its README). With
   `PROXY_FAIL_OPEN=false` a proxy outage fails calls instead of bypassing it.
 - New provider connected in the dashboard and its calls fail with a proxy
-  403? Add its API/OAuth hosts to
-  `platform/egress-proxy/config/allowed-domains.txt` and push.
+  403? Add its API/OAuth hosts to `allowed-domains.txt` in
+  `platform/egress-proxy/config/configmap.yaml`, bump the proxy's
+  `config-revision` annotation, and push.
 
 ## Credentials: Vault only, applied at every start
 

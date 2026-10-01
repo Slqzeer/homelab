@@ -53,7 +53,8 @@ spec:
       terminationGracePeriodSeconds: 40
       initContainers:
         - name: apply-admin-password
-          image: docker.io/diegosouzapw/omniroute:3.8.50@sha256:085c57adf499a8aaa9f35ccde95c0df9c11bd9ecd18d6c9edbf3b68b8079ba9d
+          image: "docker.io/diegosouzapw/omniroute:3.8.50@sha256:\
+            085c57adf499a8aaa9f35ccde95c0df9c11bd9ecd18d6c9edbf3b68b8079ba9d"
           workingDir: /app
           # Password travels by file on stdin, never argv or env of this shell.
           command:
@@ -61,7 +62,8 @@ spec:
             - -c
             - |
               if [ -f "$DATA_DIR/storage.sqlite" ]; then
-                node bin/reset-password.mjs --password-stdin < /run/secrets/omniroute/admin-password >/dev/null
+                node bin/reset-password.mjs --password-stdin \
+                  < /run/secrets/omniroute/admin-password >/dev/null
                 echo "admin password applied from Vault"
               else
                 echo "no database yet: first boot seeds it from INITIAL_PASSWORD"
@@ -87,7 +89,8 @@ spec:
               readOnly: true
       containers:
         - name: omniroute
-          image: docker.io/diegosouzapw/omniroute:3.8.50@sha256:085c57adf499a8aaa9f35ccde95c0df9c11bd9ecd18d6c9edbf3b68b8079ba9d
+          image: "docker.io/diegosouzapw/omniroute:3.8.50@sha256:\
+            085c57adf499a8aaa9f35ccde95c0df9c11bd9ecd18d6c9edbf3b68b8079ba9d"
           ports:
             - name: http
               containerPort: 20128
