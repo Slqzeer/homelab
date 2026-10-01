@@ -1,0 +1,48 @@
+# HTTPS destinations the egress proxy will CONNECT to. Squid dstdomain syntax:
+# a leading dot matches the domain and all subdomains. Do not list a host that
+# a dotted entry above already covers (Squid rejects overlapping entries).
+#
+# Add a provider: append its API (+ OAuth token) hosts, commit, push. The
+# ConfigMap hash changes and the proxy restarts. A blocked host shows up as
+# TCP_DENIED/403 in `kubectl -n egress logs deploy/egress-proxy`.
+
+# Anthropic (claude)
+.anthropic.com
+.claude.ai
+.claude.com
+# OpenAI (codex)
+.openai.com
+.chatgpt.com
+# Google (gemini, antigravity/agy cloudcode, OAuth refresh)
+.googleapis.com
+accounts.google.com
+gemini.google.com
+# DeepSeek
+.deepseek.com
+# Moonshot / Kimi
+.kimi.com
+.kimi.ai
+.moonshot.ai
+.moonshot.cn
+# xAI (grok-cli)
+.x.ai
+.grok.com
+# GitHub Copilot
+api.github.com
+github.com
+.githubcopilot.com
+# Amazon Q / Kiro
+codewhisperer.us-east-1.amazonaws.com
+oidc.us-east-1.amazonaws.com
+q.us-east-1.amazonaws.com
+.kiro.dev
+# Cline
+.cline.bot
+# LMArena
+.arena.ai
+.lmarena.ai
+# OpenCode
+.opencode.ai
+# Model catalog / pricing metadata used by OmniRoute's auto-routing
+models.dev
+openrouter.ai

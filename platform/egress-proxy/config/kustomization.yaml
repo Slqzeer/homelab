@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: egress
+resources:
+  - egress-proxy.yaml
+  - networkpolicy.yaml
+# Hashed name: editing either file rolls the proxy automatically.
+configMapGenerator:
+  - name: egress-proxy
+    files:
+      - squid.conf
+      - allowed-domains.txt

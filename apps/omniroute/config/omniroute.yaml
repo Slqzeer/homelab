@@ -1,0 +1,168 @@
+# OmniRoute LLM gateway. Image pinned to the published 3.8.50 multi-arch index
+# (see docs/runbooks/omniroute-recovery.md for the release record).
+#
+# Admin password: Vault is the source of truth at EVERY start. OmniRoute only
+# reads INITIAL_PASSWORD when its database has no password yet, so:
+#   - first boot (no DB): INITIAL_PASSWORD seeds the hash;
+#   - every later boot: the init container writes bcrypt(Vault value) into
+#     the DB with the bundled reset tool before the server starts.
+# A password changed in the dashboard is therefore reverted on restart;
+# rotate it in Vault instead (VSO then restarts this Deployment).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: omniroute-data
+  namespace: omniroute
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: omniroute
+  namespace: omniroute
+  labels:
+    app: omniroute
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate            # SQLite on a RWO volume: never two writers
+  selector:
+    matchLabels:
+      app: omniroute
+  template:
+    metadata:
+      labels:
+        app: omniroute
+    spec:
+      serviceAccountName: omniroute
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000         # `node` in the image
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 40
+      initContainers:
+        - name: apply-admin-password
+          image: docker.io/diegosouzapw/omniroute:3.8.50@sha256:085c57adf499a8aaa9f35ccde95c0df9c11bd9ecd18d6c9edbf3b68b8079ba9d
+          workingDir: /app
+          # Password travels by file on stdin, never argv or env of this shell.
+          command:
+            - sh
+            - -c
+            - |
+              if [ -f "$DATA_DIR/storage.sqlite" ]; then
+                node bin/reset-password.mjs --password-stdin < /run/secrets/omniroute/admin-password >/dev/null
+                echo "admin password applied from Vault"
+              else
+                echo "no database yet: first boot seeds it from INITIAL_PASSWORD"
+              fi
+          env:
+            - name: DATA_DIR
+              value: /app/data
+            - name: HOME
+              value: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          volumeMounts:
+            - {name: data, mountPath: /app/data}
+            - {name: tmp, mountPath: /tmp}
+            - name: admin-password
+              mountPath: /run/secrets/omniroute
+              readOnly: true
+      containers:
+        - name: omniroute
+          image: docker.io/diegosouzapw/omniroute:3.8.50@sha256:085c57adf499a8aaa9f35ccde95c0df9c11bd9ecd18d6c9edbf3b68b8079ba9d
+          ports:
+            - name: http
+              containerPort: 20128
+          env:
+            - {name: DATA_DIR, value: /app/data}
+            - {name: HOME, value: /tmp}
+            - {name: PORT, value: "20128"}
+            - {name: HOSTNAME, value: 0.0.0.0}
+            - {name: BASE_URL, value: https://omniroute.taildf6cd4.ts.net}
+            - {name: NEXT_PUBLIC_BASE_URL, value: https://omniroute.taildf6cd4.ts.net}
+            - {name: REQUIRE_API_KEY, value: "true"}
+            - {name: OMNIROUTE_MEMORY_MB, value: "1024"}
+            # All provider traffic leaves through the allowlisting egress proxy;
+            # PROXY_FAIL_OPEN stays false, so a down proxy fails calls closed.
+            - {name: HTTPS_PROXY, value: "http://egress-proxy.egress.svc.cluster.local:3128"}
+            - {name: HTTP_PROXY, value: "http://egress-proxy.egress.svc.cluster.local:3128"}
+            - {name: NO_PROXY, value: "localhost,127.0.0.1,.svc,.cluster.local"}
+            - {name: PROXY_FAIL_OPEN, value: "false"}
+            - name: INITIAL_PASSWORD
+              valueFrom: {secretKeyRef: {name: omniroute-secrets, key: admin-password}}
+            - name: JWT_SECRET
+              valueFrom: {secretKeyRef: {name: omniroute-secrets, key: jwt-secret}}
+            - name: API_KEY_SECRET
+              valueFrom: {secretKeyRef: {name: omniroute-secrets, key: api-key-secret}}
+            - name: STORAGE_ENCRYPTION_KEY
+              valueFrom: {secretKeyRef: {name: omniroute-secrets, key: storage-encryption-key}}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests: {cpu: 200m, memory: 512Mi}
+            limits: {cpu: "1", memory: 2Gi}
+          startupProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 5
+            failureThreshold: 36      # up to 3 min for migrations on first boot
+          readinessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - {name: data, mountPath: /app/data}
+            - {name: tmp, mountPath: /tmp}
+            - {name: next-cache, mountPath: /app/.next/cache}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: omniroute-data
+        - name: tmp
+          emptyDir: {sizeLimit: 512Mi}
+        - name: next-cache
+          emptyDir: {sizeLimit: 256Mi}
+        - name: admin-password
+          secret:
+            secretName: omniroute-secrets
+            items:
+              - {key: admin-password, path: admin-password}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: omniroute
+  namespace: omniroute
+  labels:
+    app: omniroute
+spec:
+  selector:
+    app: omniroute
+  ports:
+    - name: http
+      port: 20128
+      targetPort: http

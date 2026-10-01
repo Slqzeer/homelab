@@ -1,0 +1,27 @@
+# OmniRoute on the tailnet at https://omniroute.taildf6cd4.ts.net
+#
+# One port serves both the admin dashboard (password from Vault) and the
+# OpenAI-compatible /v1 API (REQUIRE_API_KEY=true). Hermes, running on the
+# node outside the cluster, reaches OmniRoute through this name.
+#
+# Deliberately NOT published in the Homelab Portal: it is an administrative
+# UI whose authentication has not been reviewed for portal access. Same
+# dedicated-proxy shape as grafana-ingress.yaml.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: omniroute
+  namespace: omniroute
+  annotations:
+    tailscale.com/proxy-class: homelab
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: omniroute
+      port:
+        number: 20128
+  tls:
+    # Short name only. Becomes omniroute.taildf6cd4.ts.net via MagicDNS.
+    - hosts:
+        - omniroute
