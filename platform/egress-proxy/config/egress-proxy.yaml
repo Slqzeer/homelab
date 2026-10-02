@@ -31,7 +31,7 @@ spec:
       annotations:
         # Bump with every configmap.yaml change: plain manifests have no
         # content hash, so this is what rolls the pod onto the new config.
-        egress-proxy.homelab.io/config-revision: "1"
+        egress-proxy.homelab.io/config-revision: "2"
     spec:
       serviceAccountName: egress-proxy
       automountServiceAccountToken: false
