@@ -15,6 +15,7 @@ manifest ever applied by hand.
 | `infrastructure/storage/` | PVC storage notes |
 | `infrastructure/cert-manager/` | Empty; deferred, see the 2026-09-02 spec |
 | `platform/` | Vault, databases, registry, Nexus, Keycloak |
+| `platform/agent-access/` | Read-only Kubernetes identity for Hermes agents. See `platform/agent-access/README.md` |
 | `platform/vault/` | HashiCorp Vault: Helm values, unsealer manifest, init/backup docs |
 | `platform/vault-secrets-operator/` | Vault Secrets Operator: Helm values, `VaultConnection`/`VaultAuth`/`VaultStaticSecret` manifests |
 | `platform/databases/postgres/` | PostgreSQL: StatefulSet, PVC, its own Vault-Secrets-Operator wiring, README |
