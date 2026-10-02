@@ -685,4 +685,65 @@ echo "    NOTE: placeholders marked REQUIRED (JWT private key, MinIO pair)"
 echo "    must be replaced via apps/tle-dev/vault-seed/seed-tle-dev-vault.sh"
 echo "    before the workloads can actually run; sync alone is not enough"
 
+echo "==> policy vso-omniroute-read"
+# The data/ segment is REQUIRED and is not a typo -- see the note on
+# vso-canary-read above.
+vault policy write vso-omniroute-read - <<'POLICY'
+path "homelab/data/omniroute" {
+  capabilities = ["read"]
+}
+POLICY
+
+echo "==> role vso-omniroute"
+# bound_service_account_names must match the ServiceAccount created in
+# apps/omniroute/config/vault-secrets.yaml, and audience must match that
+# file's VaultAuth spec.kubernetes.audiences.
+vault write auth/kubernetes/role/vso-omniroute \
+    bound_service_account_names=omniroute \
+    bound_service_account_namespaces=omniroute \
+    audience=vault \
+    token_policies=vso-omniroute-read \
+    ttl=1h
+
+echo "==> seeding homelab/omniroute"
+# Each field is generated once and never overwritten, never displayed.
+#   admin-password          dashboard login; applied to OmniRoute's DB on
+#                           EVERY start by the init container, so rotating it
+#                           here (+ VSO rollout restart) is the whole rotation
+#   jwt-secret              signs dashboard session cookies
+#   api-key-secret          encrypts client API keys at rest
+#   storage-encryption-key  encrypts provider credentials in SQLite. Rotating
+#                           it makes existing stored credentials unreadable;
+#                           apps/omniroute/vault-seed/migrate-local-omniroute.sh
+#                           overwrites it with the key of an existing install.
+# Alphanumeric/hex only so values survive env files and browser paste.
+umask 077
+OMNI_READ=$(mktemp)
+OMNI_VAL=$(mktemp)
+trap 'rm -f "$KC_PORTAL_SECRET_FILE" "$PORTAL_SESSION_FILE" "$PORTAL_EXISTING_FILE" "$PORTAL_PATH_FILE" "$PORTAL_READ_ERROR_FILE" "$OMNI_READ" "$OMNI_VAL"' EXIT
+omni_ensure_field() {
+  # $1 = field. $OMNI_VAL already holds the generated value.
+  vault_optional_get homelab/omniroute "$1" "$OMNI_READ" || exit 1
+  if [ "$VAULT_READ_STATUS" = present ] && [ -s "$OMNI_READ" ]; then
+    echo "    homelab/omniroute/$1 already present"
+    return 0
+  fi
+  vault_optional_get homelab/omniroute - "$OMNI_READ" || exit 1
+  if [ "$VAULT_READ_STATUS" = present ]; then
+    vault kv patch homelab/omniroute "$1=@$OMNI_VAL" >/dev/null
+  else
+    vault kv put homelab/omniroute "$1=@$OMNI_VAL" >/dev/null
+  fi
+  echo "    seeded homelab/omniroute/$1 (generated)"
+}
+head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32 >"$OMNI_VAL"
+omni_ensure_field admin-password
+head -c 512 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 64 >"$OMNI_VAL"
+omni_ensure_field jwt-secret
+head -c 4096 /dev/urandom | tr -dc 'a-f0-9' | head -c 64 >"$OMNI_VAL"
+omni_ensure_field api-key-secret
+head -c 4096 /dev/urandom | tr -dc 'a-f0-9' | head -c 64 >"$OMNI_VAL"
+omni_ensure_field storage-encryption-key
+rm -f "$OMNI_READ" "$OMNI_VAL"
+
 echo "==> done"

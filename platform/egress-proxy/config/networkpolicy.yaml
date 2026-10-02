@@ -1,0 +1,95 @@
+# Fence around the egress proxy. Default-deny both directions, then:
+#   clients -> proxy 3128   (only namespaces listed here; today: omniroute)
+#   proxy   -> DNS
+#   proxy   -> public TCP 443 (not cluster, LAN, tailnet or link-local space)
+# The domain allowlist in squid.conf is the second, L7 layer.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: egress
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: egress
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-proxy-clients
+  namespace: egress
+spec:
+  podSelector:
+    matchLabels:
+      app: egress-proxy
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: omniroute
+          podSelector:
+            matchLabels:
+              app: omniroute
+      ports:
+        - protocol: TCP
+          port: 3128
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-proxy-dns
+  namespace: egress
+spec:
+  podSelector:
+    matchLabels:
+      app: egress-proxy
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-proxy-internet
+  namespace: egress
+spec:
+  podSelector:
+    matchLabels:
+      app: egress-proxy
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8        # pods 10.42/16, services 10.43/16
+              - 172.16.0.0/12
+              - 192.168.0.0/16    # LAN
+              - 100.64.0.0/10     # tailnet CGNAT
+              - 169.254.0.0/16    # link-local / metadata
+      ports:
+        - protocol: TCP
+          port: 443

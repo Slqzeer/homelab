@@ -1,0 +1,30 @@
+# Allowlisting HTTPS egress proxy (platform/egress-proxy). The single
+# component with broad internet egress; application namespaces reach the
+# internet only through it, so they keep default-deny egress without any
+# 0.0.0.0/0 rule (first client: OmniRoute).
+#
+# Wave 20: depends on nothing (no Vault, no VSO, no CRD). It must exist
+# before OmniRoute (23) can call providers, but not before OmniRoute can
+# sync, so nothing stacks behind it.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: egress-proxy
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:Slqzeer/homelab.git
+    targetRevision: main
+    path: platform/egress-proxy/config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: egress
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

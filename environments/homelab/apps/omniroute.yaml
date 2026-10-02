@@ -1,0 +1,38 @@
+# OmniRoute LLM gateway (agent platform, /srv/projects/agent-platform).
+#
+# Wave 23: needs the VSO operator (21) and Vault's configure ceremony
+# (vso-omniroute role + homelab/omniroute secrets), nothing else -- no
+# Postgres, no Keycloak, no ghcr-pull. Same reasoning as the wave-23 group
+# in README.md. Nothing depends on it yet.
+#
+# Third-party image, no product repo of ours: the site manifests live in
+# apps/omniroute/config and pin the upstream image by tag AND digest.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: omniroute
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "23"
+    homelab.io/onboarding-contract: v1
+    homelab.io/owner: personal-applications
+    homelab.io/state: durable
+    backup.homelab.io/restore-runbook: docs/runbooks/omniroute-recovery.md
+    homelab.io/image-tag: "3.8.50"
+    homelab.io/image-digest: >-
+      sha256:085c57adf499a8aaa9f35ccde95c0df9c11bd9ecd18d6c9edbf3b68b8079ba9d
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:Slqzeer/homelab.git
+    targetRevision: main
+    path: apps/omniroute/config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: omniroute
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
