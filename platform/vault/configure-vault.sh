@@ -502,6 +502,12 @@ vault policy write vso-portal-read - <<'POLICY'
 path "homelab/data/portal" {
   capabilities = ["read"]
 }
+# The portal image is private on GHCR. The kubelet pulls it with the
+# ghcr-pull Secret projected by apps/portal/config/vault-secrets.yaml,
+# so this role must also read the shared GHCR credential.
+path "homelab/data/ghcr" {
+  capabilities = ["read"]
+}
 POLICY
 
 echo "==> role vso-portal"

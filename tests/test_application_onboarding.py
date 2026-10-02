@@ -378,7 +378,7 @@ class PortalRegistrationTests(unittest.TestCase):
         self.assertEqual(self.portal_revision, portal["targetRevision"])
         self.assertEqual("deploy/overlays/homelab", portal["path"])
         patches = portal["kustomize"]["patches"]
-        self.assertEqual(2, len(patches))
+        self.assertEqual(3, len(patches))
         patches_by_kind = {patch["target"]["kind"]: patch for patch in patches}
         self.assertEqual(
             {"group": "secrets.hashicorp.com", "version": "v1beta1",
@@ -389,8 +389,20 @@ class PortalRegistrationTests(unittest.TestCase):
             {"version": "v1", "kind": "Namespace", "name": "portal"},
             patches_by_kind["Namespace"]["target"],
         )
+        self.assertEqual(
+            {"group": "apps", "version": "v1",
+             "kind": "Deployment", "name": "homelab-portal"},
+            patches_by_kind["Deployment"]["target"],
+        )
         for patch in patches:
-            self.assertEqual("delete", yaml.safe_load(patch["patch"])["$patch"])
+            parsed = yaml.safe_load(patch["patch"])
+            if patch["target"]["kind"] == "Deployment":
+                self.assertEqual(
+                    [{"name": "ghcr-pull"}],
+                    parsed["spec"]["template"]["spec"]["imagePullSecrets"],
+                )
+            else:
+                self.assertEqual("delete", parsed["$patch"])
         site = next(source for source in sources if source["repoURL"].endswith("homelab.git"))
         self.assertEqual("main", site["targetRevision"])
         self.assertEqual("apps/portal/config", site["path"])
@@ -490,9 +502,13 @@ class PortalRegistrationTests(unittest.TestCase):
 
     def test_portal_vso_projects_only_required_secret_keys(self):
         resources = self.load_documents("apps/portal/config/vault-secrets.yaml")
-        by_kind = {resource["kind"]: resource for resource in resources}
-        vault_auth = by_kind["VaultAuth"]
-        portal_secret = by_kind["VaultStaticSecret"]
+        by_kind = {}
+        for resource in resources:
+            by_kind.setdefault(resource["kind"], []).append(resource)
+        vault_auth = by_kind["VaultAuth"][0]
+        secrets = {item["metadata"]["name"]: item for item in by_kind["VaultStaticSecret"]}
+        self.assertEqual({"homelab-portal", "ghcr-pull"}, set(secrets))
+        portal_secret = secrets["homelab-portal"]
 
         self.assertNotIn("ServiceAccount", by_kind)
         self.assertEqual("vso-portal", vault_auth["spec"]["kubernetes"]["role"])
@@ -516,6 +532,21 @@ class PortalRegistrationTests(unittest.TestCase):
             portal_secret["spec"]["rolloutRestartTargets"],
         )
         self.assertIs(True, portal_secret["spec"]["hmacSecretData"])
+
+        ghcr_secret = secrets["ghcr-pull"]
+        self.assertEqual("homelab-portal", ghcr_secret["spec"]["vaultAuthRef"])
+        self.assertEqual("ghcr", ghcr_secret["spec"]["path"])
+        self.assertEqual("60s", ghcr_secret["spec"]["refreshAfter"])
+        ghcr_destination = ghcr_secret["spec"]["destination"]
+        self.assertEqual("ghcr-pull", ghcr_destination["name"])
+        self.assertEqual(
+            "kubernetes.io/dockerconfigjson", ghcr_destination["type"]
+        )
+        self.assertIs(True, ghcr_destination["transformation"]["excludeRaw"])
+        self.assertEqual(
+            {".dockerconfigjson"},
+            set(ghcr_destination["transformation"]["templates"]),
+        )
 
 
 class PortalIngressPublicationTests(unittest.TestCase):

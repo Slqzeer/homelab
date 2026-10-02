@@ -47,6 +47,24 @@ spec:
               metadata:
                 name: homelab-portal
               $patch: delete
+          # The product base ships no imagePullSecrets. The kubelet pulls
+          # the private GHCR image with the ghcr-pull Secret projected by
+          # apps/portal/config, so attach it here on the site side.
+          - target:
+              group: apps
+              version: v1
+              kind: Deployment
+              name: homelab-portal
+            patch: |-
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: homelab-portal
+              spec:
+                template:
+                  spec:
+                    imagePullSecrets:
+                      - name: ghcr-pull
     - repoURL: git@github.com:Slqzeer/homelab.git
       targetRevision: main
       path: apps/portal/config
