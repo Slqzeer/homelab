@@ -22,6 +22,10 @@ data:
     pid_filename none
     # The ICMP pinger helper needs raw sockets (CAP_NET_RAW, dropped).
     pinger_enable off
+    # Squid sizes per-descriptor tables to the open-files ulimit, which the
+    # container inherits from containerd (524288): that alone exceeds the
+    # 128Mi limit and gets OOMKilled at startup. 4096 is plenty for one client.
+    max_filedescriptors 4096
     coredump_dir /tmp
     cache deny all
     cache_mem 8 MB
