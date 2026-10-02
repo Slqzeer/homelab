@@ -1,0 +1,27 @@
+# Read-only cluster identity for Hermes agents (platform/agent-access).
+#
+# Wave 20: depends on nothing (no Vault, VSO, CRD of its own; the argoproj,
+# VSO, monitoring and cert-manager rules reference CRDs by name and are valid
+# before those exist). Nothing depends on it at sync time.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: agent-access
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:Slqzeer/homelab.git
+    targetRevision: main
+    path: platform/agent-access/config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: agents
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
