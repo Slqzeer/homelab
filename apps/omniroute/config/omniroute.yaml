@@ -132,6 +132,8 @@ spec:
           readinessProbe:
             httpGet: {path: /api/health, port: http}
             periodSeconds: 10
+            # The shared Node.js process can exceed Kubernetes' 1s default under load.
+            timeoutSeconds: 5
           livenessProbe:
             httpGet: {path: /api/health, port: http}
             periodSeconds: 30
