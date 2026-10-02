@@ -1,0 +1,78 @@
+# Read-only cluster identity for the Hermes `infra` worker (agent platform,
+# /srv/projects/agent-platform). Agents diagnose the cluster through this
+# identity; they CHANGE it only through this repository (a branch the human
+# reviews, pushes and merges), never with kubectl apply.
+#
+# No credential is stored here or anywhere in git: the worker's kubeconfig
+# carries a short-lived token from `kubectl create token` (TokenRequest API),
+# refreshed daily by scripts/agent-kubeconfig.sh on the host.
+#
+# Access = built-in `view` (namespaced read, excludes Secrets, pods/exec,
+# port-forward) across all namespaces + read on the cluster-scoped resources and
+# CRDs this cluster runs. Nothing here can read a Secret's data.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hermes-infra-reader
+  namespace: agents
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hermes-infra-reader-view
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: ServiceAccount
+    name: hermes-infra-reader
+    namespace: agents
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hermes-infra-reader-cluster
+rules:
+  - apiGroups: [""]
+    resources: [nodes, namespaces, persistentvolumes]
+    verbs: [get, list, watch]
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses]
+    verbs: [get, list, watch]
+  - apiGroups: [apiextensions.k8s.io]
+    resources: [customresourcedefinitions]
+    verbs: [get, list, watch]
+  - apiGroups: [metrics.k8s.io]
+    resources: [nodes, pods]
+    verbs: [get, list]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles, rolebindings, clusterroles, clusterrolebindings]
+    verbs: [get, list, watch]
+  - apiGroups: [argoproj.io]
+    resources: [applications, applicationsets, appprojects]
+    verbs: [get, list, watch]
+  - apiGroups: [secrets.hashicorp.com]
+    # VSO custom resources (sync status only; the projected Secrets stay unreadable)
+    resources: [vaultstaticsecrets, vaultauths, vaultconnections]
+    verbs: [get, list, watch]
+  - apiGroups: [monitoring.coreos.com]
+    resources: [servicemonitors, prometheusrules, podmonitors]
+    verbs: [get, list, watch]
+  - apiGroups: [cert-manager.io]
+    resources: [certificates, issuers, clusterissuers]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hermes-infra-reader-cluster
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hermes-infra-reader-cluster
+subjects:
+  - kind: ServiceAccount
+    name: hermes-infra-reader
+    namespace: agents
