@@ -92,6 +92,11 @@ data:
     .lmarena.ai
     # OpenCode
     .opencode.ai
-    # Model catalog / pricing metadata used by OmniRoute's auto-routing
+    # Model catalog / pricing metadata used by OmniRoute's auto-routing.
+    # raw.githubusercontent.com: pricing sync (src/lib/pricingSync.ts), which
+    # cost-aware routing depends on. Deliberately NOT allowed: aihorde.net
+    # (keyless free provider OmniRoute probes) and registry.npmjs.org
+    # (self-update check; the image is pinned by digest).
     models.dev
     openrouter.ai
+    raw.githubusercontent.com
