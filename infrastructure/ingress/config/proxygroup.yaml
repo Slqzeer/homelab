@@ -1,0 +1,34 @@
+# One shared pool of Tailscale proxies for every tailnet Ingress, replacing
+# one dedicated proxy StatefulSet per Ingress (eleven pods at ~25Mi each).
+#
+# Each Ingress joins the pool with the tailscale.com/proxy-group: ingress
+# annotation, and its hostname is published as a Tailscale Service
+# (svc:<name>) that every replica advertises. Approval for those Services
+# comes from autoApprovers.services in infrastructure/networking/policy.hujson.
+#
+# This was tried on 2026-09-02 and abandoned because the Service VIPs did
+# not route (design spec §10). Re-tested on 2026-10-05 with the operator and
+# clients on 1.102.3: the VIP answered over IPv4 and IPv6 from this host and
+# from a second tailnet machine, so the pool is the design again.
+#
+# Two replicas so a restart or a node-local hiccup on one pod does not drop
+# every hostname at once. Pods are named ingress-0 and ingress-1.
+#
+# The proxyClass keeps each pod memory-bounded, exactly as the per-Ingress
+# annotation did for the dedicated proxies.
+#
+# Pool pods carry tailscale.com/parent-resource: ingress and
+# tailscale.com/parent-resource-type: proxygroup -- NOT the per-Ingress labels
+# a dedicated proxy had. Any NetworkPolicy admitting the tailnet proxy must
+# select those labels (or tailscale.com/managed: "true").
+#
+# Cluster-scoped resource: no namespace.
+apiVersion: tailscale.com/v1alpha1
+kind: ProxyGroup
+metadata:
+  name: ingress
+spec:
+  type: ingress
+  replicas: 2
+  hostnamePrefix: ingress
+  proxyClass: homelab

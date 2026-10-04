@@ -5,17 +5,16 @@
 # Let's Encrypt certificate; the hop to vault-ui is plain HTTP inside the
 # cluster, matching the posture used for Argo CD.
 #
-# The proxy-class annotation is NOT decorative: a tailscale Ingress gets a
-# dedicated proxy by default, and this annotation is what bounds that pod's
-# memory. Omitting it leaves the proxy unbounded (chart default is
-# `resources: {}`).
+# The proxy-group annotation is NOT decorative: without it a tailscale
+# Ingress gets a dedicated, unbounded proxy pod of its own (chart default is
+# `resources: {}`) instead of joining the bounded shared pool.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: vault
   namespace: vault
   annotations:
-    tailscale.com/proxy-class: homelab
+    tailscale.com/proxy-group: ingress
     portal.homelab.io/enabled: "true"
     portal.homelab.io/name: Vault
     portal.homelab.io/description: Secret management and recovery operations

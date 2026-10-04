@@ -6,10 +6,8 @@
 # health to sync. An Ingress whose backend does not exist yet is valid and
 # harmless -- it simply has nothing to route to until wave 24 lands.
 #
-# A dedicated proxy rather than the shared ProxyGroup, for the reason
-# argocd-ingress.yaml records at length: Tailscale Services proved
-# unroutable on this tailnet. It still references the ProxyClass so the pod
-# stays memory-bounded.
+# Served by the shared "ingress" ProxyGroup (proxygroup.yaml), which also
+# keeps the proxy memory-bounded through the homelab ProxyClass.
 #
 # Port 8080 ONLY. Keycloak's management port 9000 carries /health/* and
 # /metrics and is deliberately not published -- Prometheus reaches it
@@ -24,7 +22,7 @@ metadata:
   name: keycloak
   namespace: keycloak
   annotations:
-    tailscale.com/proxy-class: homelab
+    tailscale.com/proxy-group: ingress
     portal.homelab.io/enabled: "true"
     portal.homelab.io/name: Keycloak
     portal.homelab.io/description: Identity and access management

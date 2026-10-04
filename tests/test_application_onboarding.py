@@ -96,7 +96,7 @@ class ApplicationOnboardingTests(unittest.TestCase):
                 "name": "example",
                 "namespace": "example",
                 "annotations": {
-                    "tailscale.com/proxy-class": "homelab",
+                    "tailscale.com/proxy-group": "ingress",
                     "portal.homelab.io/enabled": "true",
                     "portal.homelab.io/name": "Example",
                     "portal.homelab.io/description": "Example application",
@@ -153,9 +153,9 @@ class ApplicationOnboardingTests(unittest.TestCase):
         self.policy["spec"]["podSelector"] = {"matchLabels": {"app": "example"}}
         self.assertIn("namespace requires default-deny ingress and egress NetworkPolicy", self.validate())
 
-    def test_rejects_missing_proxy_class(self):
-        del self.ingress["metadata"]["annotations"]["tailscale.com/proxy-class"]
-        self.assertIn("ingress must use tailscale.com/proxy-class: homelab", self.validate())
+    def test_rejects_missing_proxy_group(self):
+        del self.ingress["metadata"]["annotations"]["tailscale.com/proxy-group"]
+        self.assertIn("ingress must use tailscale.com/proxy-group: ingress", self.validate())
 
     def test_rejects_published_ingress_without_access(self):
         del self.ingress["metadata"]["annotations"]["portal.homelab.io/access"]
@@ -378,7 +378,7 @@ class PortalRegistrationTests(unittest.TestCase):
         self.assertEqual(self.portal_revision, portal["targetRevision"])
         self.assertEqual("deploy/overlays/homelab", portal["path"])
         patches = portal["kustomize"]["patches"]
-        self.assertEqual(3, len(patches))
+        self.assertEqual(4, len(patches))
         patches_by_kind = {patch["target"]["kind"]: patch for patch in patches}
         self.assertEqual(
             {"group": "secrets.hashicorp.com", "version": "v1beta1",
@@ -394,12 +394,34 @@ class PortalRegistrationTests(unittest.TestCase):
              "kind": "Deployment", "name": "homelab-portal"},
             patches_by_kind["Deployment"]["target"],
         )
+        self.assertEqual(
+            {"group": "networking.k8s.io", "version": "v1",
+             "kind": "NetworkPolicy", "name": "homelab-portal"},
+            patches_by_kind["NetworkPolicy"]["target"],
+        )
         for patch in patches:
             parsed = yaml.safe_load(patch["patch"])
             if patch["target"]["kind"] == "Deployment":
                 self.assertEqual(
                     [{"name": "ghcr-pull"}],
                     parsed["spec"]["template"]["spec"]["imagePullSecrets"],
+                )
+            elif patch["target"]["kind"] == "NetworkPolicy":
+                # Admits the shared "ingress" ProxyGroup pool, scoped to the
+                # tailscale namespace in the same peer.
+                self.assertEqual(
+                    [{
+                        "op": "add",
+                        "path": "/spec/ingress/0/from/-",
+                        "value": {
+                            "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "tailscale"}},
+                            "podSelector": {"matchLabels": {
+                                "tailscale.com/parent-resource": "ingress",
+                                "tailscale.com/parent-resource-type": "proxygroup",
+                            }},
+                        },
+                    }],
+                    parsed,
                 )
             else:
                 self.assertEqual("delete", parsed["$patch"])
@@ -585,7 +607,7 @@ class PortalIngressPublicationTests(unittest.TestCase):
         self.assertEqual(1, len(matching))
         portal = matching[0]
         annotations = portal["metadata"]["annotations"]
-        self.assertEqual("homelab", annotations["tailscale.com/proxy-class"])
+        self.assertEqual("ingress", annotations["tailscale.com/proxy-group"])
         self.assertFalse(any(key.startswith("portal.homelab.io/") for key in annotations))
         self.assertEqual("tailscale", portal["spec"]["ingressClassName"])
         self.assertEqual([{"hosts": ["portal"]}], portal["spec"]["tls"])

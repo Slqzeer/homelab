@@ -30,10 +30,12 @@ spec:
               kubernetes.io/metadata.name: tailscale
           podSelector:
             matchLabels:
+              # The shared "ingress" ProxyGroup pool. Pool pods serve every
+              # tailnet hostname, so they carry the pool's labels rather than
+              # per-Ingress ones (infrastructure/ingress/config/proxygroup.yaml).
               tailscale.com/managed: "true"
-              tailscale.com/parent-resource-type: ingress
-              tailscale.com/parent-resource: keycloak
-              tailscale.com/parent-resource-ns: keycloak
+              tailscale.com/parent-resource-type: proxygroup
+              tailscale.com/parent-resource: ingress
       ports:
         - protocol: TCP
           port: 8080

@@ -26,8 +26,8 @@
 # status.loadBalancer.ingress, which does not depend on the backend existing.
 # The hostnames 502 for the seconds in between.
 #
-# The proxy-class annotation is NOT decorative: it is what bounds each proxy
-# pod's memory. Omitting it leaves the proxy unbounded (chart default is
+# The proxy-group annotation is NOT decorative: without it each Ingress gets
+# a dedicated, unbounded proxy pod of its own (chart default is
 # `resources: {}`), which is how this host lost CoreDNS once.
 ---
 apiVersion: networking.k8s.io/v1
@@ -36,7 +36,7 @@ metadata:
   name: nexus
   namespace: artifacts
   annotations:
-    tailscale.com/proxy-class: homelab
+    tailscale.com/proxy-group: ingress
     portal.homelab.io/enabled: "true"
     portal.homelab.io/name: Nexus
     portal.homelab.io/description: Artifact repositories and package caches
@@ -63,7 +63,7 @@ metadata:
   name: nexus-docker
   namespace: artifacts
   annotations:
-    tailscale.com/proxy-class: homelab
+    tailscale.com/proxy-group: ingress
 spec:
   ingressClassName: tailscale
   defaultBackend:

@@ -5,15 +5,15 @@
 # node outside the cluster, reaches OmniRoute through this name.
 #
 # Deliberately NOT published in the Homelab Portal: it is an administrative
-# UI whose authentication has not been reviewed for portal access. Same
-# dedicated-proxy shape as grafana-ingress.yaml.
+# UI whose authentication has not been reviewed for portal access. Served
+# by the shared "ingress" ProxyGroup like every other Ingress here.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: omniroute
   namespace: omniroute
   annotations:
-    tailscale.com/proxy-class: homelab
+    tailscale.com/proxy-group: ingress
 spec:
   ingressClassName: tailscale
   defaultBackend:

@@ -246,6 +246,15 @@ Both are backup-worthy until Vault takes over in phase 16.
 
 ## 10. Resolved: the shared ProxyGroup failed, the fallback is the design
 
+> **Superseded on 2026-10-05.** The pool was re-tested with the operator and
+> clients on 1.102.3 using a throwaway ProxyGroup and Ingress (`pg-test`).
+> The Service VIP answered over IPv4 and IPv6 from this host and from a
+> second tailnet PC, and `tailscale ping` reached the pool pod. The tailnet
+> policy was unchanged from the failure below, so the cause was most likely
+> in Tailscale itself. Every Ingress now uses
+> `tailscale.com/proxy-group: ingress`; see
+> `infrastructure/ingress/README.md`. The record below is kept as history.
+
 **Partially resolved.** With a shared `ProxyGroup`, pods are named from
 `hostnamePrefix` (`<prefix>-0`), while a per-Ingress hostname such as
 `argocd.taildf6cd4.ts.net` is published through a separate mechanism

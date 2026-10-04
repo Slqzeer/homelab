@@ -382,10 +382,13 @@ working tree, and the `argocd` Application still targets `main` with
 
 This is the entry that cost the most time getting tailnet ingress working.
 A shared `ProxyGroup` was tried first and abandoned (see the design spec
-§10 and `infrastructure/ingress/README.md`) in favor of a dedicated proxy
-per Ingress via `tailscale.com/proxy-class`. Switching designs mid-stream
-left cluster state behind that Argo CD never created and so never prunes,
-and each leftover independently blocked the replacement from coming up.
+§10) in favor of a dedicated proxy per Ingress via
+`tailscale.com/proxy-class`, then adopted again on 2026-10-05 once Tailscale
+Service routing worked. Every Ingress now uses
+`tailscale.com/proxy-group: ingress` (see `infrastructure/ingress/README.md`).
+Switching designs mid-stream leaves cluster state behind that Argo CD never
+created and so never prunes, and each leftover can block the replacement
+from coming up.
 
 ### Start here
 
@@ -410,9 +413,11 @@ fresh install, work through this checklist first, in order:
    sg k3s-admin -c 'kubectl -n tailscale get pods'
    ```
 
-   No dedicated proxy pod for the Ingress means nothing further downstream
-   (certificate, routing) can work yet — fix this before looking at
-   anything else.
+   The pool pods are `ingress-0` and `ingress-1`. If they are not Running,
+   nothing further downstream (certificate, routing) can work yet — fix
+   this before looking at anything else. A hostname that answers **502**
+   while the pool is healthy is almost always a NetworkPolicy still
+   selecting the old dedicated-proxy labels.
 4. **API permission error in the operator log** — an error naming a
    missing permission or scope means the OAuth client is under-scoped.
    Check its scopes against `infrastructure/ingress/README.md` (exactly
@@ -434,8 +439,9 @@ Ingress off a shared `ProxyGroup` and onto a dedicated
 `tailscale.com/proxy-class` proxy. Every one of them requires a ProxyGroup
 (or ProxyGroup-backed Ingress) to have existed at some point to leave the
 state behind — **none of them can happen on a fresh install**, where no
-ProxyGroup is ever created. They are kept here in case this design is
-revisited and a similar migration happens again.
+ProxyGroup is ever created. They are kept here because the 2026-10-05
+migration went the other way, onto the pool, and the same kinds of
+leftover state apply in reverse.
 
 ### An Ingress never gets an ADDRESS: "input does not match format"
 
