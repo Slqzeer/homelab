@@ -608,6 +608,13 @@ phase could be called done. **That measurement has now happened** (spec
 regardless: if this pod is ever OOM-killed, the fix is raising
 `limits.memory`, never the heap.
 
+**Resized 2026-10-05.** The host was swap-exhausted, and an in-cluster
+`jcmd 1 GC.heap_info` showed only 385Mi of the 1Gi heap in use, with the pod at
+1.29Gi in total. The flags are now `-Xms768m -Xmx768m
+-XX:MaxDirectMemorySize=512m`, with requests and limits lowered by the same
+512Mi to `1Gi` / `2Gi`. The figures in the table above were measured under the
+old sizing, so they record history, not current headroom.
+
 Also verified live, each with its own evidence rather than an assertion:
 
 - **Secret `nexus-admin` carries exactly `password` and `username`** — no `_raw`

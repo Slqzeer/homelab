@@ -140,8 +140,14 @@ spec:
             # raise limits.memory, NOT the heap: heap, direct memory, metaspace,
             # code cache and thread stacks are all counted by the cgroup, so a
             # bigger heap under an unchanged limit moves the cliff closer.
+            #
+            # Lowered from -Xms1024m -Xmx1024m -XX:MaxDirectMemorySize=768m on
+            # 2026-10-05, when the host was swap-exhausted: in-cluster
+            # `jcmd GC.heap_info` showed 385Mi of the 1Gi heap in use, with
+            # the pod at 1.29Gi in total. 768m keeps roughly 2x headroom over
+            # that. Requests and limits below were lowered by the same amount.
             - name: INSTALL4J_ADD_VM_PARAMS
-              value: "-Xms1024m -Xmx1024m -XX:MaxDirectMemorySize=768m"
+              value: "-Xms768m -Xmx768m -XX:MaxDirectMemorySize=512m"
           ports:
             - name: http
               containerPort: 8081
@@ -153,10 +159,10 @@ spec:
           resources:
             requests:
               cpu: 200m
-              memory: 1.5Gi
+              memory: 1Gi
             limits:
               # Memory only, no CPU limit -- the shape postgres.yaml uses.
-              memory: 2.5Gi
+              memory: 2Gi
           volumeMounts:
             - name: data
               mountPath: /nexus-data
