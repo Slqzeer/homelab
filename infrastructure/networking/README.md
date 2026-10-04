@@ -89,15 +89,13 @@ via a push to `main` that triggers `tailscale-acl`'s `apply` job, or by hand
 in the admin console (see "`policy.hujson` is NOT reconciled by Argo CD"
 above) — Argo CD has no way to apply a Tailscale policy file.
 
-**Status: applied, but not load-bearing for the current design.** After
-this stanza was applied, the Tailscale Service mechanism it approves
-proved unroutable on this tailnet regardless — see design doc §10. The
-Argo CD Ingress now uses a dedicated proxy (`tailscale.com/proxy-class`)
-instead of the shared `ProxyGroup`, which needs no Tailscale Service and
-so does not need this approval today. The stanza is left in place because
-it is harmless and would be required again if ProxyGroups are ever
-revisited — do not remove it thinking it is dead config, and do not
-assume it is doing anything for the cluster right now.
+**Status: applied and load-bearing.** Every tailnet Ingress is served by
+the shared `ingress` ProxyGroup (`infrastructure/ingress/config/proxygroup.yaml`),
+which publishes each hostname as a Tailscale Service. Without this stanza
+every one of those hostnames resolves and routes nowhere. When it was first
+applied on 2026-09-02, the Service VIPs still did not route (design doc
+§10). They did on 2026-10-05 with 1.102.3 everywhere and this policy
+unchanged, so that is when the pool was adopted.
 
 Automating this uses a second OAuth client, held as `TS_OAUTH_CLIENT_ID` and
 `TS_OAUTH_SECRET` — Environment secrets on the `homelab` GitHub Actions

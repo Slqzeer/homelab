@@ -1,9 +1,7 @@
-# ProxyClass and the Ingress objects served by the Tailscale operator.
-# Each Ingress gets its own dedicated proxy via the
-# tailscale.com/proxy-class annotation, bounded by this ProxyClass; a
-# shared ProxyGroup was tried and abandoned (see
-# infrastructure/ingress/README.md and the design spec §10) and
-# infrastructure/ingress/config/proxygroup.yaml no longer exists.
+# ProxyClass, the shared "ingress" ProxyGroup, and the Ingress objects
+# served by the Tailscale operator. Every Ingress joins the pool via the
+# tailscale.com/proxy-group: ingress annotation; the pool is bounded by the
+# ProxyClass. See infrastructure/ingress/README.md.
 #
 # Wave 21: deliberately after every component, not before them. An Ingress
 # is Progressing until its controller populates status.loadBalancer.ingress,

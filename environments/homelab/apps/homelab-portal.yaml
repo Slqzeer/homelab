@@ -65,6 +65,27 @@ spec:
                   spec:
                     imagePullSecrets:
                       - name: ghcr-pull
+          # The product policy admits only a dedicated per-Ingress proxy.
+          # Tailnet Ingresses are now served by the shared "ingress"
+          # ProxyGroup, whose pods carry the pool's labels, so admit those
+          # too. The original peer is left in place and simply matches
+          # nothing once the dedicated proxy is gone.
+          - target:
+              group: networking.k8s.io
+              version: v1
+              kind: NetworkPolicy
+              name: homelab-portal
+            patch: |-
+              - op: add
+                path: /spec/ingress/0/from/-
+                value:
+                  namespaceSelector:
+                    matchLabels:
+                      kubernetes.io/metadata.name: tailscale
+                  podSelector:
+                    matchLabels:
+                      tailscale.com/parent-resource: ingress
+                      tailscale.com/parent-resource-type: proxygroup
     - repoURL: git@github.com:Slqzeer/homelab.git
       targetRevision: main
       path: apps/portal/config

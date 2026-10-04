@@ -12,7 +12,7 @@ metadata:
   name: tle-dev-player
   namespace: tle-dev
   annotations:
-    tailscale.com/proxy-class: homelab
+    tailscale.com/proxy-group: ingress
 spec:
   ingressClassName: tailscale
   rules:

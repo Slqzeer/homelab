@@ -3,9 +3,8 @@
 #
 # Wave 2: after namespaces (0), before ingress-config (21), which creates
 # a ProxyClass instance and Ingress objects using the CRDs this Application
-# installs. Each Ingress gets its own dedicated proxy, bounded by the
-# ProxyClass via the tailscale.com/proxy-class annotation; a shared
-# ProxyGroup was tried and abandoned -- see the design spec §10.
+# installs. Every Ingress is served by the shared "ingress" ProxyGroup,
+# bounded by that ProxyClass -- see infrastructure/ingress/README.md.
 #
 # Requires the `operator-oauth` Secret in the tailscale namespace. That
 # Secret exists only in the cluster and in no repository -- the operator

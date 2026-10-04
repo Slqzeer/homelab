@@ -64,7 +64,9 @@ only; live client changes need an explicit registration step.
 
 Place every Tailscale Ingress in `infrastructure/ingress/config/`, never in
 the application package. Use `spec.ingressClassName: tailscale`, the
-`tailscale.com/proxy-class: homelab` annotation, and a short tailnet TLS host.
+`tailscale.com/proxy-group: ingress` annotation, and a short tailnet TLS host.
+Any NetworkPolicy admitting the tailnet proxy must select the pool's labels
+(see `infrastructure/ingress/README.md`).
 Route only the user-facing HTTP Service port. Operations, metrics, health,
 admin, and database ports remain in-cluster. No Internet or LAN ingress is
 part of this contract.

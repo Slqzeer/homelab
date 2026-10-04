@@ -36,17 +36,10 @@ applies every YAML in it, and a Helm values file has no `kind`.
 
 ## Exposing a new service
 
-A shared `ProxyGroup` pool was tried first to save memory and abandoned:
-a ProxyGroup-backed Ingress is published as a **Tailscale Service**, and
-that mechanism proved unroutable on this tailnet — DNS resolved a VIP,
-but `tailscale ping` reported "no matching peer" and connections got "No
-route to host", from two separate machines, while the same proxy pod's
-ordinary tailnet device IP cleanly refused connections (proving ordinary
-devices route fine and only the Service layer fails). See the design
-spec §10 for the full evidence. `infrastructure/ingress/config/proxygroup.yaml`
-no longer exists.
-
-The working pattern instead gives every Ingress its own dedicated proxy:
+Every Ingress joins the shared `ingress` ProxyGroup (`config/proxygroup.yaml`,
+two replicas). Each hostname is published as a **Tailscale Service**
+(`svc:<service>`) that every pool replica advertises, so adding a service
+adds no pod:
 
     apiVersion: networking.k8s.io/v1
     kind: Ingress
@@ -54,7 +47,7 @@ The working pattern instead gives every Ingress its own dedicated proxy:
       name: <service>
       namespace: <namespace>
       annotations:
-        tailscale.com/proxy-class: homelab
+        tailscale.com/proxy-group: ingress
     spec:
       ingressClassName: tailscale
       defaultBackend:
@@ -69,23 +62,38 @@ The working pattern instead gives every Ingress its own dedicated proxy:
 `spec.tls[0].hosts[0]` is a **short** name. `<service>` becomes
 `<service>.taildf6cd4.ts.net`. Writing the full FQDN there is wrong.
 
-A `tailscale` Ingress gets a dedicated proxy pod **by default** — that part
-has nothing to do with the annotation. It registers as an ordinary tailnet
-device and never touches the Service layer. There is no pool to share:
-**every Ingress exposed this way costs its own proxy pod**, measured at
-roughly 30Mi (see Memory below). That is a real, per-service memory cost
-on this host, not a rounding error — budget for it before adding another
-one.
+**The `tailscale.com/proxy-group: ingress` annotation is not decorative and
+must not be dropped when copying this template.** Without it the operator
+falls back to its default: a dedicated proxy pod for that one Ingress, with
+the chart's `resources: {}`, with no memory ceiling. The Ingress still comes
+up, still gets a working hostname and certificate, and Argo CD still reports
+it Synced/Healthy, so nothing flags the mistake.
+`scripts/validate_application_onboarding.py` rejects it for onboarded apps.
 
-What the `tailscale.com/proxy-class: homelab` annotation actually does is
-bind that already-dedicated proxy to the `homelab` ProxyClass, which caps
-it at 128Mi (see Memory below). **It is not decorative and must not be
-dropped when copying this template.** The chart's own default for a proxy
-with no ProxyClass is `resources: {}` — unbounded. Omit the annotation and
-the Ingress still comes up, still gets a working hostname and
-certificate, and Argo CD still reports it Synced/Healthy — there is no
-error anywhere — but the resulting proxy pod has no memory ceiling at all,
-on a host that is already swapping.
+**NetworkPolicies must admit the pool, not a per-Ingress proxy.** Pool pods
+carry `tailscale.com/parent-resource: ingress` and
+`tailscale.com/parent-resource-type: proxygroup`. A policy that selects the
+old dedicated-proxy labels (`parent-resource: <service>`,
+`parent-resource-type: ingress`) matches nothing, and the hostname returns
+**502** with `connection refused` in the pool pod's log. Selecting
+`tailscale.com/managed: "true"` also works.
+
+Only HTTPS (443) is served. Dedicated proxies also answered on port 80; pool
+Services do not.
+
+### History: the pool was abandoned once
+
+A shared ProxyGroup was the original design and was abandoned on
+2026-09-02: DNS resolved the Service VIP, but `tailscale ping` reported "no
+matching peer" and connections got "No route to host" from two machines
+(design spec §10). It was re-tested on 2026-10-05 with the operator and
+clients on 1.102.3, using a throwaway `pg-test` Ingress: the VIP answered
+over IPv4 and IPv6 from this host and from a second tailnet PC. The tailnet
+policy had not changed in between, so the fix was most likely in Tailscale
+itself. If routing regresses, the fallback is still to replace the
+annotation with `tailscale.com/proxy-class: homelab`, which gives that
+Ingress a dedicated, memory-bounded proxy that never touches the Service
+layer.
 
 **Every Ingress in this repository lives here, at wave 21 — not alongside
 the service it fronts.** This was reconsidered during phase 16 (Vault) and
@@ -175,14 +183,9 @@ scopes, each read and write, all tagged `tag:k8s-operator`:
 
 Do not grant `all`; it confers every scope plus all device tags.
 
-`services` is required by Tailscale's own Kubernetes-operator install
-documentation for the operator generally — it is not specific to
-ProxyGroups or Tailscale Services, the mechanism this phase tried and
-abandoned (see "Exposing a new service" above, and the design spec §10).
-It may not be strictly required by the dedicated-proxy design this
-repository actually uses, but that has not been tested, and trimming it
-would mean regenerating the OAuth client to find out, so all three scopes
-are kept as originally granted.
+`services` is load-bearing: the shared ProxyGroup publishes every Ingress
+hostname as a Tailscale Service, which the operator creates through this
+scope. Do not trim it.
 
     kubectl create secret generic operator-oauth -n tailscale \
       --from-literal=client_id=<id> --from-literal=client_secret=<secret>
@@ -192,14 +195,12 @@ attach it — see `infrastructure/networking/README.md`.
 
 ## Memory
 
-`ProxyClass` bounds each proxy to 128Mi. That bound is deliberate: this
-host runs with almost no free memory and no usable swap. Read
-`docs/troubleshooting.md` before raising it.
+`ProxyClass` bounds each pool pod to 128Mi. That bound is deliberate: this
+host has a history of swap exhaustion. Read `docs/troubleshooting.md`
+before raising it. Each pool pod now serves every hostname, so it is the
+pod to watch against that limit.
 
-**Measured**, not estimated: the operator pod uses 35Mi and the Argo CD
-Ingress's dedicated proxy pod uses 28Mi — 63Mi total for the whole
-ingress stack, against the design spec's 150–250Mi estimate (which
-priced in a ProxyGroup and, at the high end, cert-manager). The host had
-549Mi available and 15 pods running at measurement time. Each additional
-dedicated proxy pod (see "Exposing a new service" above) adds roughly
-that same 28–30Mi.
+**Measured:** with dedicated proxies, each pod used 25-30Mi, so the eleven
+tailnet Ingresses cost about 275Mi. In the 2026-10-05 test, a pool pod
+serving one hostname used 51Mi. The two pool pods replace all eleven, and
+the operator pod adds about 35Mi as before.

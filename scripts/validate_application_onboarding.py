@@ -257,8 +257,8 @@ def validate_application(
         ingress_annotations = _map(_map(ingress.get("metadata")).get("annotations"))
         if _map(ingress.get("spec")).get("ingressClassName") != "tailscale":
             errors.append("ingress must use the tailscale class")
-        if ingress_annotations.get("tailscale.com/proxy-class") != "homelab":
-            errors.append("ingress must use tailscale.com/proxy-class: homelab")
+        if ingress_annotations.get("tailscale.com/proxy-group") != "ingress":
+            errors.append("ingress must use tailscale.com/proxy-group: ingress")
         for backend in _ingress_backends(ingress):
             if _exposes_operations_port(backend, namespace, rendered):
                 errors.append("ingress must not expose an operations port")
