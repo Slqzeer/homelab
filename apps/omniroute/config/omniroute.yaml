@@ -99,7 +99,13 @@ spec:
             - {name: HOME, value: /tmp}
             - {name: PORT, value: "20128"}
             - {name: HOSTNAME, value: 0.0.0.0}
-            - {name: BASE_URL, value: https://omniroute.taildf6cd4.ts.net}
+            # BASE_URL is OmniRoute's server-side address for calls to itself (upstream
+            # .env.selfhost.example: BASE_URL=http://omniroute:20128); only NEXT_PUBLIC_BASE_URL
+            # is the browser-facing origin. With the tailnet URL here, its 15-min health cycle
+            # went out through the egress proxy and was denied (TCP_DENIED CONNECT
+            # omniroute.taildf6cd4.ts.net:443, ~8/h). Loopback is in NO_PROXY and needs no
+            # NetworkPolicy.
+            - {name: BASE_URL, value: "http://localhost:20128"}
             - {name: NEXT_PUBLIC_BASE_URL, value: https://omniroute.taildf6cd4.ts.net}
             - {name: REQUIRE_API_KEY, value: "true"}
             - {name: OMNIROUTE_MEMORY_MB, value: "1024"}
