@@ -510,6 +510,45 @@ is forced to disambiguate.
 console (<https://login.tailscale.com/admin/machines>), then delete the
 Ingress so the operator re-provisions and claims the now-freed name.
 
+### Migrating onto the pool: what the 2026-10-05 rollout hit
+
+Both of these appeared when the eleven dedicated proxies were switched to
+the shared `ingress` ProxyGroup in one sync. Neither needed a code change.
+
+**`name exists but is not a service (400)` for every hostname.** The
+operator tries to create each Tailscale Service while the old dedicated
+proxy device still holds the same name on the tailnet:
+
+```bash
+kubectl -n tailscale logs deploy/operator --since=10m | grep 'not a service'
+```
+
+This is transient. The operator retries, and once each old device has been
+deleted the Service takes the plain name, not `<name>-1`. All eleven
+recovered within about three minutes. Some hostnames resolve to the new
+Service address but time out for a minute or two after that while the pool
+replicas pick up the advertisement. Only act if it persists: check that
+`tailscale serve status` inside `ingress-0` lists the hostname, then look
+for a stale device in the admin console as described above.
+
+**Traffic works, but the Ingress has no ADDRESS and Argo CD shows it
+Progressing.** The operator's status write hit a conflict
+(`the object has been modified`) because Argo CD was updating the same
+Ingress, and it did not retry:
+
+```bash
+kubectl -n <ns> get ingress <name>   # ADDRESS empty
+curl -sS -o /dev/null -w '%{http_code}\n' https://<name>.taildf6cd4.ts.net/   # answers
+```
+
+**Fix:** touch the Ingress so the operator reconciles it again. Argo CD
+ignores an annotation it does not manage, so this does not fight selfHeal:
+
+```bash
+kubectl -n <ns> annotate ingress <name> homelab.io/reconcile-nudge="$(date +%s)"
+kubectl -n <ns> annotate ingress <name> homelab.io/reconcile-nudge-
+```
+
 ### The lesson
 
 Argo CD prunes only what it manages. Secrets and finalizers the Tailscale

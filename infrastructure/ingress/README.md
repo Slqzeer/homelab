@@ -201,6 +201,9 @@ before raising it. Each pool pod now serves every hostname, so it is the
 pod to watch against that limit.
 
 **Measured:** with dedicated proxies, each pod used 25-30Mi, so the eleven
-tailnet Ingresses cost about 275Mi. In the 2026-10-05 test, a pool pod
-serving one hostname used 51Mi. The two pool pods replace all eleven, and
-the operator pod adds about 35Mi as before.
+tailnet Ingresses cost about 275Mi. After the 2026-10-05 migration, with
+all eleven hostnames on the pool and traffic settled, `ingress-0` used 57Mi
+and `ingress-1` 29Mi: **86Mi for the whole pool, about 190Mi saved.** The
+replicas are not symmetric; `-0` also obtains the certificates. Both are
+well inside the 128Mi limit. The operator pod used 50Mi (85Mi briefly
+during the switch-over reconciles).
