@@ -108,7 +108,17 @@ spec:
             - {name: BASE_URL, value: "http://localhost:20128"}
             - {name: NEXT_PUBLIC_BASE_URL, value: https://omniroute.taildf6cd4.ts.net}
             - {name: REQUIRE_API_KEY, value: "true"}
-            - {name: OMNIROUTE_MEMORY_MB, value: "1024"}
+            # V8 heap cap (the launcher turns it into --max-old-space-size).
+            # Measured 2026-10-05 after a forced GC: 312Mi live heap, 703Mi RSS.
+            # 512 keeps ~1.6x headroom and stops the heap drifting towards 1G
+            # before it collects. A "JavaScript heap out of memory" crash means
+            # raise this, and limits.memory with it.
+            - {name: OMNIROUTE_MEMORY_MB, value: "512"}
+            # ~380Mi of RSS sits outside the V8 heap: glibc malloc, with 14
+            # threads plus the better-sqlite3 and wreq-js (Rust) native modules.
+            # Capping glibc's per-thread arenas is the standard fix for that
+            # fragmentation.
+            - {name: MALLOC_ARENA_MAX, value: "2"}
             # All provider traffic leaves through the allowlisting egress proxy;
             # PROXY_FAIL_OPEN stays false, so a down proxy fails calls closed.
             - {name: HTTPS_PROXY, value: "http://egress-proxy.egress.svc.cluster.local:3128"}
@@ -130,7 +140,8 @@ spec:
               drop: [ALL]
           resources:
             requests: {cpu: 200m, memory: 512Mi}
-            limits: {cpu: "1", memory: 2Gi}
+            # 512Mi heap + ~380Mi off-heap measured, so 1Gi bounds it with room.
+            limits: {cpu: "1", memory: 1Gi}
           startupProbe:
             httpGet: {path: /api/health, port: http}
             periodSeconds: 5
