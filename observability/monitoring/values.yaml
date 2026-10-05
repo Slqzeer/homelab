@@ -261,10 +261,10 @@ grafana:
 
     # Measured 2026-09-19: grafana-sc-dashboard at 79Mi, grafana-sc-datasources
     # at 77Mi, with no limit on either -- the chart's default here is `{}`,
-    # not a value this phase ever set. That is the same defect class
-    # infrastructure/ingress/config/nexus-ingress.yaml warns about for
-    # Tailscale proxies: "omitting it leaves the proxy unbounded (chart
-    # default resources: {}), which is how this host lost CoreDNS once."
+    # not a value this phase ever set. That is the same defect class as an
+    # Ingress without the tailscale.com/proxy-group annotation, which gets
+    # a dedicated proxy pod with the chart default resources: {} -- how
+    # this host lost CoreDNS once.
     # Limits below leave roughly 2x headroom over the measured figures;
     # memory-only, no CPU limit, matching every other limits: block in this
     # repository.

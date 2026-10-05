@@ -23,8 +23,8 @@ crds:
 # Decision L20. The chart's default `rbac.rules` grants cluster-wide
 # get/list/watch on configmaps AND secrets, plus pods/log, replicasets, and
 # six monitoring.coreos.com kinds -- bound to a ServiceAccount whose pod runs
-# as runAsUser: 0. That reaches vault-*, grafana-admin, ghcr-pull,
-# nexus-admin and every database credential in this cluster. This pipeline
+# as runAsUser: 0. That reaches vault-*, grafana-admin, ghcr-pull
+# and every database credential in this cluster. This pipeline
 # uses discovery.kubernetes with role = "pod" plus file tailing; it needs
 # none of it. Overriding `rules` replaces that grant with just the two verbs
 # this pipeline actually uses.

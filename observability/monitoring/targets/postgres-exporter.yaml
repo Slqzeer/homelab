@@ -6,10 +6,10 @@
 # provides for exactly this -- and its password is generated in Vault by
 # platform/vault/configure-vault.sh.
 #
-# The role is created by an Argo CD Sync HOOK, not a plain Job, for the
-# reason platform/nexus/config/bootstrap-job.yaml sets out: a Job is
+# The role is created by an Argo CD Sync HOOK, not a plain Job: a Job is
 # immutable, so re-applying an unchanged one does nothing at all, and a
-# changed script would never reach the cluster.
+# changed script would never reach the cluster. BeforeHookCreation deletes
+# the previous Job so each sync genuinely re-runs it.
 ---
 apiVersion: v1
 kind: ServiceAccount

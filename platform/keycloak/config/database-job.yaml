@@ -5,10 +5,10 @@
 # object below states `namespace: databases` explicitly. That is the same
 # arrangement monitoring-config uses to write into four namespaces.
 #
-# The role is created by an Argo CD Sync HOOK, not a plain Job, for the
-# reason platform/nexus/config/bootstrap-job.yaml sets out: a Job is
+# The role is created by an Argo CD Sync HOOK, not a plain Job: a Job is
 # immutable, so re-applying an unchanged one does nothing at all, and a
-# changed script would never reach the cluster.
+# changed script would never reach the cluster. BeforeHookCreation deletes
+# the previous Job so each sync genuinely re-runs it.
 ---
 apiVersion: v1
 kind: ServiceAccount

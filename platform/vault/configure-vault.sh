@@ -173,53 +173,12 @@ vault write auth/kubernetes/role/vso-ghcr \
     token_policies=vso-ghcr-read \
     ttl=1h
 
-echo "==> seeding homelab/nexus"
-if vault kv get homelab/nexus >/dev/null 2>&1; then
-  echo "    already present, leaving the credential alone"
-else
-  # Generated here and never displayed, exactly as the postgres and redis
-  # blocks above.
-  #
-  # Alphanumeric only. Nexus accepts more, but this password is sent in a
-  # `change-password` request body and pasted into browser logins; a / or @
-  # survives neither round trip predictably.
-  #
-  # Written to a file so that only the FILENAME becomes an argument -- a
-  # password on a command line is visible in `ps`.
-  PWFILE=$(mktemp)
-  trap 'rm -f "$PWFILE"' EXIT
-  head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32 > "$PWFILE"
-  vault kv put homelab/nexus username=admin password=@"$PWFILE" >/dev/null
-  rm -f "$PWFILE"
-  echo "    generated"
-fi
-
-echo "==> policy vso-nexus-read"
-# The data/ segment is REQUIRED and is not a typo -- see the note on
-# vso-canary-read above.
-vault policy write vso-nexus-read - <<'POLICY'
-path "homelab/data/nexus" {
-  capabilities = ["read"]
-}
-POLICY
-
-echo "==> role vso-nexus"
-# bound_service_account_names must match the ServiceAccount created in
-# platform/nexus/config/vault-secrets.yaml, and audience must match that
-# file's VaultAuth spec.kubernetes.audiences.
-vault write auth/kubernetes/role/vso-nexus \
-    bound_service_account_names=nexus \
-    bound_service_account_namespaces=artifacts \
-    audience=vault \
-    token_policies=vso-nexus-read \
-    ttl=1h
-
 echo "==> seeding homelab/grafana"
 if vault kv get homelab/grafana >/dev/null 2>&1; then
   echo "    already present, leaving the credential alone"
 else
-  # Generated here and never displayed, exactly as the postgres, redis and
-  # nexus blocks above.
+  # Generated here and never displayed, exactly as the postgres and redis
+  # blocks above.
   #
   # Alphanumeric only -- this password is set as Grafana's admin password and
   # may be pasted into a browser login; a / or @ survives neither round trip
@@ -268,8 +227,8 @@ echo "==> seeding homelab/postgres-exporter"
 if vault kv get homelab/postgres-exporter >/dev/null 2>&1; then
   echo "    already present, leaving the credential alone"
 else
-  # Generated here and never displayed, exactly as the postgres, redis and
-  # nexus blocks above.
+  # Generated here and never displayed, exactly as the postgres and redis
+  # blocks above.
   #
   # Alphanumeric only: a / or @ inside a password breaks connection URLs in
   # ways that surface far from the cause.
@@ -311,8 +270,8 @@ else
   # The BREAK-GLASS admin of the `master` realm, and nothing else. Humans
   # live in the `homelab` realm; this account exists to recover them.
   #
-  # Generated here and never displayed, exactly as the postgres, redis,
-  # nexus and grafana blocks above.
+  # Generated here and never displayed, exactly as the postgres, redis and
+  # grafana blocks above.
   #
   # Alphanumeric only -- this password is pasted into a browser login.
   #

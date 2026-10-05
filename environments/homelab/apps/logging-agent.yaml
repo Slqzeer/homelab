@@ -3,7 +3,7 @@
 # Wave 23, the SAME wave as logging.yaml rather than behind it. Alloy does
 # not gate on Loki: if Loki is not yet serving, loki.write retries with
 # backoff and Alloy reports Healthy either way, so stacking a wave here
-# would be the habit redis.yaml and nexus.yaml warn against. It needs no
+# would be the habit redis.yaml warns against. It needs no
 # CRD either -- crds.create is false in its values.
 #
 # Separate from logging.yaml because it is a separate chart, pinned

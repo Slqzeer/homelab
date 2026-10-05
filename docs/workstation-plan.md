@@ -561,7 +561,6 @@ homelab/
 ├── platform/
 │   ├── vault/
 │   ├── databases/
-│   ├── nexus/
 │   └── registry/
 │
 ├── observability/
@@ -799,6 +798,15 @@ Cela évite d’installer immédiatement un registry interne.
 
 # 24. Phase 21 — Artifactory
 
+> **Retiré le 2026-10-05.** Nexus consommait environ 1,1 Gio de RAM pour un
+> seul usage réel : le cache Docker Hub de containerd. `raw-hosted` n’avait
+> aucun consommateur, et les images du homelab et de TLE sont sur GHCR, donc
+> hors du cache. L’Application, le namespace `artifacts`, l’ingress et le
+> câblage Vault ont été supprimés ; containerd tire directement depuis Docker
+> Hub. La section ci-dessous reste comme trace de ce qui avait été livré ;
+> l’historique git (`platform/nexus/`) contient la configuration complète si
+> un besoin réel (proxys Maven/npm/PyPI, registre interne) réapparaît.
+
 **Réalisé avec Sonatype Nexus Repository Community Edition, pas avec
 Artifactory.** Aucune édition gratuite de JFrog ne couvre la liste ci-dessous :
 Artifactory OSS n’a pas Docker, et JCR n’a ni Maven, ni npm, ni PyPI. Nexus CE
@@ -848,7 +856,7 @@ Voir la spec, section 6.2.
 
 Nexus reste relativement lourd — environ 1,22 Gio mesurés en régime établi,
 pour une limite de 2,5 Gio — et doit être ajouté après les fondations.
-Documentation opérationnelle : `platform/nexus/README.md`.
+Documentation opérationnelle : `platform/nexus/README.md` dans l’historique git (supprimé).
 
 ---
 
@@ -1165,7 +1173,6 @@ Structure :
 │   └── autres/
 │
 ├── services/
-│   ├── nexus/
 │   ├── keycloak/
 │   └── autres/
 │
@@ -1237,6 +1244,8 @@ Destination :
 
 ## Nexus Repository (rôle Artifactory)
 
+> **Sans objet depuis le retrait de Nexus (2026-10-05)** — voir la phase 21.
+
 Sauvegarder :
 
 ```text
@@ -1255,7 +1264,7 @@ corrompue.** Il faut d’abord lancer la tâche d’export de Nexus, puis copier
 `/nexus-data/backup/` **et** `/nexus-data/blobs/` — l’export sans les blobs
 restaure un index qui ne pointe sur rien. La phase 21 n’automatise rien de
 tout cela et n’a effectué aucun test de restauration ; c’est le travail de la
-phase 34. Procédure détaillée : `platform/nexus/README.md`.
+phase 34.
 
 ---
 
@@ -1399,7 +1408,6 @@ GitHub
       ├── Vault Secrets Operator
       ├── PostgreSQL
       ├── Redis
-      ├── Nexus Repository (raw + docker proxy)
       ├── Prometheus
       ├── Grafana
       ├── Logging (Loki)
