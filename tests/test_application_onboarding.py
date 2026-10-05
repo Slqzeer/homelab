@@ -575,11 +575,6 @@ class PortalIngressPublicationTests(unittest.TestCase):
     approved_catalogue = {
         ("vault", "vault"): ("Vault", "groups", "homelab-admins"),
         ("argocd", "argocd"): ("Argo CD", "groups", "homelab-admins"),
-        ("monitoring", "grafana"): (
-            "Grafana",
-            "groups",
-            "homelab-admins,homelab-users",
-        ),
         ("keycloak", "keycloak"): ("Keycloak", "groups", "homelab-admins"),
     }
 

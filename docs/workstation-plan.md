@@ -862,6 +862,9 @@ Documentation opérationnelle : `platform/nexus/README.md` dans l’historique g
 
 # 25. Phase 22 — Prometheus
 
+> **Modifié le 2026-10-05 — Grafana Cloud.** Prometheus tourne désormais en mode agent : il collecte et envoie une allowlist de métriques (~1,3k séries, quota gratuit ~10k) vers Grafana Cloud, sans stockage local ni règles. Le PVC de 20 Gio et la rétention locale n’existent plus. Voir
+> `observability/monitoring/README.md`, section « Grafana Cloud ».
+
 **Livrée fusionnée avec la phase 23 (Grafana) dans une seule release Helm**,
 `kube-prometheus-stack` — Grafana est un subchart de ce chart, donc
 l'installer deux fois reviendrait à dupliquer Prometheus et l'operator.
@@ -916,6 +919,9 @@ dans `observability/monitoring/README.md`.
 
 # 26. Phase 23 — Grafana
 
+> **Modifié le 2026-10-05 — Grafana Cloud.** Le Grafana local, son ingress tailnet et son client Keycloak ont été supprimés ; tableaux de bord, Explore et alertes sont dans Grafana Cloud, avec connexion par compte grafana.com. Voir
+> `observability/monitoring/README.md`, section « Grafana Cloud ».
+
 Grafana fournit dashboards, datasources et visualisation — **pas
 d'alerting** : Alertmanager est désactivé (décision P3, aucune destination
 de notification n'existe encore ; les ~30 règles d'alerte par défaut du
@@ -948,6 +954,9 @@ Détails complets, mesures et décisions dans
 ---
 
 # 27. Phase 24 — Logging
+
+> **Modifié le 2026-10-05 — Grafana Cloud.** Le Loki local a été supprimé ; Alloy envoie les logs vers Grafana Cloud Loki (~65 Mo/jour). Les logs quittent donc le homelab. Voir
+> `observability/monitoring/README.md`, section « Grafana Cloud ».
 
 Livrée. Loki stocke les logs de conteneurs du cluster, collectés par un
 DaemonSet Grafana Alloy, et interrogés depuis le Grafana de la phase 23.

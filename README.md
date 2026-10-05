@@ -22,8 +22,8 @@ manifest ever applied by hand.
 | `platform/databases/redis/` | Redis: ephemeral cache, its own Vault-Secrets-Operator wiring, README |
 | `platform/registry/` | GHCR pull credential: Vault Secrets Operator wiring, README covering issuing, seeding and rotating the token |
 | `platform/keycloak/` | OIDC identity provider, first-import realm seed, database Job, VSO wiring and recovery/backup ceremonies |
-| `observability/monitoring/` | Prometheus, Grafana: Helm values, VSO wiring for the Grafana admin credential, every ServiceMonitor and its exporter. See `observability/monitoring/README.md` |
-| `observability/logging/` | Loki and Grafana Alloy: Helm values for both charts, the Grafana datasource, and the collector pipeline. See `observability/logging/README.md` |
+| `observability/monitoring/` | Prometheus agent remote-writing to Grafana Cloud: Helm values with the series allowlist, VSO wiring for the Grafana Cloud credential, every ServiceMonitor and its exporter. See `observability/monitoring/README.md` |
+| `observability/logging/` | Grafana Alloy shipping pod logs to Grafana Cloud Loki: Helm values, the collector pipeline and its credential wiring. See `observability/logging/README.md` |
 | `apps` namespace | Created by `bootstrap/namespaces/namespaces.yaml`; holds `beacon` and the GHCR pull Secret it consumes — **not** the same thing as the `apps/` directory below, despite the shared name |
 | `apps/` | Site-specific application values/manifests and a non-deployed `_template/`; never child Application objects |
 
@@ -37,7 +37,7 @@ deliberately (see below for why `vso-operator` is not right after `vault`),
 `vso-config` at 22, and wave 23 shared by `postgres`, `redis`, `registry`
 and `monitoring` — **not** because `vso-config` creates a Secret any
 of them consumes (it does not: `postgres-credentials`, `redis-credentials`,
-`ghcr-pull` and `grafana-admin` are each created by that
+`ghcr-pull` and `grafana-cloud` are each created by that
 component's own `VaultStaticSecret`, shipped in its own Application at wave
 23), but because all four need the
 VSO **operator** (`vso-operator`, wave 21) already running and Vault's
@@ -47,12 +47,10 @@ because of it. Sharing the wave rather than stacking one behind another
 lets them reconcile in parallel since none of the four depends on
 another.
 
-Phase 24 added `logging` and `logging-agent` to that same wave for a
-*different* reason: they need neither the VSO operator nor Vault's configure
-ceremony — Loki runs `auth_enabled: false` and holds no credential at all —
-and nothing at wave 23 gates them. By the rule below they therefore belong at
-or below 23; stacking them higher would have broken the wave-24 invariant the
-next sentences describe, for no dependency that exists.
+Phase 24 added `logging-agent` (Alloy) to that same wave. Since logs moved
+to Grafana Cloud it needs the same two preconditions as the four above —
+it reads the `grafana-cloud` credential through its own `VaultStaticSecret`
+— and nothing at wave 23 gates it.
 
 Wave 23 is **not** last of all any more: three Applications sit
 at wave 24, one wave above, and each is there for its own *real*
@@ -247,10 +245,10 @@ first password change; there is no recovery path from the cluster, so the
 password must be kept in a password manager.
 
 Keycloak is at **<https://keycloak.taildf6cd4.ts.net>**; its recovery account
-and OIDC setup are documented in `platform/keycloak/README.md`. Grafana at
-**<https://grafana.taildf6cd4.ts.net>** now offers Keycloak SSO **with its
-local admin form still enabled**. Argo CD deliberately is not an OIDC
-client yet.
+and OIDC setup are documented in `platform/keycloak/README.md`. Dashboards,
+metrics and logs are in **Grafana Cloud** (login with the grafana.com
+account; see `observability/monitoring/README.md`). Argo CD deliberately is
+not an OIDC client yet.
 
 For Argo CD, if Tailscale itself is unavailable, port-forward still works:
 
@@ -422,17 +420,15 @@ once. See `platform/vault/README.md`.
     kind Argo CD does not assess. The real check is
     `kubectl -n apps get vaultstaticsecret ghcr-pull` (SYNCED/HEALTHY/READY
     columns), not the Application's own status. See
-    `platform/registry/README.md`. Step 11's OIDC client secret needs a
+    `platform/registry/README.md`. Step 11's Grafana Cloud token needs a
     similar ceremony because its issuer is also outside Vault.
-11. Complete the Grafana client-secret paste ceremony in
-    `platform/keycloak/README.md`, after step 9's **configure** half and
-    Keycloak's first realm import. Keycloak issues this secret, just as
-    GitHub issues step 10's GHCR token; Vault cannot generate either on
-    the issuer's behalf. Copy Clients → `grafana` → Credentials from the
-    `homelab` realm into `homelab/keycloak-grafana` using the documented
-    echo-off prompt, wait for VSO, then restart Grafana. The configure
-    script seeds only a placeholder: until it is replaced, SSO returns
-    `invalid_client`, while local Grafana login remains available.
+11. Seed the Grafana Cloud credential into Vault at `homelab/grafana-cloud`
+    (`metrics-username`, `logs-username`, `token`), after step 9's
+    **configure** half. grafana.com issues the token, just as GitHub issues
+    step 10's GHCR token. The configure script seeds only placeholders:
+    until they are replaced, the Prometheus agent and Alloy get 401s and
+    nothing reaches Grafana Cloud, while every Application still reports
+    Healthy. See `observability/monitoring/README.md`, "Grafana Cloud".
 
 The order matters: step 5 must follow step 4, because the `argocd`
 namespace does not exist until `bootstrap.sh` creates it. Step 6 has the
@@ -451,9 +447,8 @@ list specifically because it needs `vault-0` unsealed first; unlike the
 other steps, doing it in numeric order requires having already done the
 step before it, not just some step before it in the plan. The configure
 half of step 9 can trail behind step 10 without urgency, precisely because
-wave 22 already sits after every Ingress. It must finish before step 11:
-Keycloak needs the database credentials and Grafana's Vault path configured
-before its issuer-generated client secret can be delivered.
+wave 22 already sits after every Ingress. It must finish before step 11,
+which writes into a path whose policy and roles the configure half creates.
 
 ## Known gaps
 
@@ -475,18 +470,14 @@ last thought about it.
 - **Keycloak browser acceptance is pending.** The existing `homelab`
   realm needs `UPDATE_PASSWORD` registered/enabled; the corrected git seed
   cannot repair it under `IGNORE_EXISTING`. Follow the operator procedure
-  in `platform/keycloak/README.md`, then verify Admin/Viewer roles,
-  temporary-password replacement, TOTP and local Grafana login. Earlier
+  in `platform/keycloak/README.md`, then verify admin/user access in the
+  portal, temporary-password replacement and TOTP. Earlier
   operator-reported logins were not independently established; the dump
   at 2026-09-20 15:34:32 +0200 contained zero `homelab` users.
 - **Keycloak's admin password cannot be rotated through Vault.**
   `KC_BOOTSTRAP_ADMIN_PASSWORD` is honoured only when no admin exists.
   Rotate the live password in Keycloak first, then update Vault, or the
   recovery credential silently diverges from the account.
-- **The OIDC client secret has no reconciler.** Regenerating Grafana's
-  secret in Keycloak silently breaks SSO until Vault is updated and
-  Grafana restarted. Use the same paste ceremony as a rebuild; the local
-  admin form remains available.
 - **Two of eleven `VaultStaticSecret` destinations still keep VSO's `_raw`
   key**, so each derived Secret carries its credential twice: once parsed,
   once in the verbatim KV JSON. `spec.destination.transformation.excludeRaw:
@@ -531,10 +522,10 @@ last thought about it.
   not close it. Every `role:`/`serviceAccount:`/`audiences:` comment in this
   repository warning that a mismatch "names neither side" still applies
   exactly as before.
-- **The seven Helm `values.yaml` files have no kubeconform schema gate.** They are
+- **The six Helm `values.yaml` files have no kubeconform schema gate.** They are
   excluded from `kubeconform` by filename pattern because they are not
   Kubernetes manifests and have no `apiVersion`/`kind`. They configure Vault,
-  VSO, the Tailscale operator, Argo CD, monitoring, Loki and Alloy.
+  VSO, the Tailscale operator, Argo CD, monitoring and Alloy.
   `yamllint` still covers them; pinned-chart rendering is a separate check.
 - **The GHCR token expires, and the failure is delayed and misleading.**
   Running pods are unaffected; only *new* pulls fail. An expired token

@@ -1,14 +1,11 @@
 # Grafana Alloy -- workstation-plan phase 24, the log collector.
 #
-# Wave 23, the SAME wave as logging.yaml rather than behind it. Alloy does
-# not gate on Loki: if Loki is not yet serving, loki.write retries with
-# backoff and Alloy reports Healthy either way, so stacking a wave here
-# would be the habit redis.yaml warns against. It needs no
-# CRD either -- crds.create is false in its values.
+# Ships pod logs to Grafana Cloud Loki; there is no in-cluster log store.
 #
-# Separate from logging.yaml because it is a separate chart, pinned
-# separately. Argo CD renders one chart per Application, and pinning the
-# collector independently of the store is the point.
+# Wave 23: at or above 22, the floor vso-config.yaml establishes for anything
+# that depends on a human having run platform/vault/configure-vault.sh -- the
+# Grafana Cloud credential does. It needs no CRD -- crds.create is false in
+# its values.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -23,8 +20,7 @@ spec:
       chart: alloy
       targetRevision: 1.12.1
       helm:
-        # Pinned for the same reason logging.yaml pins its own: it prefixes
-        # every object the chart creates, and the ServiceMonitor in
+        # Pinned deliberately: it prefixes every object the chart creates, and the ServiceMonitor in
         # observability/monitoring/targets/alloy.yaml selects the resulting
         # Service `alloy` by name.
         releaseName: alloy
@@ -33,6 +29,13 @@ spec:
     - repoURL: git@github.com:Slqzeer/homelab.git
       targetRevision: main
       ref: values
+    # The Grafana Cloud credential is not part of the chart. path is
+    # .../alloy/config -- NOT .../alloy, which also holds values.yaml, and a
+    # Helm values file has no kind. Same split as observability/monitoring/
+    # config.
+    - repoURL: git@github.com:Slqzeer/homelab.git
+      targetRevision: main
+      path: observability/logging/alloy/config
   destination:
     server: https://kubernetes.default.svc
     namespace: logging

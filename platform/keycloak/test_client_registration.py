@@ -477,11 +477,13 @@ class ClientRegistrationTests(unittest.TestCase):
                         "kubernetes.io/metadata.name", "keycloak"), ingress["ports"][0]["port"]))
         self.assertIn(("tailscale", 8080), grants)
         self.assertIn(("monitoring", 9000), grants)
-        self.assertIn(("monitoring", 8080), grants)
+        # Grafana, the one in-cluster consumer of 8080 from `monitoring`, moved
+        # to Grafana Cloud; only the metrics scrape on 9000 remains.
+        self.assertNotIn(("monitoring", 8080), grants)
         self.assertIn(("keycloak", 8080), grants)
         self.assertIn(("portal", 8080), grants)
         self.assertIn(("nextcloud", 8080), grants)
-        self.assertEqual(6, len(grants))
+        self.assertEqual(5, len(grants))
 
 
 if __name__ == "__main__":

@@ -3,9 +3,9 @@
 # platform/keycloak/config/networkpolicy.yaml shape.
 #
 # Parties: tailnet proxy -> edge; edge -> services; auth-service ->
-# Keycloak 8080 back-channel (tailnet DNS unresolvable in-cluster, same as
-# Grafana); services -> postgres.databases 5432, valkey 6379, nats 4222;
-# Prometheus (monitoring ns) scrapes edge + services metrics ports.
+# Keycloak 8080 back-channel (tailnet DNS unresolvable in-cluster);
+# services -> postgres.databases 5432, valkey 6379, nats 4222;
+# The Prometheus agent (monitoring ns) scrapes edge + services metrics ports.
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -288,7 +288,8 @@ spec:
               kubernetes.io/metadata.name: monitoring
           podSelector:
             matchLabels:
-              app.kubernetes.io/name: prometheus
+              # prometheus-agent, not prometheus: agent mode since 2026-10-05.
+              app.kubernetes.io/name: prometheus-agent
               operator.prometheus.io/name: monitoring-kube-prometheus-prometheus
       ports:
         - protocol: TCP

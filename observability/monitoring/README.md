@@ -1,215 +1,139 @@
-# Monitoring — Prometheus and Grafana
+# Monitoring — Prometheus agent to Grafana Cloud
 
-`kube-prometheus-stack`, covering workstation-plan phases 22 (Prometheus) and
-23 (Grafana), delivered as one Helm release because Grafana is a subchart of
-the same chart — see decision P2. Design:
-`docs/superpowers/specs/2026-09-18-monitoring-stack-design.md`. Verified and
-measured on 2026-09-19; the figures in this file come from that pass, not
-from the spec's budget.
-
-Two Applications, split on the CRD boundary the way `vso-operator`/
-`vso-config` already are (P11):
+`kube-prometheus-stack`, covering workstation-plan phases 22 and 23. Since
+2026-10-05 nothing here stores or serves metrics: Prometheus runs in
+**agent mode** (scrape and `remote_write` only) and ships an allowlisted
+subset to **Grafana Cloud**, where dashboards, Explore and alerting live.
+The Grafana subchart, the local TSDB and the in-cluster Loki were removed to
+free about 1.1Gi of RAM on this single node. Original design:
+`docs/superpowers/specs/2026-09-18-monitoring-stack-design.md`; the local
+Grafana/Prometheus documentation is in git history before that date.
 
 ```text
 Argo CD
 ├── monitoring            wave 23   ns monitoring
 │   ├── kube-prometheus-stack chart  ($values -> observability/monitoring/values.yaml)
 │   │     ├── prometheus-operator + CRDs
-│   │     ├── Prometheus  -> PVC 20Gi (local-path) -> /srv/kubernetes/storage
-│   │     ├── Grafana     -> emptyDir, provisioned from ConfigMaps
+│   │     ├── PrometheusAgent  -> remote_write -> Grafana Cloud (allowlist)
 │   │     ├── kube-state-metrics
 │   │     └── node-exporter (DaemonSet, one node)
-│   └── observability/monitoring/config/   VSO path for Secret grafana-admin
+│   └── observability/monitoring/config/   VSO path for Secret grafana-cloud
 │
 └── monitoring-config     wave 24   (every manifest carries an explicit namespace)
     ├── ServiceMonitor  argocd-application-controller / -server / -repo-server   ns argocd
-    ├── ServiceMonitor  vault                                          ns vault
-    ├── HelmChartConfig traefik + ServiceMonitor                       ns kube-system
+    ├── ServiceMonitor  vault, keycloak, alloy, tle-dev, traefik
     ├── postgres-exporter + role Job + VSO path + ServiceMonitor       ns databases
     └── redis-exporter + ServiceMonitor                                ns databases
 ```
 
-`monitoring` installs the CRDs `monitoring-config`'s ServiceMonitors need, so
-it must land first; `monitoring-config` depends on nothing else and nothing
-depends on it, which is why observability sits at the far end of the wave
-order rather than gating anything.
+Logs follow the same path through Alloy; see
+`observability/logging/README.md`.
 
 | | |
 | --- | --- |
 | Chart | `kube-prometheus-stack` 91.4.1 (`prometheus-community`) |
 | prometheus-operator | v0.94.0 |
-| Grafana subchart | 13.2.5 |
-| Prometheus UI | port-forward only — see below |
-| Grafana UI | <https://grafana.taildf6cd4.ts.net> |
+| Dashboards, Explore, alerting | Grafana Cloud stack, login with the grafana.com account |
+| Cluster label | every series and log stream carries `cluster="homelab"` |
 
-- `values.yaml` — the chart's Helm values, applied by the `monitoring`
-  Application. **Not** a Kubernetes manifest.
-- `config/` — the VaultStaticSecret path for Grafana's admin credential.
-- `targets/` — every ServiceMonitor and its exporter, applied by
-  `monitoring-config`. One file per integration, each independently
-  revertible (see "Rolling back Traefik" below).
+## Grafana Cloud
 
-## A dashboard edited in the Grafana UI does not survive a restart
+### Free-tier budget
 
-Decision P4: Grafana runs with `persistence.enabled: false`.
-`/var/lib/grafana` is an `emptyDir`, and the SQLite database it holds —
-dashboards, folders, anything clicked together in the UI — is deleted the
-moment the pod is replaced. This is the design, not a defect: plan §26 asks
-for configuration that is declarative and versioned in git, and a PVC would
-quietly make the running cluster authoritative over git instead (spec §3,
-rejected alternatives).
+The free tier caps active metric series (about 10k at the time of writing;
+re-check the current limits). The old local Prometheus held **~47k** series,
+so shipping everything would not fit. `values.yaml` therefore keeps an
+**allowlist** of metric names on the `remote_write`; everything else is
+scraped and dropped. Measured against the old TSDB on 2026-10-05, the
+allowlist selects **~1.3k series**: per-container CPU/memory/network, pod
+and workload state from kube-state-metrics, node CPU/memory/disk/pressure,
+PVC usage, `up` for every target, and the health gauges of each exporter
+(`pg_*`, `redis_*`, `vault_core_unsealed`, `argocd_app_info`, Keycloak,
+Traefik, the portal, Alloy's log shipping, the agent's own remote-write
+health).
 
-**Anything that must survive a restart has to exist as a file in this
-repository.** A new dashboard is a ConfigMap labelled `grafana_dashboard:
-"1"` — the sidecar's label discovery (`grafana.sidecar.dashboards`) picks it
-up from any namespace with no other change. A dashboard built by hand in the
-web UI and never exported to a ConfigMap is gone the next time the pod
-restarts for any reason — an OOMKill, a node drain, a chart upgrade.
+The apiserver job (13.5k series alone) is **not scraped** at all
+(`kubeApiServer.enabled: false`): an agent pays memory for every series it
+scrapes, shipped or not.
 
-That restart is not free, either: bringing Grafana back cold takes roughly
-**4 minutes** (measured on the Task 10 pod deletion) and re-provisions all 24
-dashboards from ConfigMaps in one burst, which was the OOMKill this phase
-found — see "Memory" below.
+To add a metric: check its cardinality first, then add its NAME to the
+allowlist regex. Never widen the allowlist to a job or namespace wildcard —
+it is the only thing between this cluster and the series cap. In Grafana
+Cloud, *Administration → Cost management → Usage* shows the live count.
 
-## Logging into Grafana
+### Credential
 
-The admin credential lives in Vault and reaches the cluster as the
-`grafana-admin` Secret via VSO (see `config/vault-secrets.yaml`). Read it
-back with:
+Vault path `homelab/grafana-cloud`, three keys:
 
-```bash
-sg k3s-admin -c 'kubectl -n monitoring get secret grafana-admin -o jsonpath="{.data.admin-password}"' | base64 -d
-```
+| Key | Value |
+| --- | --- |
+| `metrics-username` | the stack's Prometheus instance ID (grafana.com → stack → Prometheus → Details) |
+| `logs-username` | the stack's Loki instance ID (stack → Loki → Details) |
+| `token` | an access-policy token with `metrics:write` and `logs:write` scopes only |
 
-Username is `admin`.
-
-### Keycloak SSO, phase 25
-
-Grafana is the first OIDC client at
-<https://grafana.taildf6cd4.ts.net>. The local admin form stays enabled as
-the recovery route; Argo CD is deliberately not an OIDC client yet.
-`values.yaml` supplies `grafana.grafana.ini.auth.generic_oauth`: client
-`grafana`, scopes `openid profile email groups`, and Keycloak's `homelab`
-endpoints. The browser-facing authorization endpoint uses tailnet HTTPS.
-The token and userinfo back-channels use
-`http://keycloak.keycloak.svc.cluster.local:8080`: CoreDNS does not resolve
-the Tailscale MagicDNS name from Grafana's pod. `homelab-admins` maps to
-organization Admin, everyone else to Viewer; `allow_assign_grafana_admin:
-false` reserves server-admin access for the local account. CI parses the
-values with `test_oauth_routing.py` to preserve this routing split.
-
-`grafana.ini.server.root_url: https://grafana.taildf6cd4.ts.net` is
-**required, not cosmetic**. Grafana constructs its OIDC callback from it;
-without it, an `http://` redirect can be generated and rejected by
-Keycloak. It must agree with the client's exact HTTPS callback
-`https://grafana.taildf6cd4.ts.net/login/generic_oauth`.
-
-`GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET` comes from the `keycloak-grafana`
-Secret via `envValueFrom.secretKeyRef`, never from the rendered ConfigMap.
-The issuer-generated value needs the paste ceremony in
-`platform/keycloak/README.md`; VSO refreshing the Secret alone does not
-reload an environment variable, so restart Grafana after it lands.
-`invalid_client` means to check this path; `user email is not found` means
-the Keycloak user needs an email address. All `homelab` users enrol TOTP.
-
-**`values.yaml` is excluded from kubeconform.** CI checks its YAML syntax
-with yamllint, but `helm template` is the only rendering gate on this OIDC
-edit. Before changing it, render both the ConfigMap and Deployment from
-the pinned chart:
+`configure-vault.sh` seeds placeholders; the real values are pasted in once,
+the same way as the GHCR token. VSO projects two Secrets named
+`grafana-cloud`, one in `monitoring` (for the agent) and one in `logging`
+(for Alloy), each carrying only its own `username` plus the token.
 
 ```bash
-helm template monitoring prometheus-community/kube-prometheus-stack --version 91.4.1 -n monitoring -f observability/monitoring/values.yaml --show-only charts/grafana/templates/configmap.yaml --show-only charts/grafana/templates/deployment.yaml
+sg k3s-admin -c 'kubectl -n vault exec -it vault-0 -- vault login'
+sg k3s-admin -c 'kubectl -n vault exec -it vault-0 -- sh'
+# inside vault-0 -- echo off, so the token never reaches the screen or history:
+stty -echo; printf 'token: '; read T; stty echo; echo
+printf '%s' "$T" > /tmp/t
+vault kv put homelab/grafana-cloud metrics-username=<id> logs-username=<id> token=@/tmp/t
+rm -f /tmp/t; unset T; exit
+sg k3s-admin -c 'kubectl -n vault exec vault-0 -- rm -f /home/vault/.vault-token'
 ```
 
-Check `[auth.generic_oauth]`, the external `auth_url`, both internal
-back-channel URLs and `[server]` `root_url`, then the environment variable's
-Secret reference. The ConfigMap must not contain a `client_secret` value.
+The agent picks a rotated token up on its next config reload; VSO restarts
+the Alloy DaemonSet itself (`rolloutRestartTargets`).
 
-### Rotating the local admin password
+### Checking that data arrives
 
-Grafana keeps no copy of its admin password to go stale, for the same
-reason a dashboard clicked together in the UI does not survive a restart:
-decision P4 gives it no PVC. `admin.existingSecret: grafana-admin` (see
-`values.yaml`) means the container reads this Secret fresh on every cold
-start and re-applies it as the admin credential each time. Rotating the
-value in Vault takes effect on Grafana's next restart, full stop; there is
-no ordering trap and no stranded-admin recovery path.
+Every Application reports Healthy even with a placeholder or revoked token,
+so check the data, not Argo CD:
 
-## Reaching Prometheus — port-forward, not Ingress
+- In Grafana Cloud Explore: `up{cluster="homelab"}` returns one series per
+  target, and `{cluster="homelab"}` in Loki returns recent logs.
+- In the cluster: the agent's own counter
+  `prometheus_remote_storage_samples_failed_total` stays flat. Its logs show
+  `401` on a bad credential:
+  `sg k3s-admin -c 'kubectl -n monitoring logs prom-agent-monitoring-kube-prometheus-prometheus-0 -c prometheus --tail=50'`.
 
-There is deliberately no Ingress for Prometheus. It has no authentication of
-any kind, and `infrastructure/networking/policy.hujson` is currently a
-single `{"src": ["*"], "dst": ["*"], "ip": ["*"]}` grant — publishing it
-would put its admin API in front of every device on the tailnet (spec P9).
-`infrastructure/ingress/config/grafana-ingress.yaml` points here for the
-command:
+### What leaves the homelab
 
-```bash
-sg k3s-admin -c 'kubectl -n monitoring port-forward svc/monitoring-kube-prometheus-prometheus 9090:9090'
-```
+Metric values and pod logs are sent to Grafana Labs. Logs are not filtered
+for content; a service that logs a secret sends it off-site. Keep secrets out
+of logs at the source, and drop a namespace in Alloy's pipeline if that ever
+cannot be guaranteed.
 
-Then `http://localhost:9090`. Grafana, which does have authentication, is
-published on the tailnet instead (P9) — that asymmetry is deliberate, not an
-oversight.
+### The scraper's pod labels changed
 
-## Memory: measured against the budget
-
-Taken with `kubectl top` on 2026-09-19, once all 18 targets were confirmed
-`up` and immediately after the Task 10 restart tests — so Grafana's row
-reflects a cold start, not idle steady state.
-
-| Component | Spec §5 request | Spec §5 limit | Spec §5 expected steady state | Measured |
-| --- | --- | --- | --- | --- |
-| Prometheus | 512Mi | 2Gi | 700Mi–1.2Gi at ~15 targets | 624Mi at 18 targets |
-| Grafana (grafana container) | 128Mi | 256Mi | ~120Mi | **252Mi** (98% of the pre-fix 256Mi limit — see below) |
-| kube-state-metrics | 64Mi | 128Mi | ~60Mi | 30Mi |
-| node-exporter | 32Mi | 64Mi | ~30Mi | 12Mi |
-| prometheus-operator | 64Mi | 128Mi | ~60Mi | 33Mi |
-| postgres-exporter | 32Mi | 64Mi | ~25Mi | 9Mi |
-| redis-exporter | 16Mi | 32Mi | ~15Mi | 10Mi |
-
-Stack total: roughly **1.1Gi** across all seven pods, against the spec's
-~1.0–1.6Gi expected range — inside the estimate, with everything but Grafana
-running well under it.
-
-**Grafana was the one figure the spec got wrong, and it did so in a way that
-actually mattered.** The `grafana` container's `lastState` showed
-`reason=OOMKilled, exitCode=137`, and its two sidecars — `grafana-sc-dashboard`
-and `grafana-sc-datasources` — had **no resources block at all** (chart
-default `{}`), measured at 79Mi and 77Mi, unbounded. Both are now fixed in
-`values.yaml`: `grafana.resources.limits.memory` raised to 512Mi, and
-`grafana.sidecar.resources` set with a memory limit. The mechanism, recorded
-in the values file: no PVC (P4) means every restart is a cold start that
-rebuilds SQLite and re-provisions 24 dashboards in one burst, and that burst
-is the memory peak — so statelessness guarantees a spike on exactly the
-event a tight limit is most likely to kill it on. The cold-start cost itself
-is not removed by the fix; only the OOMKill is.
-
-Node total at measurement time: 1183m CPU (9%), 11391Mi memory (71%).
-Allocated: requests 4092Mi (25%), limits 10602Mi (66%) — 4Gi still
-available. Host: 15Gi total, 11Gi used. `/srv`: 938G total, 850G free.
-
-**`local-path`'s StorageClass has `ALLOWVOLUMEEXPANSION: false`.** The 20Gi
-Prometheus PVC can never be grown in place. Outgrowing it means recreating
-the volume, which means losing history — `retentionSize: 12GiB` (P8) is
-therefore the real, load-bearing bound on disk use, not the 20Gi request,
-which spec §5.1 already calls nominal against 850G free.
+In agent mode the operator labels pods `app.kubernetes.io/name:
+prometheus-agent` (not `prometheus`); `operator.prometheus.io/name` is
+unchanged. The NetworkPolicies that admit the scraper by pod label
+(`tle-dev-metrics`, `keycloak-metrics`) select the new value. A new policy
+that admits the scraper must do the same.
 
 ## Scrape integrations
 
 The table below records the original five integrations at the phase-22/23
-measurement date. Phase 24 added Loki and Alloy as integrations 6 and 7;
+measurement date. Phase 24 added Loki and Alloy as integrations 6 and 7
+(Loki was removed with the move to Grafana Cloud);
 phase 25 adds **Keycloak as integration 8**, in `targets/keycloak.yaml`.
 Its ServiceMonitor scrapes `/metrics` on the Service's management port
 9000 in namespace `keycloak`, not the application port 8080 exposed by the
 Ingress. `monitoring-config` ships it at wave 24 and can apply before
 Keycloak's Service exists; it acquires a target when the Service appears.
-Check that target is UP in Prometheus. The new database NetworkPolicies
+Check `up{job="keycloak"}` in Grafana Cloud. The new database NetworkPolicies
 were accepted live on 2026-09-20 with `pg_up=1` and `redis_up=1`; preserving
 the exporters' access and cross-namespace scrape ports is part of the fence.
 
-Each proven live with one PromQL query against the port-forwarded Prometheus
-above, 2026-09-19:
+Each proven live with one PromQL query against the then-local Prometheus,
+2026-09-19. Every metric below except `traefik_config_reloads_total` is in
+the Grafana Cloud allowlist:
 
 | Target | ServiceMonitor | Query | Result |
 | --- | --- | --- | --- |
@@ -221,10 +145,7 @@ above, 2026-09-19:
 
 All 18 active targets are `up`; there are no ghost jobs for
 `kube-scheduler`, `kube-controller-manager`, `kube-proxy` or `etcd` — the
-result decision P6 was written to guarantee. Prometheus was also restarted
-mid-verification (pod deleted, recreated on the same PVC) and a query at the
-pre-restart timestamp still returned data — the 20Gi `local-path` volume is
-genuinely persisting history, not silently starting empty on every restart.
+result decision P6 was written to guarantee.
 
 **All six CRD selectors are open, not just the original four.** `values.yaml`
 sets `serviceMonitorSelectorNilUsesHelmValues: false`,
@@ -232,7 +153,7 @@ sets `serviceMonitorSelectorNilUsesHelmValues: false`,
 `podMonitorSelectorNilUsesHelmValues: false`,
 `probeSelectorNilUsesHelmValues: false` and
 `scrapeConfigSelectorNilUsesHelmValues: false` — every ServiceMonitor,
-PodMonitor, PrometheusRule, Probe and ScrapeConfig in the cluster is picked
+PodMonitor, Probe and ScrapeConfig in the cluster is picked
 up regardless of label. The chart does expose the equivalent
 nil-uses-helm-values toggle for `Probe` and `ScrapeConfig` (91.4.1's
 `values.yaml`, lines 4714 and 4739, defaulting `true`); this repo does not
@@ -243,24 +164,17 @@ silently ignored.
 
 ## What is deliberately absent
 
-- **Alertmanager.** Decision P3 — no notification destination exists yet.
-  The stack's ~30 default alert rules still load and evaluate in
-  Prometheus; only delivery is missing. The Grafana datasource that would
-  have pointed at it is explicitly disabled too (`values.yaml`,
-  `grafana.sidecar.datasources.alertmanager.enabled: false`) — otherwise it
-  provisions against a Service that does not exist.
+- **Alertmanager and rules.** An agent evaluates no rules, so
+  `defaultRules.create: false` and Alertmanager stays off. Alerting, when it
+  is set up, is configured in Grafana Cloud against the shipped series.
 - **The k3s control-plane scrapers** — `kubeScheduler`, `kubeControllerManager`,
   `kubeProxy`, `kubeEtcd`. Decision P6. On this single-node k3s cluster
   these run as goroutines inside one process bound to `127.0.0.1`; turning
   them on is a host-root systemd edit, an operator hand-off deliberately not
   taken here.
-- **Curated dashboards.** Decision P7. The ~24 built-in dashboards the chart
-  ships cover the CPU/RAM/nodes/pods/Kubernetes list plan §25 asked for.
-  This phase proves the pipe; curation is a later, one-file commit.
-- **Any backup of metrics.** Decision P18. Plan §32 lists what this homelab
-  backs up, and metrics history is not on it. A lost Prometheus volume
-  costs history and nothing else; everything else here is reconstructed
-  from git.
+- **Local dashboards and history.** Grafana Cloud's Kubernetes Monitoring
+  app provides the dashboards; history is Grafana Cloud's retention, not a
+  local volume.
 
 ## Re-syncing `monitoring-config` — a hook-only edit does not trigger a sync
 
