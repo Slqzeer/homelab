@@ -127,21 +127,13 @@ Secret reference. The ConfigMap must not contain a `client_secret` value.
 
 ### Rotating the local admin password
 
-`platform/nexus/README.md`'s "Rotating the admin password, and the ordering
-trap" section sets the house convention for this kind of credential, and it
-is worth reading before assuming the same trap applies here — **it does
-not.** Nexus keeps its own password hash inside an H2 database it owns, so a
-value changed in Vault sits inert until the bootstrap Job re-runs and
-explicitly pushes it to the running server; discard the old password before
-that re-run happens and the account is stranded. Grafana has no such state
-to go stale, for the same reason a dashboard clicked together in the UI
-does not survive a restart: decision P4 gives it no PVC. `admin.
-existingSecret: grafana-admin` (see `values.yaml`) means the container reads
-this Secret fresh on every cold start and re-applies it as the admin
-credential each time — there is nothing analogous to Nexus's embedded
-database to fall out of sync. Rotating the value in Vault takes effect on
-Grafana's next restart, full stop; none of the Nexus ordering trap, and
-none of its stranded-admin recovery path, applies here.
+Grafana keeps no copy of its admin password to go stale, for the same
+reason a dashboard clicked together in the UI does not survive a restart:
+decision P4 gives it no PVC. `admin.existingSecret: grafana-admin` (see
+`values.yaml`) means the container reads this Secret fresh on every cold
+start and re-applies it as the admin credential each time. Rotating the
+value in Vault takes effect on Grafana's next restart, full stop; there is
+no ordering trap and no stranded-admin recovery path.
 
 ## Reaching Prometheus — port-forward, not Ingress
 
@@ -265,8 +257,6 @@ silently ignored.
 - **Curated dashboards.** Decision P7. The ~24 built-in dashboards the chart
   ships cover the CPU/RAM/nodes/pods/Kubernetes list plan §25 asked for.
   This phase proves the pipe; curation is a later, one-file commit.
-- **Nexus metrics.** Its Prometheus endpoint requires authentication and a
-  CE capability check — worth pulling only if something needs it.
 - **Any backup of metrics.** Decision P18. Plan §32 lists what this homelab
   backs up, and metrics history is not on it. A lost Prometheus volume
   costs history and nothing else; everything else here is reconstructed
@@ -293,16 +283,15 @@ kubectl -n argocd exec deploy/argocd-server -- argocd app sync monitoring-config
 **This fails on this cluster** — `argocd-server`'s own ServiceAccount cannot
 list `services` in the `argocd` namespace, which `--core` mode needs to talk
 to the API server directly. What works instead is patching the
-Application's `operation` field directly, the same recipe
-`platform/nexus/README.md` documents for the `nexus-bootstrap` Job:
+Application's `operation` field directly:
 
 ```bash
 sg k3s-admin -c 'kubectl -n argocd patch application monitoring-config --type merge -p "{\"operation\":{\"sync\":{\"syncStrategy\":{\"hook\":{}}}}}"'
 ```
 
 Then confirm the Job actually re-ran by its `creationTimestamp`, not by the
-Application's status — the same false-pass the Nexus README warns about
-applies here too. This cost a real debugging session on this phase; anyone
+Application's status: an Application can report a successful sync while
+the hook Job it should have replaced is still the old one. This cost a real debugging session on this phase; anyone
 who needs to re-run `postgres-exporter-role` after editing it should start
 from the patch above, not from `argocd app sync`.
 

@@ -1,9 +1,9 @@
 # Loki -- workstation-plan phase 24, the log store.
 #
-# Wave 23 -- the SAME wave as monitoring, postgres, redis, registry and
-# nexus. NOT a new wave behind them, and the distinction matters.
+# Wave 23 -- the SAME wave as monitoring, postgres, redis and registry.
+# NOT a new wave behind them, and the distinction matters.
 #
-# redis.yaml and nexus.yaml both warn against stacking a wave "out of
+# redis.yaml warns against stacking a wave "out of
 # habit": sharing one means these reconcile in parallel and none gates
 # another. Applying that test here, Loki gates on nothing at wave 23 --
 # auth_enabled is false so there is no Vault credential and the wave-22

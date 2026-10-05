@@ -580,7 +580,6 @@ class PortalIngressPublicationTests(unittest.TestCase):
             "groups",
             "homelab-admins,homelab-users",
         ),
-        ("artifacts", "nexus"): ("Nexus", "groups", "homelab-admins"),
         ("keycloak", "keycloak"): ("Keycloak", "groups", "homelab-admins"),
     }
 

@@ -2,8 +2,8 @@
 # node-exporter. Workstation-plan phases 22 and 23, merged -- Grafana is a
 # subchart, so splitting them means installing the chart twice.
 #
-# Wave 23 -- the SAME wave as postgres, redis, registry and nexus, not 24.
-# This depends on none of them, and both redis.yaml and nexus.yaml warn
+# Wave 23 -- the SAME wave as postgres, redis and registry, not 24.
+# This depends on none of them, and redis.yaml warns
 # against stacking a wave "out of habit": sharing one means these reconcile
 # in parallel and none gates another.
 #
