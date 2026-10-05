@@ -6,7 +6,7 @@ sync, with no human ever copying it by hand:
 ```
 Vault KV v2            Vault Secrets Operator          Kubernetes Secret         Workload
 homelab/data/canary  →  authenticates via k8s SA   →   vault-canary (ns vault)  →  mounts/env
-                         polls every refreshAfter=60s
+                         polls every refreshAfter=300s
 ```
 
 Chart `hashicorp/vault-secrets-operator` 1.5.1 (app 1.5.1), from
@@ -80,7 +80,19 @@ secret's namespace."
 | `ServiceAccount` | `vault-canary` | The identity Vault actually trusts |
 | `VaultConnection` | `vault` | Where Vault is: `http://vault.vault.svc:8200` |
 | `VaultAuth` | `vault-canary` | How to authenticate: `kubernetes` mount, role `vso-canary`, this ServiceAccount, audience `vault` |
-| `VaultStaticSecret` | `vault-canary` | What to fetch: `homelab` mount, `kv-v2`, path `canary`, `refreshAfter: 60s` |
+| `VaultStaticSecret` | `vault-canary` | What to fetch: `homelab` mount, `kv-v2`, path `canary`, `refreshAfter: 300s` |
+
+**`refreshAfter` is 300s on every `VaultStaticSecret` in this repository,
+not 60s.** Each poll rewrites the object's `Healthy` and `Ready` conditions
+with a fresh timestamp even when the secret is unchanged, so every poll is a
+status write: an apiserver/kine write and a watch event that Argo CD's
+application controller has to process. At 60s across 19 secrets that was
+about 27,000 events a day, and the dominant churn in the controller (235k
+`VaultStaticSecret` events against 1,086 cached objects, measured
+2026-10-05). The cost of 300s is propagation latency: a value changed in
+Vault reaches its Secret within five minutes instead of one. Use the same
+value for new secrets; to push a change sooner, edit the
+`VaultStaticSecret` (any spec change triggers an immediate sync).
 
 The `ServiceAccount` is listed here rather than treated as scaffolding
 because it is the thing authenticated, not incidental plumbing. VSO's

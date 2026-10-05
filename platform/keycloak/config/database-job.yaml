@@ -44,7 +44,7 @@ spec:
   mount: homelab
   type: kv-v2
   path: keycloak-db
-  refreshAfter: 60s
+  refreshAfter: 300s
   destination:
     name: keycloak-db
     create: true

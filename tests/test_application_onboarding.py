@@ -536,7 +536,7 @@ class PortalRegistrationTests(unittest.TestCase):
         self.assertEqual("vso-portal", vault_auth["spec"]["kubernetes"]["role"])
         self.assertEqual("homelab-portal", vault_auth["spec"]["kubernetes"]["serviceAccount"])
         self.assertEqual("portal", portal_secret["spec"]["path"])
-        self.assertEqual("60s", portal_secret["spec"]["refreshAfter"])
+        self.assertEqual("300s", portal_secret["spec"]["refreshAfter"])
         destination = portal_secret["spec"]["destination"]
         self.assertEqual("homelab-portal-secrets", destination["name"])
         transformation = destination["transformation"]
@@ -558,7 +558,7 @@ class PortalRegistrationTests(unittest.TestCase):
         ghcr_secret = secrets["ghcr-pull"]
         self.assertEqual("homelab-portal", ghcr_secret["spec"]["vaultAuthRef"])
         self.assertEqual("ghcr", ghcr_secret["spec"]["path"])
-        self.assertEqual("60s", ghcr_secret["spec"]["refreshAfter"])
+        self.assertEqual("300s", ghcr_secret["spec"]["refreshAfter"])
         ghcr_destination = ghcr_secret["spec"]["destination"]
         self.assertEqual("ghcr-pull", ghcr_destination["name"])
         self.assertEqual(
