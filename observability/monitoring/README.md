@@ -102,6 +102,21 @@ so check the data, not Argo CD:
   `401` on a bad credential:
   `sg k3s-admin -c 'kubectl -n monitoring logs prom-agent-monitoring-kube-prometheus-prometheus-0 -c prometheus --tail=50'`.
 
+### Dashboards and where the data is
+
+The stack's built-in dashboards target Grafana Cloud's own integrations and
+stay empty here: this cluster ships kube-prometheus-stack job names
+(`kubelet`, `kube-state-metrics`, ...) and only the allowlisted metrics.
+`dashboards/homelab-overview.json` is built from exactly those metrics plus
+the logs. Import it in the stack's Grafana: *Dashboards → New → Import →
+Upload JSON file*. Its two datasource pickers default to the stack's
+`grafanacloud-*-prom` and `grafanacloud-*-logs`; it is versioned here, so
+edit the file and re-import rather than editing in the UI.
+
+Ad hoc: *Explore* with the `…-prom` datasource (`up{cluster="homelab"}`) or
+the `…-logs` datasource (`{cluster="homelab"}`), or *Drilldown → Logs* to
+browse streams without writing a query.
+
 ### What leaves the homelab
 
 Metric values and pod logs are sent to Grafana Labs. Logs are not filtered
