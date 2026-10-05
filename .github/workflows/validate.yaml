@@ -33,6 +33,9 @@ jobs:
       - name: Validate application onboarding contract
         run: python3 -m unittest -v tests.test_application_onboarding
 
+      - name: Validate metric allowlist on every scrape
+        run: python3 -m unittest -v tests.test_metric_allowlist
+
       - name: Validate Keycloak client registration
         run: python3 platform/keycloak/test_client_registration.py -v
 
@@ -73,6 +76,11 @@ jobs:
         # are added -- a directory list would need editing every phase and
         # would fail open when someone forgot.
         #
+        # It also excludes observability/monitoring/dashboards/*.json: Grafana
+        # dashboard JSON imported by hand into Grafana Cloud, not a manifest.
+        # Matched by that directory, so a JSON manifest elsewhere is still
+        # validated.
+        #
         # The second -schema-location supplies CRD schemas. The CRDs this
         # repository uses are all in the datreeio catalog: Application,
         # VaultAuth, VaultConnection, VaultStaticSecret, ProxyClass, and as
@@ -84,6 +92,7 @@ jobs:
           ./kubeconform -strict -summary \
             -kubernetes-version 1.36.0 \
             -ignore-filename-pattern 'values\.yaml$' \
+            -ignore-filename-pattern 'observability/monitoring/dashboards/.*\.json$' \
             -schema-location default \
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             bootstrap environments infrastructure observability platform rendered
@@ -95,6 +104,7 @@ jobs:
         run: |
           ./kubeconform -summary -kubernetes-version 1.36.0 \
             -ignore-filename-pattern 'values\.yaml$' \
+            -ignore-filename-pattern 'observability/monitoring/dashboards/.*\.json$' \
             -schema-location default \
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             bootstrap environments infrastructure observability platform rendered \

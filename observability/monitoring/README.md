@@ -52,12 +52,21 @@ PVC usage, `up` for every target, and the health gauges of each exporter
 Traefik, the portal, Alloy's log shipping, the agent's own remote-write
 health).
 
-The apiserver job (13.5k series alone) is **not scraped** at all
-(`kubeApiServer.enabled: false`): an agent pays memory for every series it
-scrapes, shipped or not.
+The allowlist is applied at **scrape** time, not only on the
+`remote_write`: an agent holds every series it scrapes in its WAL, shipped
+or not (24k scraped for 1.3k shipped before this, heap ~250MB and
+climbing). It is defined once as the `&metricAllowlist` anchor in
+`values.yaml` and reused by alias on every chart ServiceMonitor and on the
+`remote_write`. The ServiceMonitors in `targets/` carry a managed copy,
+written by `scripts/sync_metric_allowlist.py`;
+`tests/test_metric_allowlist.py` fails CI if any scrape lacks it or a copy
+has drifted. The apiserver job (13.5k series alone) is not scraped at all.
 
-To add a metric: check its cardinality first, then add its NAME to the
-allowlist regex. Never widen the allowlist to a job or namespace wildcard —
+To add a metric: check its cardinality, add its NAME to the anchor in
+`values.yaml`, run `python3 scripts/sync_metric_allowlist.py`, commit both.
+A new ServiceMonitor in `targets/` gets its copy from the same script. This
+includes TLE: a metric a TLE service exports reaches Grafana Cloud only once
+its name is here. Never widen the allowlist to a job or namespace wildcard —
 it is the only thing between this cluster and the series cap. In Grafana
 Cloud, *Administration → Cost management → Usage* shows the live count.
 

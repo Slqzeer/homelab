@@ -41,34 +41,86 @@ kubeProxy:
 kubeEtcd:
   enabled: false
 
-# Cardinality. Measured 2026-10-05: 129k head series, Prometheus at ~800Mi.
-# The kubelet and apiserver jobs held 104k of them, and 85k of those were
-# read by no rule and no dashboard.
+# THE METRIC ALLOWLIST, applied at SCRAPE time on every endpoint.
 #
-# k3s runs the apiserver, etcd (kine), scheduler and controllers in the SAME
-# process as the kubelet, with one shared metrics registry. The kubelet's
-# /metrics endpoint therefore re-exports the whole control plane, and every
-# apiserver_*/etcd_*/workqueue_* series was scraped twice: once here and once
-# by the apiserver job. No rule or dashboard selects those families with
-# job="kubelet" (checked against every PrometheusRule and Grafana dashboard
-# ConfigMap), so they are dropped on the kubelet's /metrics endpoint only.
-# rest_client_*, go_*, process_* and storage_* stay: the kubelet dashboard
-# reads its own copies of those.
+# Defined once here as the YAML anchor &metricAllowlist and reused by alias
+# (*metricAllowlist) on every chart ServiceMonitor below and on the
+# remote_write. ServiceMonitors in observability/monitoring/targets/ are
+# separate manifests and cannot use the alias, so they carry a verbatim copy;
+# tests/test_metric_allowlist.py fails CI if any copy differs from this one.
 #
-# Setting metricRelabelings REPLACES the chart's defaults, so each list
-# starts with the chart 91.4.1 default verbatim. Re-check them on upgrade.
+# Why at scrape and not only on remote_write: an agent holds every series it
+# scrapes in its WAL, shipped or not. Measured 2026-10-05: 24k series scraped
+# for 1.3k shipped, agent heap ~250MB and climbing. Dropping at scrape keeps
+# only what is shipped. `up` and the other scrape_* series are synthetic and
+# are never affected by metric relabelling.
+#
+# To add a metric: check its cardinality, add its NAME here, done -- every
+# alias follows. Never widen it to a job or namespace wildcard: it is the only
+# thing between this cluster and the Grafana Cloud free-tier series cap.
+#
+# Setting a metricRelabelings list REPLACES the chart's defaults. The kubelet
+# and cAdvisor defaults that could still match an allowlisted name are kept
+# below the keep; the rest only dropped names the keep now drops anyway.
 kubelet:
   serviceMonitor:
     metricRelabelings:
-      # chart default
-      - action: drop
-        sourceLabels: [__name__, le]
-        regex: "(csi_operations|storage_operation_duration)_seconds_bucket;(0.25|2.5|15|25|120|\
-          600)(\\.0)?"
-      # k3s control-plane duplicates, ~53k series
-      - action: drop
+      - action: keep
         sourceLabels: [__name__]
-        regex: (apiserver|etcd|kine|lasso|scheduler|workqueue)_.*
+        regex: &metricAllowlist "up|node_cpu_seconds_total|node_load1|node_load5|node_load15\
+          |node_memory_(MemTotal|MemAvailable|SwapTotal|SwapFree)_bytes\
+          |node_filesystem_(size|avail)_bytes|node_network_(receive\
+          |transmit)_bytes_total|node_disk_(read|written)_bytes_total\
+          |node_disk_io_time_seconds_total|node_pressure_(cpu|memory\
+          |io)_waiting_seconds_total|container_cpu_usage_seconds_total\
+          |container_memory_working_set_bytes|container_network_(receive\
+          |transmit)_bytes_total|container_oom_events_total\
+          |kubelet_volume_stats_(capacity|available)_bytes\
+          |kube_pod_status_phase|kube_pod_container_status_restarts_total\
+          |kube_pod_container_status_waiting_reason\
+          |kube_pod_container_status_last_terminated_reason\
+          |kube_pod_container_resource_(requests|limits)\
+          |kube_deployment_(spec_replicas|status_replicas_available)\
+          |kube_statefulset_(replicas|status_replicas_ready)\
+          |kube_daemonset_status_(desired_number_scheduled|number_ready)\
+          |kube_node_status_(condition|allocatable|capacity)\
+          |kube_persistentvolumeclaim_status_phase|kube_job_status_failed\
+          |argocd_app_info|argocd_app_sync_total|vault_core_unsealed|pg_up\
+          |pg_database_size_bytes|pg_stat_database_(numbackends|xact_commit\
+          |xact_rollback|deadlocks)|redis_up|redis_memory_(used|max)_bytes\
+          |redis_connected_clients|redis_(keyspace_hits|keyspace_misses\
+          |evicted_keys)_total|keycloak_user_events_total\
+          |jvm_memory_used_bytes|traefik_open_connections\
+          |traefik_(entrypoint|service)_requests_total|portal_.+\
+          |loki_write_(sent_bytes|sent_entries|dropped_entries|dropped_bytes)_total\
+          |loki_source_file_files_active_total\
+          |prometheus_remote_storage_(samples_failed|samples_dropped\
+          |samples_retried)_total\
+          |prometheus_remote_storage_(highest_timestamp_in_seconds\
+          |queue_highest_sent_timestamp_seconds)"
+    probesMetricRelabelings:
+      - action: keep
+        sourceLabels: [__name__]
+        regex: *metricAllowlist
+    cAdvisorMetricRelabelings:
+      - action: keep
+        sourceLabels: [__name__]
+        regex: *metricAllowlist
+      # chart 91.4.1 defaults that can still match allowlisted container_*:
+      # network series of CNI-side interfaces, and cgroups with no pod.
+      - action: drop
+        sourceLabels: [__name__, interface]
+        regex: 'container_network_.*;(cali|cilium|cni|lxc|nodelocaldns|tunl).*'
+      - action: drop
+        sourceLabels: [id, pod]
+        regex: '.+;'
+
+coreDns:
+  serviceMonitor:
+    metricRelabelings:
+      - action: keep
+        sourceLabels: [__name__]
+        regex: *metricAllowlist
 
 # Not scraped. The apiserver job was 13.5k series, the largest single job,
 # and none of it is in the remote_write allowlist below. An agent still pays
@@ -82,6 +134,11 @@ defaultRules:
   create: false
 
 prometheusOperator:
+  serviceMonitor:
+    metricRelabelings:
+      - action: keep
+        sourceLabels: [__name__]
+        regex: *metricAllowlist
   resources:
     requests:
       cpu: 50m
@@ -107,6 +164,11 @@ prometheusOperator:
         memory: 64Mi
 
 prometheus:
+  serviceMonitor:
+    metricRelabelings:
+      - action: keep
+        sourceLabels: [__name__]
+        regex: *metricAllowlist
   # Scrape and remote_write only. The chart renders a PrometheusAgent instead
   # of a Prometheus, and its pods carry app.kubernetes.io/name=prometheus-agent
   # (operator v0.94.0) -- the NetworkPolicies that admit the scraper select
@@ -159,10 +221,9 @@ prometheus:
     # from Vault path homelab/grafana-cloud (observability/monitoring/config/
     # vault-secrets.yaml). The URL is not secret and lives here.
     #
-    # The allowlist is the ONLY thing standing between this cluster and the
-    # free tier's series cap. Add a metric name here deliberately, after
-    # checking its cardinality; never replace it with a namespace or job
-    # wildcard. Each entry is a metric NAME regex, anchored by Prometheus.
+    # The keep below is the same &metricAllowlist anchor defined at the
+    # kubelet block: with every scrape already filtered it is a backstop, and
+    # the guard for any future ServiceMonitor that forgets its own keep.
     remoteWrite:
       - name: grafana-cloud
         # The stack's Prometheus remote_write endpoint, from grafana.com ->
@@ -178,37 +239,7 @@ prometheus:
         writeRelabelConfigs:
           - action: keep
             sourceLabels: [__name__]
-            regex: "up|node_cpu_seconds_total|node_load1|node_load5|node_load15\
-            |node_memory_(MemTotal|MemAvailable|SwapTotal|SwapFree)_bytes\
-            |node_filesystem_(size|avail)_bytes|node_network_(receive\
-            |transmit)_bytes_total|node_disk_(read|written)_bytes_total\
-            |node_disk_io_time_seconds_total|node_pressure_(cpu|memory\
-            |io)_waiting_seconds_total|container_cpu_usage_seconds_total\
-            |container_memory_working_set_bytes|container_network_(receive\
-            |transmit)_bytes_total|container_oom_events_total\
-            |kubelet_volume_stats_(capacity|available)_bytes\
-            |kube_pod_status_phase|kube_pod_container_status_restarts_total\
-            |kube_pod_container_status_waiting_reason\
-            |kube_pod_container_status_last_terminated_reason\
-            |kube_pod_container_resource_(requests|limits)\
-            |kube_deployment_(spec_replicas|status_replicas_available)\
-            |kube_statefulset_(replicas|status_replicas_ready)\
-            |kube_daemonset_status_(desired_number_scheduled|number_ready)\
-            |kube_node_status_(condition|allocatable|capacity)\
-            |kube_persistentvolumeclaim_status_phase|kube_job_status_failed\
-            |argocd_app_info|argocd_app_sync_total|vault_core_unsealed|pg_up\
-            |pg_database_size_bytes|pg_stat_database_(numbackends|xact_commit\
-            |xact_rollback|deadlocks)|redis_up|redis_memory_(used|max)_bytes\
-            |redis_connected_clients|redis_(keyspace_hits|keyspace_misses\
-            |evicted_keys)_total|keycloak_user_events_total\
-            |jvm_memory_used_bytes|traefik_open_connections\
-            |traefik_(entrypoint|service)_requests_total|portal_.+\
-            |loki_write_(sent_bytes|sent_entries|dropped_entries|dropped_bytes)_total\
-            |loki_source_file_files_active_total\
-            |prometheus_remote_storage_(samples_failed|samples_dropped\
-            |samples_retried)_total\
-            |prometheus_remote_storage_(highest_timestamp_in_seconds\
-            |queue_highest_sent_timestamp_seconds)"
+            regex: *metricAllowlist
 
 # Dashboards and Explore are in Grafana Cloud. Login there is a grafana.com
 # account, not Keycloak.
@@ -216,6 +247,13 @@ grafana:
   enabled: false
 
 kube-state-metrics:
+  prometheus:
+    monitor:
+      http:
+        metricRelabelings:
+          - action: keep
+            sourceLabels: [__name__]
+            regex: *metricAllowlist
   resources:
     requests:
       cpu: 20m
@@ -224,6 +262,12 @@ kube-state-metrics:
       memory: 128Mi
 
 prometheus-node-exporter:
+  prometheus:
+    monitor:
+      metricRelabelings:
+        - action: keep
+          sourceLabels: [__name__]
+          regex: *metricAllowlist
   resources:
     requests:
       cpu: 20m
