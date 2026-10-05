@@ -43,7 +43,7 @@ spec:
   mount: homelab
   type: kv-v2
   path: tle-dev/data
-  refreshAfter: 60s
+  refreshAfter: 300s
   destination:
     name: tle-dev-db
     create: true

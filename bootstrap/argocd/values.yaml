@@ -29,6 +29,16 @@ controller:
       memory: 256Mi
     limits:
       memory: 1Gi
+  # Soft heap ceiling for the Go runtime. Measured 2026-10-05: 286Mi live
+  # heap but 511Mi RSS, with 345Mi of the heap idle -- churn from watch
+  # events, not cached state (only 1,086 objects cached). Without a limit
+  # Go only collects at 2x the live heap and hands idle pages back lazily.
+  # 400MiB sits ~1.4x over the live heap and well under limits.memory, so
+  # it trims the idle slack without GC-thrashing. If the controller
+  # becomes CPU-bound with GC, raise this before raising the limit.
+  env:
+    - name: GOMEMLIMIT
+      value: 400MiB
   # Phase 22. Creates Service argocd-application-controller-metrics on 8082.
   #
   # metrics.serviceMonitor.enabled is deliberately NOT set, here or in the
