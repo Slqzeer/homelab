@@ -408,7 +408,10 @@ class PortalRegistrationTests(unittest.TestCase):
                 )
             elif patch["target"]["kind"] == "NetworkPolicy":
                 # Admits the shared "ingress" ProxyGroup pool, scoped to the
-                # tailscale namespace in the same peer.
+                # tailscale namespace in the same peer, and retargets the
+                # metrics peer at the Prometheus agent -- guarded by a `test`
+                # so a changed product policy fails instead of mis-patching.
+                scrape_label = "/spec/ingress/1/from/0/podSelector/matchLabels/app.kubernetes.io~1name"
                 self.assertEqual(
                     [{
                         "op": "add",
@@ -420,6 +423,10 @@ class PortalRegistrationTests(unittest.TestCase):
                                 "tailscale.com/parent-resource-type": "proxygroup",
                             }},
                         },
+                    }, {
+                        "op": "test", "path": scrape_label, "value": "prometheus",
+                    }, {
+                        "op": "replace", "path": scrape_label, "value": "prometheus-agent",
                     }],
                     parsed,
                 )

@@ -86,6 +86,17 @@ spec:
                     matchLabels:
                       tailscale.com/parent-resource: ingress
                       tailscale.com/parent-resource-type: proxygroup
+              # The metrics scraper is a Prometheus AGENT since the move to
+              # Grafana Cloud, labelled prometheus-agent rather than
+              # prometheus (see observability/monitoring/README.md). The
+              # `test` makes a changed product policy fail the sync loudly
+              # instead of patching the wrong peer.
+              - op: test
+                path: /spec/ingress/1/from/0/podSelector/matchLabels/app.kubernetes.io~1name
+                value: prometheus
+              - op: replace
+                path: /spec/ingress/1/from/0/podSelector/matchLabels/app.kubernetes.io~1name
+                value: prometheus-agent
     - repoURL: git@github.com:Slqzeer/homelab.git
       targetRevision: main
       path: apps/portal/config
