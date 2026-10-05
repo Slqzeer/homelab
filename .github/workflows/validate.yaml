@@ -30,9 +30,6 @@ jobs:
         # is clean under it; see the argument in that file's header.
         run: yamllint --strict -c .yamllint.yaml apps bootstrap environments infrastructure observability platform .github
 
-      - name: Validate Grafana OAuth routing
-        run: python3 observability/monitoring/test_oauth_routing.py
-
       - name: Validate application onboarding contract
         run: python3 -m unittest -v tests.test_application_onboarding
 

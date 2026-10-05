@@ -7,8 +7,7 @@
 # evidence is loki_source_file_files_active_total > 0 and a non-zero
 # rate(loki_write_sent_entries_total[10m]), both exposed by this same scrape.
 #
-# No exclusion is needed here, unlike loki.yaml: the alloy chart renders a
-# single Service.
+# No exclusion is needed here: the alloy chart renders a single Service.
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor

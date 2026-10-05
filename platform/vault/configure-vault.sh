@@ -173,54 +173,51 @@ vault write auth/kubernetes/role/vso-ghcr \
     token_policies=vso-ghcr-read \
     ttl=1h
 
-echo "==> seeding homelab/grafana"
-if vault kv get homelab/grafana >/dev/null 2>&1; then
-  echo "    already present, leaving the credential alone"
+echo "==> seeding homelab/grafana-cloud"
+if vault kv get homelab/grafana-cloud >/dev/null 2>&1; then
+  echo "    already present, leaving the value alone"
 else
-  # Generated here and never displayed, exactly as the postgres and redis
-  # blocks above.
+  # PLACEHOLDERS, deliberately. grafana.com issues the real token and shows
+  # the instance IDs; a human then overwrites all three keys -- see
+  # observability/monitoring/README.md, "Grafana Cloud".
   #
-  # Alphanumeric only -- this password is set as Grafana's admin password and
-  # may be pasted into a browser login; a / or @ survives neither round trip
-  # predictably.
-  #
-  # Written to a file so that only the FILENAME becomes an argument -- a
-  # password on a command line is visible in `ps`.
-  PWFILE=$(mktemp)
-  trap 'rm -f "$PWFILE"' EXIT
-  head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32 > "$PWFILE"
-  vault kv put homelab/grafana username=admin password=@"$PWFILE" >/dev/null
-  rm -f "$PWFILE"
-  echo "    generated"
+  # Seeded so that both `grafana-cloud` Secrets always exist on a cold
+  # rebuild. Without them the operator cannot render the agent's
+  # remote_write and Alloy sits in CreateContainerConfigError; with them,
+  # the failure degrades to 401s at the push endpoints.
+  vault kv put homelab/grafana-cloud \
+      metrics-username=3637537 logs-username=1814435 token=glc_eyJvIjoiMTkzNDcwMyIsIm4iOiJob21lbGFiLWszcy1wb2xpY3ktaG9tZWxhYi10b2tlbiIsImsiOiJhMTM1Q3hZcUo2OWJ1UTQxc1IwMThQaXgiLCJtIjp7InIiOiJwcm9kLWV1LWNlbnRyYWwtMCJ9fQ== >/dev/null
+  echo "    seeded placeholders -- replace them with the stack's values"
 fi
 
-echo "==> policy vso-grafana-read"
+# Two identities rather than one: the metrics Secret lives in `monitoring`
+# and the logs Secret in `logging`, and a VaultAuth's ServiceAccount must
+# reside in the consuming Secret's namespace. Both read the same path.
+echo "==> policy vso-grafana-cloud-read"
 # The data/ segment is REQUIRED and is not a typo -- see the note on
 # vso-canary-read above.
-#
-# Two paths since phase 25: the admin credential, and the OIDC client
-# secret Grafana presents to Keycloak. Both are read by the same `grafana`
-# ServiceAccount through the same VaultAuth, so extending this policy is
-# the whole change -- no new role, no new ServiceAccount.
-vault policy write vso-grafana-read - <<'POLICY'
-path "homelab/data/grafana" {
-  capabilities = ["read"]
-}
-
-path "homelab/data/keycloak-grafana" {
+vault policy write vso-grafana-cloud-read - <<'POLICY'
+path "homelab/data/grafana-cloud" {
   capabilities = ["read"]
 }
 POLICY
 
-echo "==> role vso-grafana"
-# bound_service_account_names must match the ServiceAccount created in
-# observability/monitoring/config/vault-secrets.yaml, and audience must match
-# that file's VaultAuth spec.kubernetes.audiences.
-vault write auth/kubernetes/role/vso-grafana \
-    bound_service_account_names=grafana \
+echo "==> roles vso-grafana-cloud-metrics and vso-grafana-cloud-logs"
+# bound_service_account_names must match the ServiceAccounts created in
+# observability/monitoring/config/vault-secrets.yaml and
+# observability/logging/alloy/config/vault-secrets.yaml, and audience must
+# match those files' VaultAuth spec.kubernetes.audiences.
+vault write auth/kubernetes/role/vso-grafana-cloud-metrics \
+    bound_service_account_names=grafana-cloud \
     bound_service_account_namespaces=monitoring \
     audience=vault \
-    token_policies=vso-grafana-read \
+    token_policies=vso-grafana-cloud-read \
+    ttl=1h
+vault write auth/kubernetes/role/vso-grafana-cloud-logs \
+    bound_service_account_names=grafana-cloud \
+    bound_service_account_namespaces=logging \
+    audience=vault \
+    token_policies=vso-grafana-cloud-read \
     ttl=1h
 
 echo "==> seeding homelab/postgres-exporter"
@@ -270,8 +267,8 @@ else
   # The BREAK-GLASS admin of the `master` realm, and nothing else. Humans
   # live in the `homelab` realm; this account exists to recover them.
   #
-  # Generated here and never displayed, exactly as the postgres, redis and
-  # grafana blocks above.
+  # Generated here and never displayed, exactly as the postgres and redis
+  # blocks above.
   #
   # Alphanumeric only -- this password is pasted into a browser login.
   #
@@ -304,33 +301,6 @@ else
   vault kv put homelab/keycloak-db username=keycloak password=@"$PWFILE" >/dev/null
   rm -f "$PWFILE"
   echo "    generated"
-fi
-
-echo "==> seeding homelab/keycloak-grafana"
-if vault kv get homelab/keycloak-grafana >/dev/null 2>&1; then
-  echo "    already present, leaving the value alone"
-else
-  # A PLACEHOLDER, and deliberately so. Keycloak generates the real client
-  # secret when it imports the realm; a human then overwrites this value.
-  # See platform/keycloak/README.md.
-  #
-  # This block exists to break a REBUILD DEADLOCK, not to supply a working
-  # credential. Grafana (wave 23) reads this Secret through envValueFrom.
-  # A Secret that does not exist leaves the pod in
-  # CreateContainerConfigError, so `monitoring` never goes Healthy, so
-  # NOTHING AT WAVE 24 SYNCS -- including the Keycloak that is the only
-  # thing able to produce the real value. Grafana would wait on Keycloak
-  # and Keycloak on Grafana, with nothing anywhere naming identity as the
-  # cause.
-  #
-  # Seeded, the failure degrades to `invalid_client` on the SSO button
-  # while Grafana's local admin form keeps working.
-  PWFILE=$(mktemp)
-  trap 'rm -f "$PWFILE"' EXIT
-  head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32 > "$PWFILE"
-  vault kv put homelab/keycloak-grafana clientSecret=@"$PWFILE" >/dev/null
-  rm -f "$PWFILE"
-  echo "    generated placeholder -- Keycloak's real secret replaces it"
 fi
 
 echo "==> seeding homelab/keycloak-portal and homelab/portal"

@@ -134,11 +134,10 @@ The initial catalogue is intentionally narrow:
 | --- | --- | --- |
 | Vault | `groups: homelab-admins` | root-token administrative UI |
 | Argo CD | `groups: homelab-admins` | local administrator only; Dex is disabled |
-| Grafana | `groups` | exact `homelab-admins,homelab-users` Keycloak groups |
 | Keycloak | `groups: homelab-admins` | identity administration console |
 
-Credential-free checks on 2026-09-24 confirmed that the Vault, Grafana
-and Keycloak administrative APIs reject anonymous requests. Argo CD's
+Credential-free checks on 2026-09-24 confirmed that the Vault and
+Keycloak administrative APIs reject anonymous requests. Argo CD's
 session endpoint returned an explicitly logged-out identity. Those checks
 used no token, cookie, or Secret. The checked-in service policies above are
 the source of each catalogue access decision; change the metadata only with a

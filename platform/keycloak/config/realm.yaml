@@ -1,7 +1,7 @@
-# The `homelab` realm: groups, roles, the groups claim, and the Grafana
-# client. Structure only -- NO USERS. Humans are created by hand and
-# documented in platform/keycloak/README.md, so that who has access to this
-# homelab is not repository content.
+# The `homelab` realm: groups, roles and the groups claim. Structure only
+# -- NO USERS. Humans are created by hand and documented in
+# platform/keycloak/README.md, so that who has access to this homelab is not
+# repository content.
 #
 # IMPORTED ON FIRST START ONLY. `kc.sh start --import-realm` uses the
 # IGNORE_EXISTING strategy, so once the realm exists in PostgreSQL this file
@@ -13,9 +13,9 @@
 #
 # The `groups` client scope is not decorative. Without its
 # oidc-group-membership-mapper the token carries no groups claim at all, and
-# Grafana's role_attribute_path silently falls through to its default for
-# every user -- a login that succeeds with the wrong permissions, which is
-# worse than one that fails.
+# any client that maps groups to permissions silently falls through to its
+# default for every user -- a login that succeeds with the wrong
+# permissions, which is worse than one that fails.
 #
 # CONFIGURE_TOTP is a realm-wide default required action, so every account
 # enrols TOTP at first login. The roadmap asks only for MFA on admin
@@ -381,30 +381,6 @@ data:
                 "jsonType.label": "String"
               }
             }
-          ]
-        }
-      ],
-      "clients": [
-        {
-          "clientId": "grafana",
-          "name": "Grafana",
-          "enabled": true,
-          "protocol": "openid-connect",
-          "publicClient": false,
-          "standardFlowEnabled": true,
-          "implicitFlowEnabled": false,
-          "directAccessGrantsEnabled": false,
-          "serviceAccountsEnabled": false,
-          "redirectUris": [
-            "https://grafana.taildf6cd4.ts.net/login/generic_oauth"
-          ],
-          "webOrigins": [
-            "https://grafana.taildf6cd4.ts.net"
-          ],
-          "defaultClientScopes": [
-            "profile",
-            "email",
-            "groups"
           ]
         }
       ]

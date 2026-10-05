@@ -1,6 +1,6 @@
-# kube-prometheus-stack: Prometheus, Grafana, kube-state-metrics and
-# node-exporter. Workstation-plan phases 22 and 23, merged -- Grafana is a
-# subchart, so splitting them means installing the chart twice.
+# kube-prometheus-stack: the Prometheus operator, a Prometheus AGENT that
+# remote_writes to Grafana Cloud, kube-state-metrics and node-exporter.
+# Workstation-plan phases 22 and 23. The Grafana subchart is disabled.
 #
 # Wave 23 -- the SAME wave as postgres, redis and registry, not 24.
 # This depends on none of them, and redis.yaml warns
@@ -9,7 +9,7 @@
 #
 # It is at or above 22, the floor vso-config.yaml establishes for anything
 # that depends on a human having run platform/vault/configure-vault.sh.
-# Grafana's admin password does.
+# The Grafana Cloud credential does.
 #
 # The ServiceMonitors are NOT here. They are custom resources needing the
 # CRDs this Application installs, so they live in monitoring-config at wave
@@ -30,8 +30,8 @@ spec:
       helm:
         # Pinned deliberately: it prefixes every object name the chart
         # creates, so changing it renames live objects -- including the
-        # Services that grafana-ingress.yaml and the ServiceMonitors in
-        # monitoring-config reference by name.
+        # agent's operator.prometheus.io/name, which the scrape
+        # NetworkPolicies in tle-dev and keycloak select on.
         releaseName: monitoring
         valueFiles:
           - $values/observability/monitoring/values.yaml

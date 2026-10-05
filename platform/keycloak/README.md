@@ -5,10 +5,11 @@
 The homelab's OIDC identity provider, workstation-plan phase 25. Keycloak
 26.7.4 runs as one Deployment with no PVC; all durable state lives in the
 `keycloak` database on PostgreSQL's existing PVC. Its Application joins
-wave 24 because PostgreSQL is at 23. Grafana is the proving OIDC client;
-its local admin form remains enabled. The portal's confidential client is
-reconciled by a PostSync hook with only `homelab-portal` on its allowlist.
-The hook does not change Grafana, users, groups, or realm settings.
+wave 24 because PostgreSQL is at 23. The portal is the OIDC client in
+daily use; its confidential client is reconciled by a PostSync hook with
+only `homelab-portal` on its allowlist. The hook does not change users,
+groups, or realm settings. Grafana was the first client until it moved to
+Grafana Cloud (2026-10-05), whose login is a grafana.com account.
 Argo CD deliberately is not a client
 yet, so recovering the deployment system does not depend on this service.
 
@@ -37,8 +38,7 @@ unauthorized pod was denied, and both `keycloak-database` and
 were not independently established: the database dump at
 2026-09-20 15:34:32 +0200 contained zero `homelab` users and one `master`
 user. Admin and Viewer mapping, temporary-password replacement, TOTP
-enrolment and a subsequent TOTP challenge, and local Grafana login must
-be rerun explicitly. The 603Mi observation is a 15-minute maximum, not a
+enrolment and a subsequent TOTP challenge must be rerun explicitly. The 603Mi observation is a 15-minute maximum, not a
 proven login peak. The 21-second restart did not test first installation
 against an empty database. The 896Mi limit remains supported by the steady
 sample and the export memory evidence below.
@@ -50,8 +50,8 @@ TLS terminates at the Tailscale proxy; management port 9000 is used only
 inside the cluster for probes and Prometheus integration 8.
 
 Port-forward is a **degraded** route: `KC_HOSTNAME` redirects browsers to
-the tailnet URL. Unlike Prometheus and Loki, this does not give a working
-browser fallback when Tailscale is unavailable.
+the tailnet URL, so this does not give a working browser fallback when
+Tailscale is unavailable.
 
 ### The break-glass account
 
@@ -78,15 +78,12 @@ below.
 
 In `homelab` → Users → Add user, assign `homelab-admins` or `homelab-users`
 and set a temporary password. **Every user needs an email address**, unique
-in the realm, or Grafana refuses the login with `user email is not found`.
+in the realm: `email` is a default scope of every client here.
 The default required action `CONFIGURE_TOTP` makes every account enrol
 TOTP on its first login, stricter than the roadmap's admins-only request.
 `UPDATE_PASSWORD` must also be registered and enabled to replace temporary
 passwords; it is non-default, so existing permanent passwords are not
 changed on every login. Users and their credentials never belong in git.
-
-Grafana maps `homelab-admins` to organization `Admin`, everyone else to
-`Viewer`. The Grafana server-admin role remains local-account only.
 
 ### Repair the existing realm and complete browser acceptance
 
@@ -112,103 +109,34 @@ changing its authentication settings.
    enabled, also add **Configure OTP** to that user's **Required user
    actions**; changing the realm default does not retrofit existing users.
 5. In a fresh private browser session, open
-   `https://grafana.taildf6cd4.ts.net` and choose **Sign in with Keycloak**.
-   For the admin user, verify that the temporary password must be replaced,
-   then enrol TOTP. Confirm Grafana assigns organization **Admin**.
+   `https://portal.taildf6cd4.ts.net` and sign in. For the admin user,
+   verify that the temporary password must be replaced, then enrol TOTP.
+   Confirm the portal shows the administrative cards (Vault, Argo CD,
+   Keycloak).
 6. Fully sign out, close the private session, and open a new one. Verify
    login requires the new password and a TOTP code. Repeat steps 5–6 for
-   the other user and confirm organization **Viewer**.
-7. In a separate fresh session, verify Grafana's local admin form with its
-   Vault-held credential. Record dated pass/fail results for both roles,
-   password replacement, TOTP enrolment/challenge and local login; no
-   passwords, tokens or TOTP seeds belong in that record.
-8. Take fresh database and `--users realm_file` backups after onboarding,
+   the other user and confirm the administrative cards are absent. Record
+   dated pass/fail results for both roles, password replacement and TOTP
+   enrolment/challenge; no passwords, tokens or TOTP seeds belong in that
+   record.
+7. Take fresh database and `--users realm_file` backups after onboarding,
    with the realm validation minimum set to the number of users just
    verified. The earlier zero-user backups do not cover these accounts.
-
-### The client-secret paste ceremony
-
-On a rebuild, the realm import generates the Grafana client secret;
-`configure-vault.sh` only seeds a placeholder. SSO returns `invalid_client`
-until this ceremony replaces it. The issuer is Keycloak, not Vault, just
-as GitHub issues the GHCR token in the root README's rebuild instructions.
-
-Before the Vault write, record a fingerprint of the current Kubernetes
-Secret in the host's Bash shell. Keep this same shell open through the
-paste and restart checks. Only the SHA-256 fingerprint enters a variable;
-the Secret value travels through pipes, never argv or terminal output.
-Stop if the baseline cannot be read. A TRUE VSO status may still describe
-the old value and does not prove the replacement has arrived.
-
-```bash
-set -o pipefail
-keycloak_grafana_fingerprint() { sg k3s-admin -c 'kubectl -n monitoring get secret keycloak-grafana -o json' | jq -er '.data.clientSecret | select(type == "string" and length > 0)' | sha256sum; }
-KC_GRAFANA_SECRET_BEFORE=$(keycloak_grafana_fingerprint) || unset KC_GRAFANA_SECRET_BEFORE
-test -n "${KC_GRAFANA_SECRET_BEFORE:-}" && printf '%s\n' 'Baseline recorded; continue with the paste ceremony.'
-```
-
-Task 7's paste instructions follow verbatim:
-
-1. Open `https://keycloak.taildf6cd4.ts.net/admin`, sign in as `admin`, switch to the **homelab** realm.
-2. Clients → `grafana` → Credentials tab → copy the **Client Secret**.
-3. Run these two commands. The second opens a shell inside `vault-0`:
-
-```bash
-sg k3s-admin -c 'kubectl -n vault exec -it vault-0 -- vault login'
-sg k3s-admin -c 'kubectl -n vault exec -it vault-0 -- sh'
-```
-
-4. Inside that shell, run these lines. The `read` prompt takes the pasted secret with echo off, so it never appears on screen, in argv or in history:
-
-```sh
-stty -echo; printf 'client secret: '; read CS; stty echo; echo
-printf '%s' "$CS" > /tmp/cs
-vault kv put homelab/keycloak-grafana clientSecret=@/tmp/cs
-rm -f /tmp/cs; unset CS
-exit
-```
-
-5. Remove the token:
-
-```bash
-sg k3s-admin -c 'kubectl -n vault exec vault-0 -- rm -f /home/vault/.vault-token'
-```
-
-Back in the same host shell, VSO normally refreshes within 60 seconds.
-Poll for up to two minutes for a successful read whose fingerprint differs
-from the baseline. Missing/empty Secrets and read errors do not pass. The
-restart is gated on that change, so a still-TRUE status for a placeholder
-or old secret cannot trigger it. Grafana reads the value only at startup.
-
-```bash
-sg k3s-admin -c 'kubectl -n monitoring get vaultstaticsecret keycloak-grafana'
-KC_GRAFANA_SECRET_CHANGED=false
-for attempt in $(seq 1 60); do KC_GRAFANA_SECRET_AFTER=$(keycloak_grafana_fingerprint) && [ -n "${KC_GRAFANA_SECRET_BEFORE:-}" ] && [ "$KC_GRAFANA_SECRET_AFTER" != "$KC_GRAFANA_SECRET_BEFORE" ] && { KC_GRAFANA_SECRET_CHANGED=true; break; }; sleep 2; done
-if [ "$KC_GRAFANA_SECRET_CHANGED" = true ]; then sg k3s-admin -c 'kubectl -n monitoring rollout restart deploy/monitoring-grafana' && sg k3s-admin -c 'kubectl -n monitoring rollout status deploy/monitoring-grafana'; else printf '%s\n' 'No verified secret change; Grafana was not restarted. Check the Vault write and VSO, then retry.' >&2; fi
-unset KC_GRAFANA_SECRET_BEFORE KC_GRAFANA_SECRET_AFTER KC_GRAFANA_SECRET_CHANGED
-```
-
-If the baseline was already the intended value, this intentionally does
-not prove a new delivery or restart Grafana. Do not use a timeout as proof
-that the paste succeeded; investigate before repeating the ceremony.
 
 ## Things that will surprise you
 
 **OIDC uses split routing.** A browser reaches the authorization endpoint
-at `https://keycloak.taildf6cd4.ts.net`, but Grafana exchanges the code and
-loads userinfo through `http://keycloak.keycloak.svc.cluster.local:8080`.
-Pods use cluster DNS, which does not resolve the Tailscale MagicDNS name.
-Pointing Grafana's back-channels at the public URL fails before client-secret
-validation with `lookup keycloak.taildf6cd4.ts.net ... no such host`.
+at `https://keycloak.taildf6cd4.ts.net`, but an in-cluster client (tle-dev's
+edge, the registration hook) reaches Keycloak through
+`http://keycloak.keycloak.svc.cluster.local:8080`. Pods use cluster DNS,
+which does not resolve the Tailscale MagicDNS name. Pointing a back-channel
+at the public URL fails with `lookup keycloak.taildf6cd4.ts.net ... no such
+host`.
 
-**The two rotation traps are silent.** `KC_BOOTSTRAP_ADMIN_PASSWORD` is
+**The rotation trap is silent.** `KC_BOOTSTRAP_ADMIN_PASSWORD` is
 honoured only when no admin exists. Changing Vault updates the Secret but
 does not rotate the live account: rotate in Keycloak first, then update
-`homelab/keycloak` in Vault. Separately, regenerating the Grafana client
-secret in Keycloak breaks SSO until `homelab/keycloak-grafana` is updated
-through the paste ceremony and Grafana restarted. No reconciler performs
-either operation; the local Grafana form remains enabled throughout, with
-actual login acceptance pending the procedure above.
+`homelab/keycloak` in Vault. No reconciler performs that operation.
 
 **The realm is reproducible, not reconciled.** `--import-realm` uses
 `IGNORE_EXISTING`: the seed is applied once, then ignored on every later
@@ -223,7 +151,7 @@ identity service was not worth automatic reconciliation.
 
 **Declaring `clientScopes` suppresses Keycloak's built-in scope population.**
 The seed therefore explicitly declares only `groups`, `profile` and
-`email`, and Grafana references those three as default client scopes.
+`email`, and clients reference those three as default client scopes.
 Referencing a built-in name without declaring it here does not create its
 mappers. The `groups` mapper emits bare group names; without it the role
 mapping quietly falls through to Viewer.
@@ -262,7 +190,7 @@ authorization-code flow, and the `groups` scope. It fails if duplicate
 client IDs exist. Repeated syncs with the same Vault value make no write.
 Inspect Job success and the VaultStaticSecret status; do not print
 Kubernetes Secret contents. A Keycloak ingress policy permits only its
-selected proxy, Prometheus, registration Job, Grafana, portal, and future
+selected proxy, the Prometheus agent, registration Job, portal, and future
 Nextcloud pods on the ports they use.
 
 For other clients, create a confidential OpenID Connect client in the `homelab` console with
@@ -390,7 +318,7 @@ added when the TLE admin portal's sign-in lands.
 | File | Purpose |
 | --- | --- |
 | `config/keycloak.yaml` | Deployment, application and management Service ports, probes, measured limit |
-| `config/realm.yaml` | First-import realm structure, groups, scopes, MFA and Grafana client; no users |
+| `config/realm.yaml` | First-import realm structure, groups, scopes and MFA; no clients, no users |
 | `config/vault-secrets.yaml` | Keycloak ServiceAccount, VaultConnection, VaultAuth and three VSO projections |
 | `config/client-registration.yaml` | Portal client allowlist, reconciler and PostSync Job |
 | `config/networkpolicy.yaml` | Namespace ingress deny and selected Keycloak peers/ports |
@@ -401,14 +329,12 @@ added when the TLE admin portal's sign-in lands.
 | `../../environments/homelab/apps/keycloak.yaml` | Wave-24 Application |
 | `../../infrastructure/ingress/config/keycloak-ingress.yaml` | Tailnet HTTPS entry point |
 | `../../observability/monitoring/targets/keycloak.yaml` | Integration 8 on management port 9000 |
-| `../../observability/monitoring/config/vault-secrets.yaml` | Grafana's client-secret delivery |
 | `../databases/postgres/config/networkpolicy.yaml` | Namespace deny, PostgreSQL clients and exporter access |
 | `../databases/redis/config/networkpolicy.yaml` | Redis clients and exporter access |
 
 ## Rollback
 
-Revert the Grafana OIDC integration first if SSO needs abandoning; the
-local admin form remains enabled (login acceptance is pending). Reverting
+Reverting
 the Deployment prunes Keycloak but preserves PostgreSQL's database.
 Reverting `realm.yaml` cannot remove
 or overwrite an imported realm. To retire the whole Application, follow

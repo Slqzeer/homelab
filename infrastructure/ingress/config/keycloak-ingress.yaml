@@ -13,7 +13,7 @@
 # /metrics and is deliberately not published -- Prometheus reaches it
 # in-cluster through the Service.
 #
-# Unlike Prometheus and Loki, this one IS published: Keycloak authenticates
+# This one IS published: Keycloak authenticates
 # every request, and with KC_HOSTNAME set a port-forward is a degraded
 # route anyway. The tailnet is how you reach it.
 apiVersion: networking.k8s.io/v1

@@ -1,4 +1,8 @@
 # Grafana Alloy -- workstation-plan phase 24, the log collector.
+#
+# Ships to GRAFANA CLOUD Loki since 2026-10-05; the in-cluster Loki is gone.
+# The push URL is below, the instance ID and token come from Secret
+# `grafana-cloud` (config/vault-secrets.yaml) as environment variables.
 # Chart: grafana/alloy 1.12.1 (Alloy v1.19.2)
 # Repo:  https://grafana.github.io/helm-charts
 #
@@ -23,7 +27,7 @@ crds:
 # Decision L20. The chart's default `rbac.rules` grants cluster-wide
 # get/list/watch on configmaps AND secrets, plus pods/log, replicasets, and
 # six monitoring.coreos.com kinds -- bound to a ServiceAccount whose pod runs
-# as runAsUser: 0. That reaches vault-*, grafana-admin, ghcr-pull
+# as runAsUser: 0. That reaches vault-*, grafana-cloud, ghcr-pull
 # and every database credential in this cluster. This pipeline
 # uses discovery.kubernetes with role = "pod" plus file tailing; it needs
 # none of it. Overriding `rules` replaces that grant with just the two verbs
@@ -86,6 +90,20 @@ alloy:
   # Decision L9. Adds --disable-reporting. Alloy phones home to Grafana Labs
   # by default.
   enableReporting: false
+  # basic_auth for loki.write below. `optional` is NOT set: configure-vault.sh
+  # seeds placeholders so the Secret always exists, and a missing Secret
+  # should fail loudly at pod start rather than ship anonymously.
+  extraEnv:
+    - name: GRAFANA_CLOUD_LOGS_USERNAME
+      valueFrom:
+        secretKeyRef:
+          name: grafana-cloud
+          key: username
+    - name: GRAFANA_CLOUD_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: grafana-cloud
+          key: password
 
   # Decision L12. The chart starts the container with
   # --storage.path=/tmp/alloy and MOUNTS NO VOLUME THERE -- verified in
@@ -215,8 +233,20 @@ alloy:
         forward_to = [loki.write.default.receiver]
       }
 
+      // `cluster` is the label Grafana Cloud's Kubernetes app groups by,
+      // and the same value the Prometheus agent sets as an external label.
+      // One constant label adds no streams.
       loki.write "default" {
         endpoint {
-          url = "http://loki.logging.svc.cluster.local:3100/loki/api/v1/push"
+          // The stack's Loki URL, from grafana.com -> My Account -> stack
+          // -> Loki -> Details, with /loki/api/v1/push appended.
+          url = "https://logs-prod-039.grafana.net/loki/api/v1/push"
+          basic_auth {
+            username = sys.env("GRAFANA_CLOUD_LOGS_USERNAME")
+            password = sys.env("GRAFANA_CLOUD_TOKEN")
+          }
+        }
+        external_labels = {
+          cluster = "homelab",
         }
       }
