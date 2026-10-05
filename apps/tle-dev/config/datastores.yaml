@@ -158,11 +158,15 @@ spec:
               containerPort: 4222
             - name: metrics
               containerPort: 8222
+          # --http_port, not --monitor: nats-server has no --monitor flag and
+          # exits printing its usage text (CrashLoopBackOff, 1544 restarts
+          # by 2026-10-05). The monitor binds the client address (0.0.0.0).
+          # store_dir is the PVC root: nats-server appends jetstream/ itself,
+          # so this stores in /data/jetstream.
           args:
             - --jetstream
-            - --store_dir=/data/jetstream
-            - --monitor
-            - 0.0.0.0:8222
+            - --store_dir=/data
+            - --http_port=8222
           volumeMounts:
             - name: data
               mountPath: /data
