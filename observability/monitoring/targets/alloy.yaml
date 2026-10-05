@@ -21,3 +21,38 @@ spec:
       app.kubernetes.io/instance: alloy
   endpoints:
     - port: http-metrics
+      metricRelabelings:
+        # BEGIN metric allowlist (scripts/sync_metric_allowlist.py)
+        - action: keep
+          sourceLabels: [__name__]
+          regex: "up|node_cpu_seconds_total|node_load1|node_load5|node_load15\
+            |node_memory_(MemTotal|MemAvailable|SwapTotal|SwapFree)_bytes\
+            |node_filesystem_(size|avail)_bytes|node_network_(receive\
+            |transmit)_bytes_total|node_disk_(read|written)_bytes_total\
+            |node_disk_io_time_seconds_total|node_pressure_(cpu|memory\
+            |io)_waiting_seconds_total|container_cpu_usage_seconds_total\
+            |container_memory_working_set_bytes|container_network_(receive\
+            |transmit)_bytes_total|container_oom_events_total\
+            |kubelet_volume_stats_(capacity|available)_bytes\
+            |kube_pod_status_phase|kube_pod_container_status_restarts_total\
+            |kube_pod_container_status_waiting_reason\
+            |kube_pod_container_status_last_terminated_reason\
+            |kube_pod_container_resource_(requests|limits)\
+            |kube_deployment_(spec_replicas|status_replicas_available)\
+            |kube_statefulset_(replicas|status_replicas_ready)\
+            |kube_daemonset_status_(desired_number_scheduled|number_ready)\
+            |kube_node_status_(condition|allocatable|capacity)\
+            |kube_persistentvolumeclaim_status_phase|kube_job_status_failed\
+            |argocd_app_info|argocd_app_sync_total|vault_core_unsealed|pg_up\
+            |pg_database_size_bytes|pg_stat_database_(numbackends|xact_commit\
+            |xact_rollback|deadlocks)|redis_up|redis_memory_(used|max)_bytes\
+            |redis_connected_clients|redis_(keyspace_hits|keyspace_misses\
+            |evicted_keys)_total|keycloak_user_events_total\
+            |jvm_memory_used_bytes|traefik_open_connections\
+            |traefik_(entrypoint|service)_requests_total|portal_.+\
+            |loki_write_(sent_bytes|sent_entries|dropped_entries\
+            |dropped_bytes)_total|loki_source_file_files_active_total\
+            |prometheus_remote_storage_(samples_failed|samples_dropped\
+            |samples_retried)_total\
+            |prometheus_remote_storage_(highest_timestamp_in_seconds\
+            |queue_highest_sent_timestamp_seconds)"
