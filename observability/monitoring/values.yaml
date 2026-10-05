@@ -32,6 +32,64 @@ kubeProxy:
 kubeEtcd:
   enabled: false
 
+# Cardinality. Measured 2026-10-05: 129k head series, Prometheus at ~800Mi.
+# The kubelet and apiserver jobs held 104k of them, and 85k of those were
+# read by no rule and no dashboard.
+#
+# k3s runs the apiserver, etcd (kine), scheduler and controllers in the SAME
+# process as the kubelet, with one shared metrics registry. The kubelet's
+# /metrics endpoint therefore re-exports the whole control plane, and every
+# apiserver_*/etcd_*/workqueue_* series was scraped twice: once here and once
+# by the apiserver job. No rule or dashboard selects those families with
+# job="kubelet" (checked against every PrometheusRule and Grafana dashboard
+# ConfigMap), so they are dropped on the kubelet's /metrics endpoint only.
+# rest_client_*, go_*, process_* and storage_* stay: the kubelet dashboard
+# reads its own copies of those.
+#
+# Setting metricRelabelings REPLACES the chart's defaults, so each list
+# starts with the chart 91.4.1 default verbatim. Re-check them on upgrade.
+kubelet:
+  serviceMonitor:
+    metricRelabelings:
+      # chart default
+      - action: drop
+        sourceLabels: [__name__, le]
+        regex: "(csi_operations|storage_operation_duration)_seconds_bucket;(0.25|2.5|15|25|120|\
+          600)(\\.0)?"
+      # k3s control-plane duplicates, ~53k series
+      - action: drop
+        sourceLabels: [__name__]
+        regex: (apiserver|etcd|kine|lasso|scheduler|workqueue)_.*
+
+# The apiserver job keeps everything the stack's rules and dashboards use
+# (the apiserver_request_sli_* SLO histograms, apiserver_request_total and
+# friends). Dropped: the large *_bucket histograms nothing references, about
+# 23k series. Their _sum and _count stay, so rates and averages still work;
+# only quantiles over these specific histograms are lost.
+kubeApiServer:
+  serviceMonitor:
+    metricRelabelings:
+      # chart default
+      - action: drop
+        sourceLabels: [__name__, le]
+        regex: "(etcd_request|apiserver_request_slo|apiserver_request_sli|\
+          apiserver_request)_duration_seconds_bucket;(0\\.15|0\\.2|0\\.3|0\\.35|0\\.4|0\\.45\
+          |0\\.6|0\\.7|0\\.8|0\\.9|1\\.25|1\\.5|1\\.75|2|3|3\\.5|4|4\\.5|6|7|8|9|15|20|40|45\
+          |50)(\\.0)?"
+      # unreferenced histograms
+      - action: drop
+        sourceLabels: [__name__]
+        regex: "(apiserver_request_duration_seconds|apiserver_request_body_size_bytes|\
+          etcd_request_duration_seconds|apiserver_watch_list_duration_seconds|\
+          apiserver_response_sizes|apiserver_watch_cache_read_wait_seconds|\
+          apiserver_watch_events_sizes|workqueue_work_duration_seconds|\
+          scheduler_plugin_execution_duration_seconds|kine_sql_time_seconds|\
+          apiserver_admission_controller_admission_duration_seconds|\
+          apiserver_flowcontrol_request_execution_seconds|\
+          scheduler_event_handling_duration_seconds|lasso_controller_reconcile_time_seconds|\
+          apiserver_flowcontrol_priority_level_request_utilization|\
+          scheduler_framework_extension_point_duration_seconds)_bucket"
+
 defaultRules:
   # Disabling the scrapers above without disabling their rules leaves alerts
   # that reference series nothing produces. The same is true of Alertmanager
