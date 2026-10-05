@@ -165,9 +165,9 @@ prometheus:
     # wildcard. Each entry is a metric NAME regex, anchored by Prometheus.
     remoteWrite:
       - name: grafana-cloud
-        # REPLACE_ME: the stack's Prometheus remote_write endpoint, from
-        # grafana.com -> stack -> Prometheus -> Details.
-        url: https://REPLACE_ME.grafana.net/api/prom/push
+        # The stack's Prometheus remote_write endpoint, from grafana.com ->
+        # My Account -> stack -> Prometheus -> Details.
+        url: https://prometheus-prod-58-prod-eu-central-0.grafana.net/api/prom/push
         basicAuth:
           username:
             name: grafana-cloud

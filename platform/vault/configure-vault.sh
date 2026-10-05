@@ -186,7 +186,7 @@ else
   # remote_write and Alloy sits in CreateContainerConfigError; with them,
   # the failure degrades to 401s at the push endpoints.
   vault kv put homelab/grafana-cloud \
-      metrics-username=REPLACE_ME logs-username=REPLACE_ME token=REPLACE_ME >/dev/null
+      metrics-username=3637537 logs-username=1814435 token=glc_eyJvIjoiMTkzNDcwMyIsIm4iOiJob21lbGFiLWszcy1wb2xpY3ktaG9tZWxhYi10b2tlbiIsImsiOiJhMTM1Q3hZcUo2OWJ1UTQxc1IwMThQaXgiLCJtIjp7InIiOiJwcm9kLWV1LWNlbnRyYWwtMCJ9fQ== >/dev/null
   echo "    seeded placeholders -- replace them with the stack's values"
 fi
 

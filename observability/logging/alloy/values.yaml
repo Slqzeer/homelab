@@ -238,9 +238,9 @@ alloy:
       // One constant label adds no streams.
       loki.write "default" {
         endpoint {
-          // REPLACE_ME: the stack's Loki push endpoint, from grafana.com ->
-          // stack -> Loki -> Details, with /loki/api/v1/push appended.
-          url = "https://REPLACE_ME.grafana.net/loki/api/v1/push"
+          // The stack's Loki URL, from grafana.com -> My Account -> stack
+          // -> Loki -> Details, with /loki/api/v1/push appended.
+          url = "https://logs-prod-039.grafana.net/loki/api/v1/push"
           basic_auth {
             username = sys.env("GRAFANA_CLOUD_LOGS_USERNAME")
             password = sys.env("GRAFANA_CLOUD_TOKEN")
