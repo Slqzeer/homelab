@@ -21,6 +21,11 @@
 #   (no such digest exists) NOR the onboarding validator's immutable-image
 #   rule (`:dev` is not a semver tag). The runbook promotion gate must
 #   replace it with the real release tag@digest before Argo syncs this.
+#   Until then replicas is 0: no api-gateway image has been published to
+#   ghcr.io (checked 2026-10-05), and at 1 replica the pod sat in
+#   ImagePullBackOff for six days (38k pull attempts) and every sync failed
+#   on the Deployment's progress deadline, keeping tle-dev Degraded.
+#   Promotion = real tag@digest here AND replicas back to 1.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -95,7 +100,8 @@ metadata:
     app: tle-dev-edge
     metrics: tle-dev
 spec:
-  replicas: 1
+  # 0 until a real image is promoted -- see the header.
+  replicas: 0
   selector:
     matchLabels:
       app: tle-dev-edge
