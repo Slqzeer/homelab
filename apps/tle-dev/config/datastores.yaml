@@ -87,7 +87,13 @@ spec:
             limits:
               memory: 256Mi
   volumeClaimTemplates:
-    - metadata:
+    - # apiVersion/kind are required, not decorative: without them Argo CD
+      # keeps this StatefulSet permanently OutOfSync and re-applies it every
+      # reconcile. See the volumeClaimTemplates note in
+      # platform/databases/postgres/config/postgres.yaml.
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
         name: data
       spec:
         accessModes:
@@ -191,7 +197,13 @@ spec:
             limits:
               memory: 512Mi
   volumeClaimTemplates:
-    - metadata:
+    - # apiVersion/kind are required, not decorative: without them Argo CD
+      # keeps this StatefulSet permanently OutOfSync and re-applies it every
+      # reconcile. See the volumeClaimTemplates note in
+      # platform/databases/postgres/config/postgres.yaml.
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
         name: data
       spec:
         accessModes:
