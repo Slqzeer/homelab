@@ -8,6 +8,14 @@
 # No Valkey target: Valkey ships no metrics endpoint without an exporter
 # sidecar (deferred to the workload rollout); scraping a dead port would
 # only add a permanently red target.
+#
+# No NATS target either, for the same reason. nats-server's monitor port
+# (8222) serves JSON (/varz, /connz), not Prometheus text -- /metrics is a
+# 404 -- and the tle-dev-metrics NetworkPolicy only admits port 9000.
+# A tle-dev-nats ServiceMonitor existed and was permanently down; removed
+# 2026-10-05. Add prometheus-nats-exporter as a sidecar on 9000 (the
+# tle-dev-nats Service already maps a `metrics` port there) and restore
+# the ServiceMonitor once the TLE services actually use NATS.
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -19,22 +27,6 @@ spec:
   selector:
     matchLabels:
       app: tle-dev-edge
-  endpoints:
-    - port: metrics
-      path: /metrics
-      interval: 30s
----
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: tle-dev-nats
-  namespace: tle-dev
-  labels:
-    app: tle-dev-nats
-spec:
-  selector:
-    matchLabels:
-      app: tle-dev-nats
   endpoints:
     - port: metrics
       path: /metrics
