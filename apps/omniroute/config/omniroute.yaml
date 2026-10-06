@@ -140,8 +140,12 @@ spec:
               drop: [ALL]
           resources:
             requests: {cpu: 200m, memory: 512Mi}
-            # 512Mi heap + ~380Mi off-heap measured, so 1Gi bounds it with room.
-            limits: {cpu: "1", memory: 1Gi}
+            # 512Mi heap + ~380Mi off-heap measured. OmniRoute's own pressure guard
+            # (open-sse/utils/resourcePressurePolicy.ts) answers 503 "resource
+            # pressure" once usage passes 92% of this limit (85% = high); with 1Gi
+            # that is ~942Mi, and an idle ~895Mi pod tripped it on a single large
+            # request (2026-10-06). 2Gi puts critical at ~1.84Gi.
+            limits: {cpu: "1", memory: 2Gi}
           startupProbe:
             httpGet: {path: /api/health, port: http}
             periodSeconds: 5
