@@ -328,20 +328,38 @@ own defaults, read from `values.yaml` rather than assumed:
 | backend → Keycloak | 8080 | OIDC token, userinfo, JWKS |
 | all → DNS | 53 | resolution |
 | backend/exporter → egress proxy | 3128 | provider and mail egress, allowlisted |
-| Prometheus agent → exporter | 6061 | metrics scrape |
+No scrape rule is written. Nothing in this namespace serves `/metrics`; see
+Observability below for why the exporter's port 6061 is not one.
 
 The frontend is the only workload the tailnet may reach, which is what makes the
 "no second Ingress for MCP" decision enforceable rather than merely intended.
 
 ## Observability
 
-A `ServiceMonitor` for the exporter on its service port 6061, matching
-`observability/monitoring`'s existing exporters and subject to the series
-allowlist applied at scrape time. Chart `1.11.3` declares exactly one `http`
-port per component and no metrics port anywhere — the only `metrics` keys in the
-chart are HPA resource specs — so the frontend, backend and MCP server cannot be
-scraped. Their health is judged by probe status and pod restarts instead. That
-limitation is recorded rather than worked around.
+**No component of Penpot 2.18.3 exposes a Prometheus endpoint, so this
+component adds no ServiceMonitor.**
+
+Chart `1.11.3` declares exactly one `http` port per component and no metrics
+port anywhere — the only `metrics` keys in the chart are HPA resource specs.
+Ports are frontend 8080, backend 6060, exporter 6061, MCP 4401/4402.
+
+The exporter is the trap here: its name suggests it exports metrics, but it
+does not. It is a headless-browser rendering service. Port 6061 serves
+`POST /api/export` (Transit-encoded) and `/readyz`. Scraping it would produce a
+permanently-down target in Grafana Cloud and teach an operator that a red target
+is normal.
+
+Penpot's issue tracker has an open question asking what `:6060/metrics`
+represents, with no authoritative answer, which corroborates that no supported
+metrics endpoint exists in this release.
+
+Penpot's health is therefore judged by probe status and pod restart counts —
+`kube_pod_container_status_restarts_total` and `kube_deployment_status_replicas_available`
+are both already in the metric allowlist, so restarts and availability are
+visible in Grafana Cloud without a single Penpot-owned series. The
+`penpot-metrics` NetworkPolicy is deliberately **not** written: a policy admitting
+a scrape that never happens is dead configuration that reads as if something is
+being monitored.
 
 ## Portal publication
 
@@ -412,8 +430,10 @@ Before promotion:
 
 ## Known gaps carried forward
 
-- Penpot's frontend, backend and MCP server expose no Prometheus endpoints in
-  chart `1.11.3`; only the exporter is scraped.
+- **No Penpot series reach Grafana Cloud.** No component of Penpot 2.18.3
+  exposes a Prometheus endpoint, so no ServiceMonitor exists for it. Health is
+  visible only through the cluster-level `kube_pod_*` and `kube_deployment_*`
+  series already in the allowlist.
 - The shared Redis eviction policy is not Penpot's recommended `volatile-lfu`.
 - Chart-managed images are pinned by chart version and tag, not by digest.
 - MCP write operations are powerful and unauthenticated at the plugin boundary;
