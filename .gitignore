@@ -1,5 +1,10 @@
 .superpowers/
 summary.txt
+# Byte-compiled Python from the unittest suites CI runs. Untracked here for
+# months because nothing ignored them, which means one `git add -A` would
+# commit .pyc files.
+__pycache__/
+*.pyc
 # Real tle-dev Vault seed values; only *.env.example templates are committed.
 apps/tle-dev/vault-seed/.env.*
 !apps/tle-dev/vault-seed/.env.tle-dev-auth.example

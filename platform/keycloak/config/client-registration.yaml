@@ -37,10 +37,17 @@ data:
     reconcile_client() {
       client_id=$1 secret_var=$2 display_name=$3 origin=$4
       callback=$5 logout_path=$6
-      # printenv, not $var expansion into argv: the secret never becomes a
-      # process argument, and jq reads it from its own environment below
-      # (env[$env_name]), so it is absent from every process argument list.
-      secret_value=$(printenv "$secret_var")
+      # jq reads the secret, not the shell: $secret_var (the NAME) goes into
+      # argv and the value comes back out of jq's own environment. The value
+      # never becomes a process argument of anything: --arg is handed the
+      # name only, and handing it the value instead would put the secret in
+      # every argument list. A coreutils environment reader would do the same
+      # job, but it is used nowhere else in this repository and cannot be
+      # assumed present in the Keycloak image, where its absence would abort
+      # the hook under set -e. jq is already a hard dependency below; if it
+      # were missing this hook could not work at all, so this adds no new way
+      # to fail.
+      secret_value=$("$JQ" -nr --arg env_name "$secret_var" 'env[$env_name]')
       clients_json=$("$KCADM" get clients -r homelab \
         -q clientId="$client_id" --fields id,clientId \
         --config /tmp/kcadm.config)
@@ -115,8 +122,10 @@ data:
            [ "$current_secret" = "$secret_value" ]; then
           echo "$client_id client already current"
         else
-          # --merge retains unrelated client fields; Keycloak does not apply
-          # default-client-scope mappings through this representation update.
+          # --merge retains unrelated client fields. This body carries no
+          # defaultClientScopes, so client scopes are not touched here at
+          # all: the explicit scope loop below is their only owner, and it
+          # adds what is missing rather than replacing the whole mapping.
           if ! printf '%s' "$desired_json" | "$KCADM" update "clients/$client_uuid" \
               -r homelab --config /tmp/kcadm.config --merge -f - >/dev/null 2>&1; then
             echo "$client_id client update failed" >&2
@@ -168,10 +177,12 @@ data:
       done
     }
 
-    # Penpot has no logout endpoint of its own, hence the trailing "/":
-    # post-logout returns to the application root.
     reconcile_client homelab-portal PORTAL_CLIENT_SECRET "Homelab Portal" \
       https://portal.taildf6cd4.ts.net /auth/callback /auth/logout
+    # Penpot does expose POST /api/logout, but nothing a browser can be
+    # redirected to, and Keycloak's post.logout.redirect.uris is a browser
+    # GET. Hence the empty path, giving the trailing "/" that lands on the
+    # application root rather than a logout route.
     reconcile_client penpot PENPOT_CLIENT_SECRET "Penpot" \
       https://penpot.taildf6cd4.ts.net /api/oauth/redirect /
 ---

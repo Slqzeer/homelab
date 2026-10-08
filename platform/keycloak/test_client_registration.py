@@ -247,7 +247,8 @@ class ClientRegistrationTests(unittest.TestCase):
             ["https://penpot.taildf6cd4.ts.net"], penpot["webOrigins"],
         )
         self.assertEqual(
-            # Penpot has no logout endpoint of its own, so the allowlist entry
+            # Penpot does expose POST /api/logout, but there is no
+            # logout URL a browser can be redirected to, so the allowlist entry
             # passes "/" as the logout path and post-logout lands on the
             # application root: origin + "/" = this exact string.
             "https://penpot.taildf6cd4.ts.net/",
@@ -365,7 +366,11 @@ class ClientRegistrationTests(unittest.TestCase):
         self.assertNotIn("--arg secret", script)
         self.assertNotIn("--arg secret_value", script)
         self.assertIn("secret: env[$env_name]", script)
-        self.assertIn("secret_value=$(printenv", script)
+        self.assertIn('secret_value=$("$JQ" -nr --arg env_name "$secret_var"', script)
+        # jq is already a hard dependency of this script; a coreutils
+        # environment reader is not, and cannot be assumed present in the
+        # Keycloak image. Under set -e a missing binary aborts the hook.
+        self.assertNotIn("printenv", script)
         # Both allowlist entries, each naming its own secret env var.
         self.assertIn("reconcile_client homelab-portal PORTAL_CLIENT_SECRET", script)
         self.assertIn("reconcile_client penpot PENPOT_CLIENT_SECRET", script)
