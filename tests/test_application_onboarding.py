@@ -826,6 +826,77 @@ class PenpotRegistrationTests(unittest.TestCase):
         self.assertIn("volatile-lfu", text)
         self.assertIn("dedicated", text)
 
+    def test_penpot_values_wire_shared_datastores_and_oidc(self):
+        values, = self.load("apps/penpot/values.yaml")
+        config = values["config"]
+        self.assertEqual("https://penpot.taildf6cd4.ts.net", config["publicUri"])
+
+        flags = config["flags"].split()
+        self.assertIn("enable-login-with-oidc", flags)
+        self.assertIn("enable-mcp", flags)
+        # Registration stays off: Keycloak is the only way in.
+        self.assertNotIn("enable-registration", flags)
+        # The admin console is a fifth deployment this installation does not need.
+        self.assertNotIn("enable-admin-console", flags)
+        # Every flag carries the enable-/disable- prefix the chart requires;
+        # a bare token is silently ignored by Penpot.
+        for flag in flags:
+            self.assertTrue(flag.startswith(("enable-", "disable-")), flag)
+
+        self.assertEqual("penpot-secrets", config["existingSecret"])
+        self.assertEqual("api-secret-key", config["secretKeys"]["apiSecretKey"])
+
+        postgres = config["postgresql"]
+        self.assertEqual("postgres.databases.svc.cluster.local", postgres["host"])
+        self.assertEqual(5432, postgres["port"])
+        self.assertEqual("penpot", postgres["database"])
+        self.assertEqual("penpot-secrets", postgres["existingSecret"])
+        self.assertEqual("postgres-username", postgres["secretKeys"]["usernameKey"])
+        self.assertEqual("postgres-password", postgres["secretKeys"]["passwordKey"])
+        # A URI key would carry the password inside the URI; the chart builds
+        # a credential-free URI when only the username/password keys are set.
+        self.assertEqual("", postgres["secretKeys"]["postgresqlUriKey"])
+        self.assertNotIn("password", postgres)
+
+        redis = config["redis"]
+        self.assertEqual("redis.databases.svc.cluster.local", redis["host"])
+        self.assertEqual("6379", redis["port"])
+        # Index 3, not 0: this Redis is shared and index 0 may hold keys.
+        self.assertEqual("3", redis["database"])
+        # A separate Secret: a second VaultStaticSecret renders the URI from
+        # the shared Redis password, and two cannot own one destination.
+        self.assertEqual("penpot-redis", redis["existingSecret"])
+        self.assertEqual("redis-uri", redis["secretKeys"]["redisUriKey"])
+
+        assets = values["persistence"]["assets"]
+        self.assertIs(True, assets["enabled"])
+        self.assertEqual("local-path", assets["storageClass"])
+
+        # OIDC lives in backend.extraEnvs, not config.extraEnvs: the chart
+        # injects config.extraEnvs into all five components, so putting the
+        # client secret there would hand it to the MCP server too.
+        env = {entry["name"]: entry for entry in values["backend"]["extraEnvs"]}
+        self.assertEqual("penpot", env["PENPOT_OIDC_CLIENT_ID"]["value"])
+        self.assertEqual(
+            "penpot-secrets",
+            env["PENPOT_OIDC_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"]["name"],
+        )
+        auth = env["PENPOT_OIDC_AUTH_URI"]["value"]
+        self.assertIn("keycloak.taildf6cd4.ts.net", auth)
+        for name in ("PENPOT_OIDC_TOKEN_URI", "PENPOT_OIDC_USER_URI",
+                     "PENPOT_OIDC_JWKS_URI"):
+            self.assertIn(
+                "keycloak.keycloak.svc.cluster.local", env[name]["value"], name,
+            )
+        ssrf = env["PENPOT_SSRF_ALLOWED_HOSTS"]["value"].split()
+        self.assertIn("keycloak.keycloak.svc.cluster.local", ssrf)
+        self.assertIn("keycloak.taildf6cd4.ts.net", ssrf)
+
+    def test_penpot_values_contain_no_credential(self):
+        text = (REPOSITORY_ROOT / "apps/penpot/values.yaml").read_text(encoding="utf-8")
+        for forbidden in ("apiSecretKey: \"", "password: penpot", "mcp-key"):
+            self.assertNotIn(forbidden, text)
+
 
 if __name__ == "__main__":
     unittest.main()
