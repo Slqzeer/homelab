@@ -398,7 +398,7 @@ fi
 rm -f "$KC_PORTAL_SECRET_FILE" "$PORTAL_SESSION_FILE" "$PORTAL_EXISTING_FILE" "$PORTAL_PATH_FILE" "$PORTAL_READ_ERROR_FILE"
 
 echo "==> policy vso-keycloak-read"
-# Grants all three paths the Keycloak pod needs, so its one ServiceAccount needs
+# Grants all four paths the Keycloak pod needs, so its one ServiceAccount needs
 # one role. The data/ segment is REQUIRED and is not a typo -- see the note
 # on vso-canary-read above.
 vault policy write vso-keycloak-read - <<'POLICY'
@@ -411,6 +411,17 @@ path "homelab/data/keycloak-db" {
 }
 
 path "homelab/data/keycloak-portal" {
+  capabilities = ["read"]
+}
+
+# The `penpot` OIDC client secret lives at homelab/penpot-client, NOT at
+# homelab/penpot. This role is what Task 5's keycloak-penpot-client projection
+# reads through, and Keycloak needs exactly one credential from Penpot: the
+# client secret. Granting homelab/data/penpot here instead would hand the
+# Keycloak pod Penpot's database password, its Redis URI and its API secret
+# key as well -- none of which Keycloak has any use for. One credential, one
+# path; the same separation homelab/keycloak-portal makes for the portal.
+path "homelab/data/penpot-client" {
   capabilities = ["read"]
 }
 POLICY
@@ -681,18 +692,31 @@ head -c 4096 /dev/urandom | tr -dc 'a-f0-9' | head -c 64 >"$OMNI_VAL"
 omni_ensure_field storage-encryption-key
 rm -f "$OMNI_READ" "$OMNI_VAL"
 
-echo "==> seeding homelab/penpot and homelab/penpot/data"
+echo "==> seeding homelab/penpot, homelab/penpot/data and homelab/penpot-client"
 # Generated here and never displayed. Values travel to Vault as key=@file, so
 # only the FILENAME ever becomes an argument -- a password on a command line
 # is visible in `ps`, which is the same reason the unsealer reads its keys with
 # key=@<path>.
 #
-# ONE database password, written to BOTH paths. The Job in `databases` runs
-# ALTER ROLE penpot WITH PASSWORD from homelab/penpot/data on every sync,
-# while the chart authenticates with postgres-password from homelab/penpot.
-# Mint these independently and the very next sync installs a password the
-# chart does not have, which surfaces as a login failure naming only the
-# database. Same one-source-of-truth rule apps/tle-dev already follows.
+# TWO credentials live at TWO paths each, and both copies must match:
+#
+#   database password   homelab/penpot/postgres-password
+#                       homelab/penpot/data/password
+#     The Job in `databases` runs ALTER ROLE penpot WITH PASSWORD from
+#     homelab/penpot/data on every sync, while the chart authenticates with
+#     postgres-password from homelab/penpot. Mint these independently and the
+#     very next sync installs a password the chart does not have, which
+#     surfaces as a login failure naming only the database.
+#
+#   OIDC client secret  homelab/penpot/oidc-client-secret
+#                       homelab/penpot-client/clientSecret
+#     Task 5's keycloak-penpot-client projection reads homelab/penpot-client
+#     through the keycloak namespace's own vso-keycloak-read role, because
+#     granting that role homelab/data/penpot would hand Keycloak Penpot's
+#     database password, Redis URI and API secret key as well. One credential,
+#     two paths, so they are written from one generated value -- and read back
+#     from whichever copy already exists. Same one-source-of-truth rule
+#     apps/tle-dev already follows.
 #
 # NO mcp-key. Penpot issues that key from its Integrations page and shows it
 # once, so it cannot be generated ahead of time, and a placeholder here would
@@ -706,19 +730,53 @@ PENPOT_API_SECRET=$(mktemp)
 PENPOT_OIDC_SECRET=$(mktemp)
 trap 'rm -f "$PENPOT_READ" "$PENPOT_DB_PASSWORD" "$PENPOT_REDIS_URI" "$PENPOT_API_SECRET" "$PENPOT_OIDC_SECRET"' EXIT
 
-# Both paths are read before anything is written, so a transient read error
+penpot_recover() {
+  # $1 = vault path, $2 = field, $3 = file to fill. Copies an existing value
+  # out of Vault rather than minting a second one for the sibling path, which
+  # is the only way the two copies of a credential stay equal. Fails loudly if
+  # the copy that exists carries no usable value.
+  vault_optional_get "$1" "$2" "$3" || exit 1
+  if [ "$VAULT_READ_STATUS" != present ] || [ ! -s "$3" ]; then
+    echo "$1 holds no usable $2, so the other copy of this credential cannot be" >&2
+    echo "seeded without leaving the two disagreeing. Seed it by hand, or delete" >&2
+    echo "both paths and re-run this script." >&2
+    exit 1
+  fi
+}
+
+# Every path is read before anything is written, so a transient read error
 # aborts instead of passing for absence -- see vault_optional_get above.
 vault_optional_get homelab/penpot - "$PENPOT_READ" || exit 1
 penpot_status=$VAULT_READ_STATUS
 vault_optional_get homelab/penpot/data - "$PENPOT_READ" || exit 1
 penpot_data_status=$VAULT_READ_STATUS
+vault_optional_get homelab/penpot-client - "$PENPOT_READ" || exit 1
+penpot_client_status=$VAULT_READ_STATUS
+
+# Decide each shared credential ONCE, before any write, so the two paths that
+# carry it cannot disagree.
+if [ "$penpot_data_status" = absent ]; then
+  if [ "$penpot_status" = present ]; then
+    penpot_recover homelab/penpot postgres-password "$PENPOT_DB_PASSWORD"
+  else
+    # Alphanumeric only: this value is composed into the postgres:// URI the
+    # chart builds, where a / or @ breaks parsing far from the cause.
+    head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32 >"$PENPOT_DB_PASSWORD"
+  fi
+fi
+if [ "$penpot_status" = absent ] || [ "$penpot_client_status" = absent ]; then
+  if [ "$penpot_client_status" = present ]; then
+    penpot_recover homelab/penpot-client clientSecret "$PENPOT_OIDC_SECRET"
+  elif [ "$penpot_status" = present ]; then
+    penpot_recover homelab/penpot oidc-client-secret "$PENPOT_OIDC_SECRET"
+  else
+    head -c 512 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 48 >"$PENPOT_OIDC_SECRET"
+  fi
+fi
 
 if [ "$penpot_status" = present ]; then
-  echo "    already present, leaving the credential alone"
+  echo "    homelab/penpot already present, leaving the credential alone"
 else
-  # Alphanumeric only: this value is composed into the postgres:// URI the
-  # chart builds, where a / or @ breaks parsing far from the cause.
-  head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32 >"$PENPOT_DB_PASSWORD"
   # Hex 24 bytes, 192 bits, and NOT base64: this password is interpolated
   # into the redis:// URI below, where base64's + and / would first need
   # percent-encoding. A hand-rolled escape is exactly the kind of thing that
@@ -736,7 +794,6 @@ else
   # client API keys at rest -- it is never pasted into a login form. Same
   # idiom as the omniroute api-key-secret above.
   head -c 4096 /dev/urandom | tr -dc 'a-f0-9' | head -c 64 >"$PENPOT_API_SECRET"
-  head -c 512 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 48 >"$PENPOT_OIDC_SECRET"
   vault kv put homelab/penpot \
       postgres-username=penpot \
       postgres-password=@"$PENPOT_DB_PASSWORD" \
@@ -749,21 +806,14 @@ fi
 if [ "$penpot_data_status" = present ]; then
   echo "    homelab/penpot/data already present, leaving the role password alone"
 else
-  if [ "$penpot_status" = present ]; then
-    # $PENPOT_DB_PASSWORD is still empty here, because the block above took
-    # the "already present" branch. Recover the password homelab/penpot
-    # already holds rather than minting a second one, which the Job would
-    # push into PostgreSQL and strand the chart with.
-    vault_optional_get homelab/penpot postgres-password "$PENPOT_DB_PASSWORD" || exit 1
-    if [ "$VAULT_READ_STATUS" != present ] || [ ! -s "$PENPOT_DB_PASSWORD" ]; then
-      echo "homelab/penpot holds no usable postgres-password, so homelab/penpot/data" >&2
-      echo "cannot be seeded without replacing the chart's database credential." >&2
-      echo "Seed postgres-password at homelab/penpot first, or delete the path and" >&2
-      echo "re-run this script." >&2
-      exit 1
-    fi
-  fi
   vault kv put homelab/penpot/data password=@"$PENPOT_DB_PASSWORD" >/dev/null
+  echo "    generated"
+fi
+
+if [ "$penpot_client_status" = present ]; then
+  echo "    homelab/penpot-client already present, leaving the client secret alone"
+else
+  vault kv put homelab/penpot-client clientSecret=@"$PENPOT_OIDC_SECRET" >/dev/null
   echo "    generated"
 fi
 rm -f "$PENPOT_READ" "$PENPOT_DB_PASSWORD" "$PENPOT_REDIS_URI" "$PENPOT_API_SECRET" "$PENPOT_OIDC_SECRET"

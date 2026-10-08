@@ -398,9 +398,26 @@ class ClientRegistrationTests(unittest.TestCase):
         self.assertIn("token_policies=vso-portal-read", role)
         self.assertNotIn("*", role)
 
+    def roleSettings(self, role_block):
+        """A vault role's `field=value` arguments as a dict.
+
+        Exact by construction. The lines are split before they are compared,
+        so no field can match as a prefix of a longer one -- which a substring
+        check on the raw block allows, in both directions:
+        `bound_service_account_names=penpot` sits inside
+        `bound_service_account_names=penpot-db`, and `...=penpot` matches a
+        role naming `penpot-db` or `penpot-x`. Comparing whole values closes
+        both, and catches a setting the block was not supposed to have.
+        """
+        settings = {}
+        for line in role_block.strip().splitlines():
+            field, _, value = line.strip().partition("=")
+            settings[field] = value.rstrip("\\ ").strip()
+        return settings
+
     def test_vault_penpot_paths_and_roles_are_narrow(self):
         script = (ROOT / "platform/vault/configure-vault.sh").read_text(encoding="utf-8")
-        for path in ("homelab/penpot", "homelab/penpot/data"):
+        for path in ("homelab/penpot", "homelab/penpot/data", "homelab/penpot-client"):
             self.assertIn(f"vault_optional_get {path}", script)
             self.assertIn(f"vault kv put {path}", script)
         for key in ("postgres-password", "postgres-username", "redis-uri",
@@ -411,17 +428,50 @@ class ClientRegistrationTests(unittest.TestCase):
         self.assertIn('path "homelab/data/penpot"', script)
         self.assertIn('path "homelab/data/penpot/data"', script)
 
+        # homelab/penpot-client carries exactly one key, read from a file, and
+        # exactly one write creates it. `clientSecret=` alone would pass on the
+        # keycloak-portal block's own use of the same field name.
+        client_writes = [line.strip() for line in script.splitlines()
+                         if line.strip().startswith("vault kv put homelab/penpot-client")]
+        self.assertEqual(1, len(client_writes), client_writes)
+        # Anchored past the path, so a longer name cannot satisfy it.
+        self.assertRegex(client_writes[0],
+                         r"^vault kv put homelab/penpot-client clientSecret=@")
+
+        # The keycloak namespace reads the Penpot client secret through its own
+        # vso-keycloak-read role, so that policy must grant the dedicated path.
+        # It must NOT be widened to homelab/data/penpot: Keycloak needs one
+        # credential from Penpot, not its database password, Redis URI or API
+        # secret key. The closing quote is what makes each of these exact --
+        # `homelab/data/penpot` is a prefix of `homelab/data/penpot-client`.
+        keycloak_read = script.split("vault policy write vso-keycloak-read - <<'POLICY'\n", 1)[1]
+        keycloak_read = keycloak_read.split("\nPOLICY", 1)[0]
+        self.assertIn('path "homelab/data/penpot-client"', keycloak_read)
+        self.assertNotIn('path "homelab/data/penpot"', keycloak_read)
+        self.assertNotIn("*", keycloak_read)
+
+        # One role per ServiceAccount. `vso-penpot` matches its own header only:
+        # the db role is `vso-penpot-db`, which this search string cannot reach.
         app_role = script.split("vault write auth/kubernetes/role/vso-penpot \\\n", 1)[1]
         app_role = app_role.split("\n\n", 1)[0]
-        self.assertIn("bound_service_account_names=penpot", app_role)
-        self.assertIn("bound_service_account_namespaces=penpot", app_role)
-        self.assertIn("token_policies=vso-penpot-read", app_role)
+        self.assertEqual({
+            "bound_service_account_names": "penpot",
+            "bound_service_account_namespaces": "penpot",
+            "audience": "vault",
+            "token_policies": "vso-penpot-read",
+            "ttl": "1h",
+        }, self.roleSettings(app_role))
         self.assertNotIn("*", app_role)
 
         db_role = script.split("vault write auth/kubernetes/role/vso-penpot-db \\\n", 1)[1]
         db_role = db_role.split("\n\n", 1)[0]
-        self.assertIn("bound_service_account_names=penpot-db", db_role)
-        self.assertIn("bound_service_account_namespaces=databases", db_role)
+        self.assertEqual({
+            "bound_service_account_names": "penpot-db",
+            "bound_service_account_namespaces": "databases",
+            "audience": "vault",
+            "token_policies": "vso-penpot-db-read",
+            "ttl": "1h",
+        }, self.roleSettings(db_role))
         self.assertNotIn("*", db_role)
 
     def test_vault_seed_repairs_empty_key_and_preserves_rotation_key(self):
