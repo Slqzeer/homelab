@@ -588,7 +588,7 @@ class ClientRegistrationTests(unittest.TestCase):
         # The Job in `databases` never talks to Redis.
         self.assertNotIn("vso-redis-read", db_role)
 
-    def run_penpot_seed(self, state, allow_literal=True, drain=None):
+    def run_penpot_seed(self, state, allow_literal=True, drain=None, tmpdir=None):
         """Execute the real penpot seed block against FAKE_VAULT, twice.
 
         The block calls vault_optional_get, which is defined earlier in the
@@ -636,6 +636,10 @@ class ClientRegistrationTests(unittest.TestCase):
                 env["FAKE_VAULT_ALLOW_LITERAL"] = "1"
             if drain:
                 env["FAKE_VAULT_DRAIN"] = drain
+            if tmpdir:
+                # Every mktemp in the block lands here, so a test can see
+                # what the EXIT trap failed to remove.
+                env["TMPDIR"] = str(tmpdir)
             runs, per_run_events = [], []
             for _ in range(2):
                 runs.append(subprocess.run(["/bin/sh", str(script)], env=env, text=True,
@@ -733,6 +737,17 @@ class ClientRegistrationTests(unittest.TestCase):
                 output = runs[0].stdout + runs[0].stderr + runs[1].stdout + runs[1].stderr
                 for canary in ("db-shared", "oidc-shared", "app-api"):
                     self.assertNotIn(canary, output)
+
+    def test_vault_penpot_seed_leaves_no_temporary_file_behind(self):
+        # The block's EXIT trap replaces the earlier ones, so it must name
+        # every temporary file still live -- including the shared
+        # PORTAL_READ_ERROR_FILE, which vault_optional_get recreates after the
+        # portal block removed it, and which can hold a vault error message.
+        with tempfile.TemporaryDirectory() as directory:
+            runs, _, _ = self.run_penpot_seed({}, tmpdir=directory)
+            self.assertEqual([0, 0], [run.returncode for run in runs],
+                             [run.stderr for run in runs])
+            self.assertEqual([], sorted(os.listdir(directory)))
 
     def test_vault_penpot_seed_repairs_a_present_path_missing_a_field(self):
         """A path that exists but lacks a field is repaired with kv patch.

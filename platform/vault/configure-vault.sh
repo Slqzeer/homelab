@@ -736,7 +736,9 @@ PENPOT_DB_PASSWORD=$(mktemp)
 PENPOT_API_SECRET=$(mktemp)
 PENPOT_OIDC_SECRET=$(mktemp)
 PENPOT_CHECK=$(mktemp)
-trap 'rm -f "$PENPOT_READ" "$PENPOT_CHECK" "$PENPOT_DB_PASSWORD" "$PENPOT_API_SECRET" "$PENPOT_OIDC_SECRET"' EXIT
+# This trap replaces the earlier ones, so it names PORTAL_READ_ERROR_FILE
+# too: vault_optional_get recreates it after the portal block removed it.
+trap 'rm -f "$PORTAL_READ_ERROR_FILE" "$PENPOT_READ" "$PENPOT_CHECK" "$PENPOT_DB_PASSWORD" "$PENPOT_API_SECRET" "$PENPOT_OIDC_SECRET"' EXIT
 
 penpot_unusable() {
   # $1 = path, $2 = its field, $3 = what penpot_field found there,
