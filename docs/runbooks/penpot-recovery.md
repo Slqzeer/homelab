@@ -38,7 +38,7 @@ every upgrade; a mismatch means an upstream tag moved.
 | Path | Class | Restored from |
 | --- | --- | --- |
 | `penpot` database | durable | `pg_dump` / `pg_restore` |
-| `penpot-assets` PVC | durable | filesystem copy |
+| `penpot-data-assets` PVC | durable | `tar` stream through `penpot-backend` |
 | `api-secret-key` | secret-derived | Vault; rotation invalidates sessions |
 | `oidc-client-secret` | secret-derived | Vault; the registration Job re-applies it |
 | `mcp-key` | secret-derived | Penpot Integrations; regenerating revokes the old key |
@@ -48,7 +48,17 @@ every upgrade; a mismatch means an upstream tag moved.
 
 Three steps happen outside git. None is reproduced by a cluster rebuild.
 
-1. **Vault seed.** Run `platform/vault/configure-vault.sh`. It seeds three
+1. **Vault seed.** Run `platform/vault/configure-vault.sh` **before the
+   branch is pushed or merged**: the `penpot` Application's projections and
+   the `vso-penpot` role it relies on must exist when Argo CD first syncs it.
+
+   ```sh
+   sg k3s-admin -c 'kubectl -n vault exec -it vault-0 -- vault login'
+   sg k3s-admin -c 'kubectl -n vault exec -i vault-0 -- sh' < platform/vault/configure-vault.sh
+   sg k3s-admin -c 'kubectl -n vault exec vault-0 -- rm -f /home/vault/.vault-token'
+   ```
+
+   It seeds three
    paths: `homelab/penpot` (`postgres-password`, `postgres-username`,
    `api-secret-key`, `oidc-client-secret`),
    `homelab/penpot/data` (`password`), and `homelab/penpot-client`
@@ -72,10 +82,12 @@ Three steps happen outside git. None is reproduced by a cluster rebuild.
    enable, then generate a key. It is shown **once** and is not
    recoverable. Store it in a password manager, then seed it into Vault.
    This runs **inside the Vault pod**, the same way
-   `platform/vault/configure-vault.sh` does — the `vault` CLI is only
-   authenticated there. Paste the key at the `MCP key:` prompt:
+   `platform/vault/configure-vault.sh` does. Log in first — the `vault` CLI
+   in the pod holds no token until you do — then paste the key at the
+   `MCP key:` prompt, and remove the token afterwards:
 
    ```sh
+   sg k3s-admin -c 'kubectl -n vault exec -it vault-0 -- vault login'
    sg k3s-admin -c 'kubectl -n vault exec -it vault-0 -- sh -c '"'"'
      umask 077
      MCP_KEY_FILE=$(mktemp)
@@ -87,6 +99,7 @@ Three steps happen outside git. None is reproduced by a cluster rebuild.
      vault kv patch homelab/penpot mcp-key=@"$MCP_KEY_FILE"
      vault kv get -field=mcp-key homelab/penpot >/dev/null && echo "mcp-key stored"
    '"'"''
+   sg k3s-admin -c 'kubectl -n vault exec vault-0 -- rm -f /home/vault/.vault-token'
    ```
 
    The key is read from the pod's terminal and written straight to a private
@@ -115,31 +128,77 @@ Three steps happen outside git. None is reproduced by a cluster rebuild.
    the same delayed, misleading failure mode as the GHCR token.
 3. **Keycloak client.** The `penpot` OIDC client is reconciled by the
    `PostSync` hook in `platform/keycloak/config/client-registration.yaml`,
-   not by hand. It reads its secret from Vault, so re-running the hook is
-   how a rotated secret reaches Keycloak.
+   not by hand. It reads its secret from the Secret `keycloak/keycloak-penpot-client`,
+   which the `penpot` Application (sync wave 25) projects from Vault — so on
+   first rollout the hook usually runs **before** that Secret exists. It then
+   reconciles the portal client, skips `penpot` with the log line
+   `WARNING: penpot client skipped`, and succeeds. Nothing re-runs it on its
+   own: **after the `penpot` Application's first sync, re-sync the `keycloak`
+   Application** and check the hook log says `created penpot client` (or
+   `penpot client already current`):
+
+   ```sh
+   sg k3s-admin -c 'kubectl -n keycloak logs job/keycloak-client-registration'
+   ```
+
+   Re-syncing `keycloak` is also how a rotated client secret reaches
+   Keycloak.
 
 ## Backup and restore
 
 Local-path storage is single-node and is **not** a backup. Nothing here is
 backed up automatically.
 
+The database lives in the shared PostgreSQL pod `postgres-0` (StatefulSet
+`postgres`, container `postgres`). `kubectl cp` takes a **pod** name, not
+`statefulset/...`, which it would parse as `namespace/pod`. The assets live
+on PVC `penpot-data-assets`, mounted at `/opt/data/assets` in Deployment
+`penpot-backend`, and are streamed through that pod with `tar`. The backend
+runs as UID 1001; the local-path volume directory is created mode `0777`, so
+that user can read and write it.
+
 ```bash
 # Database. Consistent because pg_dump takes a snapshot.
-kubectl -n databases exec statefulset/postgres -- \
+kubectl -n databases exec postgres-0 -c postgres -- \
   pg_dump -U postgres -d penpot --format=custom --file=/tmp/penpot.dump
-kubectl -n databases cp statefulset/postgres:/tmp/penpot.dump ./penpot.dump
+kubectl -n databases cp -c postgres postgres-0:/tmp/penpot.dump ./penpot.dump
+kubectl -n databases exec postgres-0 -c postgres -- rm -f /tmp/penpot.dump
 
 # Assets.
-kubectl -n penpot cp statefulset/penpot-assets:/opt/data/assets ./penpot-assets
+kubectl -n penpot exec deploy/penpot-backend -- \
+  tar -C /opt/data/assets -cf - . > penpot-assets.tar
 ```
 
 Restore order is assets first, then the database: the database stores asset
-references, so it is meaningless without the files behind it.
+references, so it is meaningless without the files behind it. The backend
+must be **stopped** while `pg_restore --clean` drops and recreates its
+tables, or it fails mid-restore and may write into a half-restored schema.
 
 ```bash
-kubectl -n databases cp ./penpot.dump statefulset/postgres:/tmp/penpot.dump
-kubectl -n databases exec statefulset/postgres -- \
+# Assets, while the backend is still running (the stream goes through it).
+# --no-overwrite-dir: the volume root belongs to root; UID 1001 can write
+# into it but not change its mode or times.
+kubectl -n penpot exec -i deploy/penpot-backend -- \
+  tar -C /opt/data/assets --no-overwrite-dir -xf - < penpot-assets.tar
+
+# Database, with the backend scaled to zero. Stop Argo CD first, or
+# selfHeal scales the backend back up mid-restore. `root` goes first: it
+# self-heals the penpot Application's own syncPolicy back.
+kubectl -n argocd patch application root --type merge \
+  -p '{"spec":{"syncPolicy":{"automated":null}}}'
+kubectl -n argocd patch application penpot --type merge \
+  -p '{"spec":{"syncPolicy":{"automated":null}}}'
+kubectl -n penpot scale deploy/penpot-backend --replicas=0
+kubectl -n penpot rollout status deploy/penpot-backend
+kubectl -n databases cp -c postgres ./penpot.dump postgres-0:/tmp/penpot.dump
+kubectl -n databases exec postgres-0 -c postgres -- \
   pg_restore -U postgres -d penpot --clean --if-exists /tmp/penpot.dump
+kubectl -n databases exec postgres-0 -c postgres -- rm -f /tmp/penpot.dump
+kubectl -n penpot scale deploy/penpot-backend --replicas=1
+kubectl -n penpot rollout status deploy/penpot-backend
+# Hand control back: root is the one manifest applied by hand, and its
+# next sync restores the penpot Application's automated policy.
+kubectl apply -f environments/homelab/root.yaml
 ```
 
 ### Restore drill
@@ -176,7 +235,7 @@ no data restore.
 
 Disable portal publication first, then take a final dump and assets copy.
 Revoke the Keycloak client, remove the child Application, then inspect the
-`penpot-assets` PVC before removing the namespace. Deleting the namespace
+`penpot-data-assets` PVC before removing the namespace. Deleting the namespace
 cascades to the PVC and is not reversible.
 
 ## Known gaps
@@ -202,3 +261,14 @@ cascades to the PVC and is not reversible.
 - **The admin console is disabled.** `enable-admin-console` is absent from
   `config.flags`; it is a fifth deployment on port 3000 that a personal
   installation does not need. Re-enabling it requires a NetworkPolicy rule.
+- **Keycloak is the only way in.** `config.flags` disables registration and
+  password login explicitly (Penpot 2.18.3 enables both by default), and
+  enables `oidc-registration` so a first Keycloak login can create its
+  account. There is no password fallback: while Keycloak is down nobody can
+  sign in to Penpot.
+- **The chart's helm-test pod.** Chart `1.11.3` renders Pod
+  `penpot-test-connection` (`curlimages/curl:8.11.1`, annotated
+  `helm.sh/hook: test`) and no value disables it. Argo CD is expected not to
+  create `helm.sh/hook: test` resources; go-live checks that no such pod
+  exists. Should one ever be created, it borrows the frontend's hardened
+  securityContext and so passes the namespace's `restricted` admission.

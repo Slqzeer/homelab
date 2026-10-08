@@ -124,7 +124,7 @@ in §6 admit only the frontend on 4401/4402.
 
 The MCP key is generated in Penpot's UI, displayed exactly once, and is not
 derivable — Vault cannot mint it. It is seeded into Vault at
-`homelab/penpot/mcp` and handed to the AI client from there. Its expiry date must
+`homelab/penpot`, key `mcp-key`, and handed to the AI client from there. Its expiry date must
 be recorded in the runbook, the same lesson as the GHCR token's missing expiry
 in `platform/registry/README.md`.
 
@@ -212,9 +212,12 @@ Penpot's OIDC variables are set through the chart's `config.extraEnvs`, which
 Callback URI registered in Keycloak:
 `https://penpot.taildf6cd4.ts.net/api/oauth/redirect`.
 
-`enable-registration` is kept **off** and `enable-login-with-password` **on**, so
-the only way in is the homelab's identity provider; the password path remains
-reachable in the UI as a recovery route without being advertised.
+Keycloak is the only way in. Penpot 2.18.3 enables registration and password
+login by default, so leaving those flags out does not turn them off: the flags
+carry `disable-registration` and `disable-login-with-password` explicitly, plus
+`enable-oidc-registration`, without which a first Keycloak login could not
+create its Penpot account once general registration is off. There is no
+password recovery route; while Keycloak is down, nobody signs in.
 
 ### The issuer-hostname risk
 
@@ -252,6 +255,12 @@ loop over allowlisted clients rather than hardcoding `homelab-portal`, preservin
 its current guarantees: no secrets in argv, comparison that projects only owned
 fields, separate client-scope mapping with verification, and abort on duplicate
 or ambiguous client IDs.
+
+The `keycloak-penpot-client` Secret is projected by the wave-25 `penpot`
+Application, after the hook can first run, so the hook's reference to it is
+`optional`: without it the hook reconciles the portal, skips `penpot` with a
+warning and succeeds. The `keycloak` Application is re-synced after Penpot's
+first sync to register the client.
 
 ## Sync wave
 
