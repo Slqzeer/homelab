@@ -158,11 +158,11 @@ else:
     sys.exit(4)
 '''
 
-# The shared Redis has ONE requirepass, rendered from homelab/redis/password,
-# so Penpot's redis-uri must carry exactly that password. A canary, so a test
-# can prove it never reaches argv or the terminal.
+# The shared Redis's one requirepass, at homelab/redis. Penpot gets it from VSO
+# (a VaultStaticSecret template under the vso-penpot role), never from the
+# penpot seed block, so the seed tests put this canary in Vault and prove the
+# block neither reads, copies, prints nor passes it.
 REDIS_PASSWORD = "RedisCanary7Qw3Zx9Lm2Np4Vb6Tk8Hd"
-REDIS_URI = f"redis://:{REDIS_PASSWORD}@redis.databases.svc.cluster.local:6379/3"
 REDIS_PATH = {"username": "default", "password": REDIS_PASSWORD}
 
 
@@ -456,7 +456,7 @@ class ClientRegistrationTests(unittest.TestCase):
             self.assertIn(f"vault_optional_get {path}", script)
             # Anchored, or the first case is satisfied by `... penpot/data`.
             self.assertRegex(script, rf"(?m)^ *vault kv put {re.escape(path)}( |\n)")
-        for key in ("postgres-password", "redis-uri", "api-secret-key", "oidc-client-secret"):
+        for key in ("postgres-password", "api-secret-key", "oidc-client-secret"):
             # The `@` is load-bearing: it is what proves the value is read from
             # a FILE. Without it, a generated secret interpolated straight into
             # the command line would satisfy the assertion while being visible
@@ -467,6 +467,12 @@ class ClientRegistrationTests(unittest.TestCase):
         self.assertIn("postgres-username=penpot", script)
         # The MCP key is issued by Penpot and cannot be seeded here.
         self.assertNotIn("mcp-key=@", script)
+        # Nor is a Redis URI: VSO renders it from homelab/redis, so no copy of
+        # the shared Redis password is ever kept at homelab/penpot.
+        seed_block = script.split('echo "==> seeding homelab/penpot,', 1)[1]
+        seed_block = seed_block.split('echo "==> policy vso-penpot-read"', 1)[0]
+        self.assertNotIn("redis-uri=", seed_block)
+        self.assertNotIn("homelab/redis password", seed_block)
         self.assertIn('path "homelab/data/penpot"', script)
         self.assertIn('path "homelab/data/penpot/data"', script)
 
@@ -523,10 +529,18 @@ class ClientRegistrationTests(unittest.TestCase):
             "bound_service_account_names": "penpot",
             "bound_service_account_namespaces": "penpot",
             "audience": "vault",
-            "token_policies": "vso-penpot-read",
+            # vso-redis-read is the existing policy on homelab/data/redis, from
+            # which Penpot's VaultStaticSecret renders the Redis URI.
+            "token_policies": "vso-penpot-read,vso-redis-read",
             "ttl": "1h",
         }, self.roleSettings(app_role))
         self.assertNotIn("*", app_role)
+        # Granted by adding the existing policy to the role, NOT by widening
+        # vso-penpot-read, which stays the one-path policy it is.
+        self.assertEqual(['homelab/data/penpot'],
+                         re.findall(r'path "([^"]+)"', policies["vso-penpot-read"]))
+        self.assertEqual(['homelab/data/redis'],
+                         re.findall(r'path "([^"]+)"', policies["vso-redis-read"]))
 
         db_role = script.split("vault write auth/kubernetes/role/vso-penpot-db \\\n", 1)[1]
         db_role = db_role.split("\n\n", 1)[0]
@@ -538,23 +552,25 @@ class ClientRegistrationTests(unittest.TestCase):
             "ttl": "1h",
         }, self.roleSettings(db_role))
         self.assertNotIn("*", db_role)
+        # The Job in `databases` never talks to Redis.
+        self.assertNotIn("vso-redis-read", db_role)
 
-    def run_penpot_seed(self, state, allow_literal=True, redis=REDIS_PATH, drain=None):
+    def run_penpot_seed(self, state, allow_literal=True, drain=None):
         """Execute the real penpot seed block against FAKE_VAULT, twice.
 
         The block calls vault_optional_get, which is defined earlier in the
         script, so the test has to supply it -- the same way the tests above
         supply only the block they exercise.
 
-        homelab/redis is seeded earlier in the same script, so it is supplied
-        here unless `redis` is None. It is checked to be untouched and then
-        dropped from the returned state, which therefore holds only the paths
-        this block owns. Every run is also checked for any secret value in
-        Vault -- before or after -- reaching the terminal or a vault argv.
+        homelab/redis is seeded earlier in the same script, so it is always
+        present here, holding a canary. The block must never read it, write it,
+        or write a redis-uri anywhere: Penpot's Redis URI is VSO's to render.
+        homelab/redis is dropped from the returned state, which therefore holds
+        only the paths this block owns. Every run is also checked for any
+        secret value in Vault -- before or after -- reaching the terminal or a
+        vault argv.
         """
-        state = dict(state)
-        if redis is not None:
-            state["homelab/redis"] = redis
+        state = dict(state, **{"homelab/redis": REDIS_PATH})
         source = (ROOT / "platform/vault/configure-vault.sh").read_text(encoding="utf-8")
         header = ('echo "==> seeding homelab/penpot, homelab/penpot/data '
                   'and homelab/penpot-client"')
@@ -594,8 +610,13 @@ class ClientRegistrationTests(unittest.TestCase):
                 per_run_events.append(events_path.read_text())
             final = json.loads(state_path.read_text())
             argv = argv_path.read_text()
-        self.assertEqual(state.get("homelab/redis"), final.pop("homelab/redis", None),
+        self.assertEqual(state["homelab/redis"], final.pop("homelab/redis", None),
                          "the penpot block must never write homelab/redis")
+        self.assertNotIn("homelab/redis", argv, "the penpot block must not read homelab/redis")
+        for events in per_run_events:
+            for line in events.splitlines():
+                self.assertNotIn("redis-uri", json.loads(line)["keys"],
+                                 "the penpot block must never write a redis-uri")
         output = "".join(run.stdout + run.stderr for run in runs)
         # postgres-username is the one non-secret: the constant `penpot`, which
         # is also part of every path name.
@@ -625,7 +646,6 @@ class ClientRegistrationTests(unittest.TestCase):
         def app_at(password, oidc):
             """homelab/penpot populated, with the two shared values it carries."""
             return {"postgres-username": "penpot", "postgres-password": password,
-                    "redis-uri": REDIS_URI,
                     "api-secret-key": "app-api", "oidc-client-secret": oidc}
 
         data = {"homelab/penpot/data": {"password": "db-shared"}}
@@ -690,13 +710,11 @@ class ClientRegistrationTests(unittest.TestCase):
         which is what makes repairing better than refusing.
         """
         app = {"postgres-username": "penpot", "postgres-password": "shared-pw",
-               "redis-uri": REDIS_URI,
                "api-secret-key": "app-api", "oidc-client-secret": "shared-oidc"}
         client = {"homelab/penpot-client": {"clientSecret": "shared-oidc"}}
         data = {"homelab/penpot/data": {"password": "shared-pw"}}
         without_oidc = {k: v for k, v in app.items() if k != "oidc-client-secret"}
-        without_uris = {k: v for k, v in app.items()
-                        if k not in ("redis-uri", "api-secret-key")}
+        without_api = {k: v for k, v in app.items() if k != "api-secret-key"}
         cases = (
             # label, starting state, the field that must be repaired
             ("app path missing oidc-client-secret",
@@ -729,16 +747,13 @@ class ClientRegistrationTests(unittest.TestCase):
                 for canary in ("shared-pw", "shared-oidc", "app-api"):
                     self.assertNotIn(canary, runs[0].stdout + runs[0].stderr)
 
-        # A field with no sibling to copy from is generated (api-secret-key) or
-        # derived (redis-uri), then patched.
+        # A field with no sibling to copy from is generated, then patched.
         runs, state, _ = self.run_penpot_seed(
-            {"homelab/penpot": without_uris, **client, **data})
+            {"homelab/penpot": without_api, **client, **data})
         self.assertEqual(0, runs[0].returncode, runs[0].stderr)
-        # redis-uri is derived from homelab/redis, never generated.
-        self.assertEqual(REDIS_URI, state["homelab/penpot"]["redis-uri"])
         self.assertRegex(state["homelab/penpot"]["api-secret-key"], r"^[0-9a-f]{64}$")
-        for key in ("postgres-username", "postgres-password", "oidc-client-secret"):
-            self.assertEqual(without_uris[key], state["homelab/penpot"][key], key)
+        for key, value in without_api.items():
+            self.assertEqual(value, state["homelab/penpot"][key], key)
 
     def test_vault_penpot_seed_refuses_two_copies_that_differ(self):
         """Both copies usable but not equal must stop the run, silently fixed never.
@@ -750,7 +765,6 @@ class ClientRegistrationTests(unittest.TestCase):
         preference hides a split behind a login that still works.
         """
         app = {"postgres-username": "penpot", "postgres-password": "shared-pw",
-               "redis-uri": REDIS_URI,
                "api-secret-key": "app-api", "oidc-client-secret": "shared-oidc"}
         cases = (
             ("database password differs",
@@ -844,63 +858,32 @@ class ClientRegistrationTests(unittest.TestCase):
         self.assertNotIn("neither", runs[0].stderr)
         self.assertEqual("", per_run_events[0], "nothing may be written on a race")
 
-    def test_vault_penpot_redis_uri_is_derived_from_the_shared_redis_password(self):
-        """redis-uri carries homelab/redis/password, on every run.
+    def test_vault_penpot_seed_leaves_the_redis_uri_to_vso(self):
+        """The seed block never manages a Redis URI.
 
-        The shared Redis has one requirepass, rendered from homelab/redis. A
-        password minted for Penpot would be one Redis rejects, and a URI that
-        was right once goes stale the moment homelab/redis is rotated. So the
-        block derives the URI on every run, compares it with what is stored,
-        and patches it only when they differ. The password never reaches argv
-        or the terminal; run_penpot_seed checks that for every case here.
+        The shared Redis has one requirepass, at homelab/redis. Penpot's
+        VaultStaticSecret renders the URI from that path, so a copy kept at
+        homelab/penpot could only fall out of step on rotation. The block must
+        not write one on a cold start, and must leave a redis-uri written by an
+        older run exactly where it is -- unused, but not this block's to delete.
+        run_penpot_seed additionally proves homelab/redis is never read.
         """
-        app = {"postgres-username": "penpot", "postgres-password": "shared-pw",
-               "redis-uri": REDIS_URI, "api-secret-key": "app-api",
-               "oidc-client-secret": "shared-oidc"}
-        others = {"homelab/penpot/data": {"password": "shared-pw"},
+        runs, state, _ = self.run_penpot_seed({})
+        self.assertEqual(0, runs[0].returncode, runs[0].stderr)
+        self.assertEqual({"postgres-username", "postgres-password", "api-secret-key",
+                          "oidc-client-secret"}, set(state["homelab/penpot"]))
+
+        legacy = {"postgres-username": "penpot", "postgres-password": "shared-pw",
+                  "redis-uri": "redis://:LegacyPw1234567890@redis.databases.svc"
+                               ".cluster.local:6379/3",
+                  "api-secret-key": "app-api", "oidc-client-secret": "shared-oidc"}
+        seeded = {"homelab/penpot": legacy,
+                  "homelab/penpot/data": {"password": "shared-pw"},
                   "homelab/penpot-client": {"clientSecret": "shared-oidc"}}
-
-        with self.subTest(case="fresh run"):
-            runs, state, _ = self.run_penpot_seed({})
-            self.assertEqual(0, runs[0].returncode, runs[0].stderr)
-            self.assertEqual(REDIS_URI, state["homelab/penpot"]["redis-uri"])
-            self.assertIn(REDIS_PASSWORD, state["homelab/penpot"]["redis-uri"])
-
-        with self.subTest(case="stale redis-uri is repaired"):
-            stale = dict(app, **{"redis-uri": "redis://:StaleOldPw1234567890@"
-                                              "redis.databases.svc.cluster.local:6379/3"})
-            runs, state, per_run_events = self.run_penpot_seed(
-                {"homelab/penpot": stale, **others})
-            self.assertEqual(0, runs[0].returncode, runs[0].stderr)
-            self.assertEqual(REDIS_URI, state["homelab/penpot"]["redis-uri"])
-            # Patched, not put: every other key at the path survives.
-            self.assertEqual(dict(stale, **{"redis-uri": REDIS_URI}), state["homelab/penpot"])
-            self.assertEqual(others, {k: v for k, v in state.items() if k != "homelab/penpot"})
-            events = [json.loads(line) for line in per_run_events[0].splitlines()]
-            self.assertEqual([{"operation": "patch", "path": "homelab/penpot",
-                               "keys": ["redis-uri"]}], events)
-            self.assertIn("updated homelab/penpot/redis-uri", runs[0].stdout)
-            # Converged: the second run writes nothing.
-            self.assertEqual(0, runs[1].returncode, runs[1].stderr)
-            self.assertEqual(per_run_events[0], per_run_events[1])
-
-        with self.subTest(case="already correct writes nothing"):
-            runs, state, per_run_events = self.run_penpot_seed(
-                {"homelab/penpot": app, **others})
-            self.assertEqual(0, runs[0].returncode, runs[0].stderr)
-            self.assertEqual("", per_run_events[0])
-            self.assertEqual(app, state["homelab/penpot"])
-
-        for label, redis in (("homelab/redis absent", None),
-                             ("password blank", {"username": "default", "password": ""}),
-                             ("password not URI-safe",
-                              {"username": "default", "password": "Has@And/Slash"})):
-            with self.subTest(case=label):
-                runs, state, per_run_events = self.run_penpot_seed({}, redis=redis)
-                self.assertNotEqual(0, runs[0].returncode, runs[0].stdout)
-                self.assertIn("homelab/redis/password", runs[0].stderr)
-                self.assertEqual("", per_run_events[0], "nothing may be written")
-                self.assertEqual({}, state)
+        runs, state, per_run_events = self.run_penpot_seed(seeded)
+        self.assertEqual(0, runs[0].returncode, runs[0].stderr)
+        self.assertEqual("", per_run_events[0], "a converged state must write nothing")
+        self.assertEqual(seeded, state)
 
     def test_vault_seed_repairs_empty_key_and_preserves_rotation_key(self):
         source = (ROOT / "platform/vault/configure-vault.sh").read_text(encoding="utf-8")

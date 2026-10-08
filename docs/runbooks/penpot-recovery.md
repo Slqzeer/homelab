@@ -50,7 +50,7 @@ Three steps happen outside git. None is reproduced by a cluster rebuild.
 
 1. **Vault seed.** Run `platform/vault/configure-vault.sh`. It seeds three
    paths: `homelab/penpot` (`postgres-password`, `postgres-username`,
-   `redis-uri`, `api-secret-key`, `oidc-client-secret`),
+   `api-secret-key`, `oidc-client-secret`),
    `homelab/penpot/data` (`password`), and `homelab/penpot-client`
    (`clientSecret`). The password and the client secret each live at **two**
    paths on purpose — a Job and the chart read different copies. The script
@@ -61,16 +61,13 @@ Three steps happen outside git. None is reproduced by a cluster rebuild.
    which cannot disturb the other keys. Only when neither copy holds a usable
    value does it stop and ask you to seed one.
 
-   `redis-uri` is **derived, not generated**: it is
-   `redis://:<password>@redis.databases.svc.cluster.local:6379/3`, where the
-   password is the shared Redis's one `requirepass` from `homelab/redis`
-   (`password`). On every run the script rebuilds that URI and patches
-   `redis-uri` if what is stored differs. So **after rotating
-   `homelab/redis`, re-run the script and then restart the Penpot backend**
-   (`sg k3s-admin -c 'kubectl -n penpot rollout restart deployment/penpot-backend'`)
-   — until both happen Penpot still presents the old password and loses
-   Redis. If `homelab/redis` has no usable password the script stops before
-   writing anything.
+   The Redis URI is **not** seeded here. VSO renders it from the shared
+   Redis password at `homelab/redis` (the VaultStaticSecret in
+   `apps/penpot/config/vault-secrets.yaml`, read through the existing
+   `vso-redis-read` policy on the `vso-penpot` role), so rotating
+   `homelab/redis` rolls Penpot through VSO with no re-run of this script. A
+   `redis-uri` key at `homelab/penpot` left by an older run of the script is
+   unused; the script neither reads nor deletes it.
 2. **MCP key.** In Penpot: *Your account → Integrations → MCP Server* →
    enable, then generate a key. It is shown **once** and is not
    recoverable. Store it in a password manager, then seed it into Vault.
@@ -97,9 +94,9 @@ Three steps happen outside git. None is reproduced by a cluster rebuild.
    the same `key=@<path>` rule the seed script follows.
 
    **`vault kv patch`, not `vault kv put`.** `homelab/penpot` already carries
-   `postgres-password`, `postgres-username`, `redis-uri`, `api-secret-key` and
+   `postgres-password`, `postgres-username`, `api-secret-key` and
    `oidc-client-secret`, and a KV v2 `put` replaces every key at the path. A
-   `put` here would delete all five, leaving Penpot unable to reach
+   `put` here would delete all four, leaving Penpot unable to reach
    PostgreSQL or to complete an OIDC login, and the loss is invisible until
    the workload fails. `patch` merges the one key in.
 

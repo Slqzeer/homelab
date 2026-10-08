@@ -418,8 +418,8 @@ path "homelab/data/keycloak-portal" {
 # homelab/penpot. Task 5's keycloak-penpot-client projection reads this policy
 # through role vso-keycloak, and Keycloak needs exactly one credential from
 # Penpot: the client secret. Granting homelab/data/penpot here instead would
-# hand the Keycloak pod Penpot's database password, its Redis URI and its API
-# secret key as well -- none of which Keycloak has any use for. One credential,
+# hand the Keycloak pod Penpot's database password and its API secret key as
+# well -- neither of which Keycloak has any use for. One credential,
 # one path; the same separation homelab/keycloak-portal makes for the portal.
 path "homelab/data/penpot-client" {
   capabilities = ["read"]
@@ -713,16 +713,18 @@ echo "==> seeding homelab/penpot, homelab/penpot/data and homelab/penpot-client"
 #     Task 5's keycloak-penpot-client projection reads homelab/penpot-client
 #     through the keycloak namespace's own vso-keycloak-read policy, because
 #     granting that policy homelab/data/penpot would hand Keycloak Penpot's
-#     database password, Redis URI and API secret key as well. One credential,
+#     database password and API secret key as well. One credential,
 #     two paths, so they are written from one generated value -- and read back
 #     from whichever copy already exists. Same one-source-of-truth rule
 #     apps/tle-dev already follows.
 #
-# redis-uri is NOT generated. The shared Redis in `databases` has exactly one
-# requirepass, rendered from homelab/redis/password, so a password minted here
-# would be one Redis rejects. The URI is derived from that password on EVERY
-# run and rewritten whenever it differs, so re-running this script after a
-# rotation of homelab/redis carries the new password to Penpot.
+# NO redis-uri. The shared Redis in `databases` has exactly one requirepass,
+# from homelab/redis/password. Penpot reads that path the way every other
+# consumer reads a Vault credential: its VaultStaticSecret renders the URI with
+# a VSO template, and the vso-penpot role below carries vso-redis-read for it.
+# A copy kept here would be one more thing to fall out of step on rotation. A
+# redis-uri key left at homelab/penpot by an older run of this script is unused
+# and is deliberately neither read nor deleted.
 #
 # NO mcp-key. Penpot issues that key from its Integrations page and shows it
 # once, so it cannot be generated ahead of time, and a placeholder here would
@@ -731,12 +733,10 @@ echo "==> seeding homelab/penpot, homelab/penpot/data and homelab/penpot-client"
 umask 077
 PENPOT_READ=$(mktemp)
 PENPOT_DB_PASSWORD=$(mktemp)
-PENPOT_REDIS_URI=$(mktemp)
 PENPOT_API_SECRET=$(mktemp)
 PENPOT_OIDC_SECRET=$(mktemp)
 PENPOT_CHECK=$(mktemp)
-PENPOT_REDIS_PW=$(mktemp)
-trap 'rm -f "$PENPOT_READ" "$PENPOT_CHECK" "$PENPOT_REDIS_PW" "$PENPOT_DB_PASSWORD" "$PENPOT_REDIS_URI" "$PENPOT_API_SECRET" "$PENPOT_OIDC_SECRET"' EXIT
+trap 'rm -f "$PENPOT_READ" "$PENPOT_CHECK" "$PENPOT_DB_PASSWORD" "$PENPOT_API_SECRET" "$PENPOT_OIDC_SECRET"' EXIT
 
 penpot_unusable() {
   # $1 = path, $2 = its field, $3 = what penpot_field found there,
@@ -890,20 +890,6 @@ penpot_data_status=$VAULT_READ_STATUS
 vault_optional_get homelab/penpot-client - "$PENPOT_READ" || exit 1
 penpot_client_status=$VAULT_READ_STATUS
 
-# The shared Redis password, which the redis-uri below is derived from. Seeded
-# by the homelab/redis step near the top of this script, so it should always be
-# here; if it is not, there is no URI Redis would accept and this stops.
-# Unreserved URI characters only: the value is spliced into redis://:<pw>@...
-# verbatim, and a / @ : or % would change what the URI means rather than fail.
-vault_optional_get homelab/redis password "$PENPOT_REDIS_PW" || exit 1
-if [ "$VAULT_READ_STATUS" != present ] || [ ! -s "$PENPOT_REDIS_PW" ] ||
-   [ "$(LC_ALL=C tr -d 'A-Za-z0-9._~-' <"$PENPOT_REDIS_PW" | wc -c)" -ne 0 ]; then
-  echo "homelab/redis/password is missing, empty, or not URI-safe, so there is" >&2
-  echo "no Redis URI to derive for Penpot. It is seeded by the homelab/redis" >&2
-  echo "step of this script; fix that path, then re-run. Nothing was written." >&2
-  exit 1
-fi
-
 # Resolve the two credentials that live at two paths each, in full, before
 # anything is written.
 penpot_shared homelab/penpot postgres-password homelab/penpot/data password \
@@ -915,29 +901,10 @@ penpot_shared homelab/penpot oidc-client-secret homelab/penpot-client clientSecr
 PENPOT_OIDC_HERE=$PENPOT_HERE_FIELD
 PENPOT_OIDC_THERE=$PENPOT_THERE_FIELD
 
-# The three fields that live at exactly one path. Generated only when that path
+# The two fields that live at exactly one path. Generated only when that path
 # does not already hold a usable value.
 penpot_field homelab/penpot postgres-username
 PENPOT_USER_FIELD=$PENPOT_FIELD
-penpot_field homelab/penpot redis-uri
-PENPOT_REDIS_FIELD=$PENPOT_FIELD
-# Derived, never generated: the one requirepass of the shared Redis, in a URI
-# for database index 3 (not 0: this Redis is shared and index 0 may hold
-# keys). Streamed straight into the file, so the password never becomes an
-# argument and is never printed. The stored value is compared with cmp, not
-# echoed, and rewritten only when it differs -- which is how a rotation of
-# homelab/redis reaches Penpot on the next run of this script.
-{
-  printf 'redis://:'
-  cat "$PENPOT_REDIS_PW"
-  printf '@redis.databases.svc.cluster.local:6379/3'
-} >"$PENPOT_REDIS_URI"
-PENPOT_REDIS_STALE=no
-if [ "$PENPOT_REDIS_FIELD" = usable ]; then
-  # penpot_field left the stored value in PENPOT_READ.
-  cmp -s "$PENPOT_READ" "$PENPOT_REDIS_URI" || PENPOT_REDIS_STALE=yes
-fi
-: >"$PENPOT_READ"
 penpot_field homelab/penpot api-secret-key
 PENPOT_API_FIELD=$PENPOT_FIELD
 if [ "$PENPOT_API_FIELD" != usable ]; then
@@ -953,12 +920,10 @@ fi
 if [ "$penpot_status" = absent ]; then
   penpot_assured "$PENPOT_DB_PASSWORD" "the database password"
   penpot_assured "$PENPOT_OIDC_SECRET" "the OIDC client secret"
-  penpot_assured "$PENPOT_REDIS_URI" "the Redis URI"
   penpot_assured "$PENPOT_API_SECRET" "the API secret key"
   vault kv put homelab/penpot \
       postgres-username=penpot \
       postgres-password=@"$PENPOT_DB_PASSWORD" \
-      redis-uri=@"$PENPOT_REDIS_URI" \
       api-secret-key=@"$PENPOT_API_SECRET" \
       oidc-client-secret=@"$PENPOT_OIDC_SECRET" >/dev/null
   echo "    generated"
@@ -976,15 +941,6 @@ else
     penpot_assured "$PENPOT_OIDC_SECRET" "the OIDC client secret"
     vault kv patch homelab/penpot oidc-client-secret=@"$PENPOT_OIDC_SECRET" >/dev/null
     echo "    repaired homelab/penpot/oidc-client-secret"
-  fi
-  if [ "$PENPOT_REDIS_FIELD" = blank ]; then
-    penpot_assured "$PENPOT_REDIS_URI" "the Redis URI"
-    vault kv patch homelab/penpot redis-uri=@"$PENPOT_REDIS_URI" >/dev/null
-    echo "    repaired homelab/penpot/redis-uri"
-  elif [ "$PENPOT_REDIS_STALE" = yes ]; then
-    penpot_assured "$PENPOT_REDIS_URI" "the Redis URI"
-    vault kv patch homelab/penpot redis-uri=@"$PENPOT_REDIS_URI" >/dev/null
-    echo "    updated homelab/penpot/redis-uri to the current homelab/redis password"
   fi
   if [ "$PENPOT_API_FIELD" = blank ]; then
     penpot_assured "$PENPOT_API_SECRET" "the API secret key"
@@ -1012,7 +968,7 @@ elif [ "$PENPOT_OIDC_THERE" = blank ]; then
   vault kv patch homelab/penpot-client clientSecret=@"$PENPOT_OIDC_SECRET" >/dev/null
   echo "    repaired homelab/penpot-client/clientSecret"
 fi
-rm -f "$PENPOT_READ" "$PENPOT_CHECK" "$PENPOT_REDIS_PW" "$PENPOT_DB_PASSWORD" "$PENPOT_REDIS_URI" "$PENPOT_API_SECRET" "$PENPOT_OIDC_SECRET"
+rm -f "$PENPOT_READ" "$PENPOT_CHECK" "$PENPOT_DB_PASSWORD" "$PENPOT_API_SECRET" "$PENPOT_OIDC_SECRET"
 
 echo "==> policy vso-penpot-read"
 # One path per consumer, as vso-postgres-read above. The data/ segment is
@@ -1036,17 +992,23 @@ echo "==> role vso-penpot"
 # authorize penpot-db in `penpot` and penpot in `databases` -- two identities
 # nobody intended, and a widening no manifest comment reveals. Same reasoning
 # as vso-keycloak-db above.
+#
+# vso-redis-read is the EXISTING policy on homelab/data/redis: Penpot's
+# VaultStaticSecret renders its Redis URI from the shared password there, so a
+# rotation of homelab/redis reaches Penpot through VSO with no re-run of this
+# script. vso-penpot-read itself is not widened, and vso-penpot-db does not
+# get it -- the Job in `databases` never talks to Redis.
 vault write auth/kubernetes/role/vso-penpot \
     bound_service_account_names=penpot \
     bound_service_account_namespaces=penpot \
     audience=vault \
-    token_policies=vso-penpot-read \
+    token_policies=vso-penpot-read,vso-redis-read \
     ttl=1h
 
 echo "==> policy vso-penpot-db-read"
 # Narrower than vso-penpot-read on purpose: the Job in `databases` needs the
-# database login and must not see the API secret key, the Redis URI or the
-# OIDC client secret.
+# database login and must not see the API secret key, the Redis password or
+# the OIDC client secret.
 vault policy write vso-penpot-db-read - <<'POLICY'
 path "homelab/data/penpot/data" {
   capabilities = ["read"]
