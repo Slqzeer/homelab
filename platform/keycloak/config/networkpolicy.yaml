@@ -110,6 +110,16 @@ spec:
           podSelector:
             matchLabels:
               app.kubernetes.io/name: nextcloud
+        # The backend, not the MCP server: it is what exchanges the code for a
+        # token and reads JWKS. Chart 1.11.3 labels the backend pod
+        # app.kubernetes.io/name: penpot-backend (penpot.backendSelectorLabels);
+        # a `penpot` selector would match no pod and deny silently.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: penpot
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: penpot-backend
       ports:
         - protocol: TCP
           port: 8080

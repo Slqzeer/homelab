@@ -44,8 +44,9 @@ if args[:2] == ["config", "credentials"]:
 elif args[:2] == ["get", "clients"]:
     if os.environ.get("FAKE_FAIL_LIST"):
         sys.exit(17)
+    allowed = os.environ.get("FAKE_ALLOWLIST", "homelab-portal,penpot").split(",")
     print(json.dumps([{"id": c["id"], "clientId": c["clientId"]}
-                      for c in state if c["clientId"] == "homelab-portal"]))
+                      for c in state if c["clientId"] in allowed]))
 elif args[0] == "get" and args[1].endswith("/client-secret"):
     uuid = args[1].split("/")[1]
     print(json.dumps({"value": next(c["secret"] for c in state if c["id"] == uuid)}))
@@ -66,7 +67,7 @@ elif args[:2] == ["create", "clients"]:
         print(body["secret"], file=sys.stderr)
         sys.exit(23)
     event["body_keys"] = sorted(body)
-    body["id"] = "created-id"
+    body["id"] = "created-" + body["clientId"]
     body["_default_scopes"] = ["profile", "email"]
     state.append(body)
 elif args[0] == "update" and args[1].startswith("clients/"):
@@ -169,7 +170,8 @@ class ClientRegistrationTests(unittest.TestCase):
             env = dict(os.environ, FAKE_STATE=str(state_path), FAKE_EVENTS=str(events_path),
                        FAKE_JQ_ARGS=str(jq_args_path), KC_ADMIN_USERNAME="admin",
                        KC_CLI_PASSWORD="admin-canary-secret",
-                       PORTAL_CLIENT_SECRET="portal-canary-secret")
+                       PORTAL_CLIENT_SECRET="portal-canary-secret",
+                       PENPOT_CLIENT_SECRET="penpot-canary-secret")
             if fail_list:
                 env["FAKE_FAIL_LIST"] = "1"
             if leak_on_create:
@@ -205,14 +207,67 @@ class ClientRegistrationTests(unittest.TestCase):
                          portal["attributes"]["post.logout.redirect.uris"])
         self.assertIn("groups", portal["_default_scopes"])
         writes = [event for event in events if event["args"][0] in ("create", "update")]
-        self.assertEqual(["create", "update"], [event["args"][0] for event in writes])
-        self.assertIn("/default-client-scopes/groups-id", writes[1]["args"][1])
+        # Portal, then Penpot: one create plus one `groups` scope add each.
+        # The second run must add nothing, so four writes cover both runs.
+        self.assertEqual(
+            ["create", "update", "create", "update"],
+            [event["args"][0] for event in writes],
+        )
+        self.assertEqual(
+            "clients/created-homelab-portal/default-client-scopes/groups-id",
+            writes[1]["args"][1],
+        )
+        self.assertEqual(
+            "clients/created-penpot/default-client-scopes/groups-id",
+            writes[3]["args"][1],
+        )
         for event in events:
             self.assertNotIn("portal-canary-secret", " ".join(event["args"]))
             self.assertNotIn("admin-canary-secret", " ".join(event["args"]))
         self.assertNotIn("portal-canary-secret", jq_args)
         self.assertNotIn("admin-canary-secret", jq_args)
         self.assertNotIn("portal-canary-secret", "".join(run.stdout + run.stderr for run in runs))
+
+    def test_penpot_client_is_allowlisted_with_its_own_redirect(self):
+        runs, state, events, _ = self.run_hook([])
+        self.assertEqual([0, 0], [run.returncode for run in runs], [run.stderr for run in runs])
+        ids = sorted(client["clientId"] for client in state)
+        self.assertEqual(["homelab-portal", "penpot"], ids)
+        penpot = next(client for client in state if client["clientId"] == "penpot")
+        self.assertEqual("openid-connect", penpot["protocol"])
+        self.assertFalse(penpot["publicClient"])
+        self.assertEqual("client-secret", penpot["clientAuthenticatorType"])
+        self.assertTrue(penpot["standardFlowEnabled"])
+        self.assertFalse(penpot["implicitFlowEnabled"])
+        self.assertEqual(
+            ["https://penpot.taildf6cd4.ts.net/api/oauth/redirect"],
+            penpot["redirectUris"],
+        )
+        self.assertEqual(
+            ["https://penpot.taildf6cd4.ts.net"], penpot["webOrigins"],
+        )
+        self.assertEqual(
+            # Penpot has no logout endpoint of its own, so the allowlist entry
+            # passes "/" as the logout path and post-logout lands on the
+            # application root: origin + "/" = this exact string.
+            "https://penpot.taildf6cd4.ts.net/",
+            penpot["attributes"]["post.logout.redirect.uris"],
+        )
+        self.assertEqual("penpot-canary-secret", penpot["secret"])
+        # The fake seeds ["profile", "email"] on create and the hook then adds
+        # the third required default, so the converged set has three entries.
+        self.assertEqual(["profile", "email", "groups"], penpot["_default_scopes"])
+
+    def test_penpot_secret_never_reaches_argv_or_output(self):
+        runs, state, events, jq_args = self.run_hook([])
+        self.assertEqual([0, 0], [run.returncode for run in runs])
+        for event in events:
+            self.assertNotIn("penpot-canary-secret", " ".join(event["args"]))
+        self.assertNotIn("penpot-canary-secret", jq_args)
+        self.assertNotIn(
+            "penpot-canary-secret",
+            "".join(run.stdout + run.stderr for run in runs),
+        )
 
     def test_drift_updates_only_allowlisted_client(self):
         unrelated = {"id": "other-id", "clientId": "unrelated", "secret": "untouched"}
@@ -224,7 +279,10 @@ class ClientRegistrationTests(unittest.TestCase):
         self.assertEqual("preserve", state[1]["custom"])
         self.assertEqual("portal-canary-secret", state[1]["secret"])
         writes = [event for event in events if event["args"][0] in ("create", "update")]
-        self.assertEqual(["update", "update", "update", "update"],
+        # Four for the drifted portal: one representation update plus three
+        # scope adds, because the fixture has no `_default_scopes` at all.
+        # Two more for Penpot, which is created and then gains `groups`.
+        self.assertEqual(["update", "update", "update", "update", "create", "update"],
                          [event["args"][0] for event in writes])
         self.assertEqual("clients/portal-id", writes[0]["args"][1])
         self.assertIn("--merge", writes[0]["args"])
@@ -238,7 +296,7 @@ class ClientRegistrationTests(unittest.TestCase):
         self.assertEqual([0, 0], [run.returncode for run in runs], [run.stderr for run in runs])
         self.assertEqual(["profile", "email", "custom", "groups"], state[0]["_default_scopes"])
         writes = [event for event in events if event["args"][0] == "update"]
-        self.assertEqual(2, len(writes), writes)
+        self.assertEqual(3, len(writes), writes)
         self.assertEqual("clients/portal-id/default-client-scopes/groups-id", writes[1]["args"][1])
 
     def test_scope_link_must_be_verified(self):
@@ -293,6 +351,7 @@ class ClientRegistrationTests(unittest.TestCase):
         env = {entry["name"]: entry for entry in container["env"]}
         self.assertEqual("keycloak-admin", env["KC_CLI_PASSWORD"]["valueFrom"]["secretKeyRef"]["name"])
         self.assertEqual("keycloak-portal-client", env["PORTAL_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"]["name"])
+        self.assertEqual("keycloak-penpot-client", env["PENPOT_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"]["name"])
         script = self.script()
         self.assertIn("/tools/jq", script)
         self.assertIn("-f -", script)
@@ -300,8 +359,16 @@ class ClientRegistrationTests(unittest.TestCase):
         self.assertNotIn("get realms", script)
         self.assertNotIn("update realms", script)
         self.assertNotIn("delete clients", script)
+        # The secret must never be a command-line argument of any kind. The
+        # allowlist entry names its env var instead, and jq reads the value
+        # out of its own environment.
         self.assertNotIn("--arg secret", script)
-        self.assertIn("env.PORTAL_CLIENT_SECRET", script)
+        self.assertNotIn("--arg secret_value", script)
+        self.assertIn("secret: env[$env_name]", script)
+        self.assertIn("secret_value=$(printenv", script)
+        # Both allowlist entries, each naming its own secret env var.
+        self.assertIn("reconcile_client homelab-portal PORTAL_CLIENT_SECRET", script)
+        self.assertIn("reconcile_client penpot PENPOT_CLIENT_SECRET", script)
         self.assertIn("del(.secret)", script)
         for doc in resources(CONFIG / "vault-secrets.yaml"):
             if doc and doc["kind"] == "VaultStaticSecret":
@@ -483,7 +550,18 @@ class ClientRegistrationTests(unittest.TestCase):
         self.assertIn(("keycloak", 8080), grants)
         self.assertIn(("portal", 8080), grants)
         self.assertIn(("nextcloud", 8080), grants)
-        self.assertEqual(5, len(grants))
+        self.assertIn(("penpot", 8080), grants)
+        self.assertEqual(6, len(grants))
+        penpot_peer = next(peer for policy in policies
+                           for ingress in policy["spec"].get("ingress", [])
+                           for peer in ingress["from"]
+                           if peer.get("namespaceSelector", {}).get("matchLabels", {}).get(
+                               "kubernetes.io/metadata.name") == "penpot")
+        # Chart 1.11.3 labels the backend pod app.kubernetes.io/name:
+        # penpot-backend. `penpot` would match no pod and deny silently, and
+        # grants above cannot see that because they key on namespace only.
+        self.assertEqual({"app.kubernetes.io/name": "penpot-backend"},
+                         penpot_peer["podSelector"]["matchLabels"])
 
 
 if __name__ == "__main__":
