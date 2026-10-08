@@ -681,4 +681,140 @@ head -c 4096 /dev/urandom | tr -dc 'a-f0-9' | head -c 64 >"$OMNI_VAL"
 omni_ensure_field storage-encryption-key
 rm -f "$OMNI_READ" "$OMNI_VAL"
 
+echo "==> seeding homelab/penpot and homelab/penpot/data"
+# Generated here and never displayed. Values travel to Vault as key=@file, so
+# only the FILENAME ever becomes an argument -- a password on a command line
+# is visible in `ps`, which is the same reason the unsealer reads its keys with
+# key=@<path>.
+#
+# ONE database password, written to BOTH paths. The Job in `databases` runs
+# ALTER ROLE penpot WITH PASSWORD from homelab/penpot/data on every sync,
+# while the chart authenticates with postgres-password from homelab/penpot.
+# Mint these independently and the very next sync installs a password the
+# chart does not have, which surfaces as a login failure naming only the
+# database. Same one-source-of-truth rule apps/tle-dev already follows.
+#
+# NO mcp-key. Penpot issues that key from its Integrations page and shows it
+# once, so it cannot be generated ahead of time, and a placeholder here would
+# imply the MCP integration works before a real key exists. The Ceremonies
+# section of docs/runbooks/penpot-recovery.md owns that step.
+umask 077
+PENPOT_READ=$(mktemp)
+PENPOT_DB_PASSWORD=$(mktemp)
+PENPOT_REDIS_URI=$(mktemp)
+PENPOT_API_SECRET=$(mktemp)
+PENPOT_OIDC_SECRET=$(mktemp)
+trap 'rm -f "$PENPOT_READ" "$PENPOT_DB_PASSWORD" "$PENPOT_REDIS_URI" "$PENPOT_API_SECRET" "$PENPOT_OIDC_SECRET"' EXIT
+
+# Both paths are read before anything is written, so a transient read error
+# aborts instead of passing for absence -- see vault_optional_get above.
+vault_optional_get homelab/penpot - "$PENPOT_READ" || exit 1
+penpot_status=$VAULT_READ_STATUS
+vault_optional_get homelab/penpot/data - "$PENPOT_READ" || exit 1
+penpot_data_status=$VAULT_READ_STATUS
+
+if [ "$penpot_status" = present ]; then
+  echo "    already present, leaving the credential alone"
+else
+  # Alphanumeric only: this value is composed into the postgres:// URI the
+  # chart builds, where a / or @ breaks parsing far from the cause.
+  head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32 >"$PENPOT_DB_PASSWORD"
+  # Hex 24 bytes, 192 bits, and NOT base64: this password is interpolated
+  # into the redis:// URI below, where base64's + and / would first need
+  # percent-encoding. A hand-rolled escape is exactly the kind of thing that
+  # yields a URI Redis rejects, long after the cause. Hex needs no escaping.
+  #
+  # Database index 3, not 0: this Redis is shared and index 0 may hold keys.
+  # The password is streamed straight into the file rather than captured in
+  # a variable, so it never becomes an argument to anything.
+  {
+    printf 'redis://:'
+    head -c 4096 /dev/urandom | tr -dc 'a-f0-9' | head -c 48
+    printf '@redis.databases.svc.cluster.local:6379/3'
+  } >"$PENPOT_REDIS_URI"
+  # Hex for the same reason as above, and because this key only ever encrypts
+  # client API keys at rest -- it is never pasted into a login form. Same
+  # idiom as the omniroute api-key-secret above.
+  head -c 4096 /dev/urandom | tr -dc 'a-f0-9' | head -c 64 >"$PENPOT_API_SECRET"
+  head -c 512 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 48 >"$PENPOT_OIDC_SECRET"
+  vault kv put homelab/penpot \
+      postgres-username=penpot \
+      postgres-password=@"$PENPOT_DB_PASSWORD" \
+      redis-uri=@"$PENPOT_REDIS_URI" \
+      api-secret-key=@"$PENPOT_API_SECRET" \
+      oidc-client-secret=@"$PENPOT_OIDC_SECRET" >/dev/null
+  echo "    generated"
+fi
+
+if [ "$penpot_data_status" = present ]; then
+  echo "    homelab/penpot/data already present, leaving the role password alone"
+else
+  if [ "$penpot_status" = present ]; then
+    # $PENPOT_DB_PASSWORD is still empty here, because the block above took
+    # the "already present" branch. Recover the password homelab/penpot
+    # already holds rather than minting a second one, which the Job would
+    # push into PostgreSQL and strand the chart with.
+    vault_optional_get homelab/penpot postgres-password "$PENPOT_DB_PASSWORD" || exit 1
+    if [ "$VAULT_READ_STATUS" != present ] || [ ! -s "$PENPOT_DB_PASSWORD" ]; then
+      echo "homelab/penpot holds no usable postgres-password, so homelab/penpot/data" >&2
+      echo "cannot be seeded without replacing the chart's database credential." >&2
+      echo "Seed postgres-password at homelab/penpot first, or delete the path and" >&2
+      echo "re-run this script." >&2
+      exit 1
+    fi
+  fi
+  vault kv put homelab/penpot/data password=@"$PENPOT_DB_PASSWORD" >/dev/null
+  echo "    generated"
+fi
+rm -f "$PENPOT_READ" "$PENPOT_DB_PASSWORD" "$PENPOT_REDIS_URI" "$PENPOT_API_SECRET" "$PENPOT_OIDC_SECRET"
+
+echo "==> policy vso-penpot-read"
+# One path per consumer, as vso-postgres-read above. The data/ segment is
+# REQUIRED and is not a typo -- see the note on vso-canary-read above.
+vault policy write vso-penpot-read - <<'POLICY'
+path "homelab/data/penpot" {
+  capabilities = ["read"]
+}
+POLICY
+
+echo "==> role vso-penpot"
+# bound_service_account_names must match the ServiceAccount created in
+# apps/penpot/config/vault-secrets.yaml, and audience must match that file's
+# VaultAuth spec.kubernetes.audiences. A mismatch in either is a permission
+# denial naming neither side.
+#
+# This role and vso-penpot-db below are TWO roles, not one role naming both
+# ServiceAccounts and both namespaces. Vault's kubernetes auth matches the
+# CROSS-PRODUCT of bound_service_account_names and
+# bound_service_account_namespaces, so a single role would additionally
+# authorize penpot-db in `penpot` and penpot in `databases` -- two identities
+# nobody intended, and a widening no manifest comment reveals. Same reasoning
+# as vso-keycloak-db above.
+vault write auth/kubernetes/role/vso-penpot \
+    bound_service_account_names=penpot \
+    bound_service_account_namespaces=penpot \
+    audience=vault \
+    token_policies=vso-penpot-read \
+    ttl=1h
+
+echo "==> policy vso-penpot-db-read"
+# Narrower than vso-penpot-read on purpose: the Job in `databases` needs the
+# database login and must not see the API secret key, the Redis URI or the
+# OIDC client secret.
+vault policy write vso-penpot-db-read - <<'POLICY'
+path "homelab/data/penpot/data" {
+  capabilities = ["read"]
+}
+POLICY
+
+echo "==> role vso-penpot-db"
+# bound_service_account_names must match the ServiceAccount created in
+# apps/penpot/config/postgres-job.yaml.
+vault write auth/kubernetes/role/vso-penpot-db \
+    bound_service_account_names=penpot-db \
+    bound_service_account_namespaces=databases \
+    audience=vault \
+    token_policies=vso-penpot-db-read \
+    ttl=1h
+
 echo "==> done"

@@ -398,6 +398,32 @@ class ClientRegistrationTests(unittest.TestCase):
         self.assertIn("token_policies=vso-portal-read", role)
         self.assertNotIn("*", role)
 
+    def test_vault_penpot_paths_and_roles_are_narrow(self):
+        script = (ROOT / "platform/vault/configure-vault.sh").read_text(encoding="utf-8")
+        for path in ("homelab/penpot", "homelab/penpot/data"):
+            self.assertIn(f"vault_optional_get {path}", script)
+            self.assertIn(f"vault kv put {path}", script)
+        for key in ("postgres-password", "postgres-username", "redis-uri",
+                    "api-secret-key", "oidc-client-secret"):
+            self.assertIn(f"{key}=", script)
+        # The MCP key is issued by Penpot and cannot be seeded here.
+        self.assertNotIn("mcp-key=@", script)
+        self.assertIn('path "homelab/data/penpot"', script)
+        self.assertIn('path "homelab/data/penpot/data"', script)
+
+        app_role = script.split("vault write auth/kubernetes/role/vso-penpot \\\n", 1)[1]
+        app_role = app_role.split("\n\n", 1)[0]
+        self.assertIn("bound_service_account_names=penpot", app_role)
+        self.assertIn("bound_service_account_namespaces=penpot", app_role)
+        self.assertIn("token_policies=vso-penpot-read", app_role)
+        self.assertNotIn("*", app_role)
+
+        db_role = script.split("vault write auth/kubernetes/role/vso-penpot-db \\\n", 1)[1]
+        db_role = db_role.split("\n\n", 1)[0]
+        self.assertIn("bound_service_account_names=penpot-db", db_role)
+        self.assertIn("bound_service_account_namespaces=databases", db_role)
+        self.assertNotIn("*", db_role)
+
     def test_vault_seed_repairs_empty_key_and_preserves_rotation_key(self):
         source = (ROOT / "platform/vault/configure-vault.sh").read_text(encoding="utf-8")
         seed = source.split('echo "==> seeding homelab/keycloak-portal and homelab/portal"', 1)[1]
