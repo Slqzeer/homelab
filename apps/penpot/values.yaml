@@ -8,6 +8,16 @@
 # are not digest-pinnable through values. The digests actually deployed are
 # recorded in docs/runbooks/penpot-recovery.md.
 
+# The chart's own ServiceAccount, worn by every Penpot pod. Not `penpot`:
+# that name belongs to the ServiceAccount in apps/penpot/config, which is
+# VSO's Vault identity (role vso-penpot) and nothing else's. Sharing it
+# would render one object from two sources and hand every Penpot pod the
+# right to read Penpot's Vault paths. Chart 1.11.3 exposes no value to turn
+# off token automount; this ServiceAccount has no RBAC bindings.
+serviceAccount:
+  enabled: true
+  name: penpot-workload
+
 config:
   # The tailnet name the browser uses, and what Penpot puts in its own
   # absolute links and OIDC redirects.

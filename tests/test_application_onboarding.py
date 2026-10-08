@@ -924,6 +924,25 @@ class PenpotRegistrationTests(unittest.TestCase):
             self.assertIs(False, container["allowPrivilegeEscalation"], component)
             self.assertEqual(1001, container["runAsUser"], component)
 
+    def test_penpot_pods_do_not_wear_the_vso_service_account(self):
+        # Checked on values plus the site manifests, not on a render: CI has
+        # no helm. The chart creates a ServiceAccount named
+        # serviceAccount.name and runs every pod as it; `penpot` belongs to
+        # VSO (Vault role vso-penpot) and is defined in apps/penpot/config.
+        values, = self.load("apps/penpot/values.yaml")
+        account = values["serviceAccount"]
+        self.assertEqual("penpot-workload", account["name"])
+        site_accounts = {
+            document["metadata"]["name"]
+            for path in sorted((REPOSITORY_ROOT / "apps/penpot/config").glob("*.yaml"))
+            if path.name != "kustomization.yaml"
+            for document in self.load(path.relative_to(REPOSITORY_ROOT).as_posix())
+            if document.get("kind") == "ServiceAccount"
+            and document["metadata"].get("namespace") == "penpot"
+        }
+        self.assertIn("penpot", site_accounts)
+        self.assertNotIn(account["name"], site_accounts)
+
     def test_penpot_values_contain_no_credential(self):
         text = (REPOSITORY_ROOT / "apps/penpot/values.yaml").read_text(encoding="utf-8")
         for forbidden in ("apiSecretKey: \"", "password: penpot", "mcp-key"):
