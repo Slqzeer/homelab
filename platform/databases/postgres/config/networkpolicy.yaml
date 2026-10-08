@@ -57,6 +57,15 @@ spec:
         - podSelector:
             matchLabels:
               job: postgres-client
+        # Penpot's backend, and only it: the frontend, exporter and MCP
+        # server never open a database connection. Its database Job runs
+        # in this namespace and is covered by `job: postgres-client` above.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: penpot
+          podSelector:
+            matchLabels:
+              app: penpot-backend
       ports:
         - protocol: TCP
           port: 5432

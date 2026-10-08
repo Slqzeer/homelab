@@ -1,0 +1,337 @@
+# Fence around Penpot. Default-deny both directions; every flow below names a
+# party and a port.
+#
+# Ports are the chart's own defaults: frontend 8080, backend 6060, exporter
+# 6061, mcp 4401 (HTTP) and 4402 (WebSocket). Pods are selected by the
+# chart's `app: penpot-<component>` label.
+#
+# The tailnet reaches the FRONTEND and nothing else. That single fact is what
+# makes the MCP design safe: the MCP server has no authentication of its own,
+# so its ports are admitted only from the frontend, which authenticates with
+# the MCP key before proxying /mcp/stream. If a rule ever admits 4401 or 4402
+# from the tailnet, an unauthenticated actor can read and modify every design
+# file. Do not add one.
+#
+# default-deny-egress covers every pod here, so each in-namespace flow needs
+# BOTH halves: an ingress grant on the receiver and an egress grant on the
+# sender. The in-namespace flows are:
+#   frontend -> backend 6060, exporter 6061, mcp 4401/4402
+#   exporter -> frontend 8080 (PENPOT_INTERNAL_URI, to render pages)
+# The databases side admits Penpot in its own policies:
+# platform/databases/{postgres,redis}/config/networkpolicy.yaml. Keycloak
+# admits the backend in platform/keycloak/config/networkpolicy.yaml.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: penpot
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: penpot
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+---
+# DNS, for every pod in the namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: penpot-dns
+  namespace: penpot
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# The only user-facing route: the shared "ingress" ProxyGroup pool.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: penpot-tailnet
+  namespace: penpot
+spec:
+  podSelector:
+    matchLabels:
+      app: penpot-frontend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tailscale
+          podSelector:
+            matchLabels:
+              tailscale.com/parent-resource: ingress
+              tailscale.com/parent-resource-type: proxygroup
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# Receiving half of frontend -> backend (PENPOT_BACKEND_URI).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: penpot-frontend-to-backend
+  namespace: penpot
+spec:
+  podSelector:
+    matchLabels:
+      app: penpot-backend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: penpot-frontend
+      ports:
+        - protocol: TCP
+          port: 6060
+---
+# The frontend's proxy to the MCP server. This is the ONLY path to 4401/4402.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: penpot-frontend-to-mcp
+  namespace: penpot
+spec:
+  podSelector:
+    matchLabels:
+      app: penpot-mcp
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: penpot-frontend
+      ports:
+        - protocol: TCP
+          port: 4401
+        - protocol: TCP
+          port: 4402
+---
+# Receiving half of frontend -> exporter (PENPOT_EXPORTER_URI): exports.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: penpot-frontend-to-exporter
+  namespace: penpot
+spec:
+  podSelector:
+    matchLabels:
+      app: penpot-exporter
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: penpot-frontend
+      ports:
+        - protocol: TCP
+          port: 6061
+---
+# Receiving half of exporter -> frontend. The exporter's headless browser
+# loads the page it renders from PENPOT_INTERNAL_URI (the `penpot` Service).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: penpot-exporter-to-frontend
+  namespace: penpot
+spec:
+  podSelector:
+    matchLabels:
+      app: penpot-frontend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: penpot-exporter
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# Sending half of every flow that starts at the frontend.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: penpot-frontend-egress
+  namespace: penpot
+spec:
+  podSelector:
+    matchLabels:
+      app: penpot-frontend
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: penpot-backend
+      ports:
+        - protocol: TCP
+          port: 6060
+    - to:
+        - podSelector:
+            matchLabels:
+              app: penpot-exporter
+      ports:
+        - protocol: TCP
+          port: 6061
+    - to:
+        - podSelector:
+            matchLabels:
+              app: penpot-mcp
+      ports:
+        - protocol: TCP
+          port: 4401
+        - protocol: TCP
+          port: 4402
+---
+# Sending half of exporter -> frontend.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: penpot-exporter-egress
+  namespace: penpot
+spec:
+  podSelector:
+    matchLabels:
+      app: penpot-exporter
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: penpot-frontend
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# Only the backend uses PostgreSQL.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: penpot-postgres
+  namespace: penpot
+spec:
+  podSelector:
+    matchLabels:
+      app: penpot-backend
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: databases
+          podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+# Backend, exporter and MCP each read the Redis URI; the frontend does not.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: penpot-redis
+  namespace: penpot
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - penpot-backend
+          - penpot-exporter
+          - penpot-mcp
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: databases
+          podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+---
+# OIDC: the backend's token, userinfo and JWKS requests. The browser's
+# authorization redirect goes to Keycloak directly and never touches this.
+# The Keycloak pod carries `app: keycloak` (as apps/tle-dev selects it), not
+# app.kubernetes.io/name.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: penpot-keycloak
+  namespace: penpot
+spec:
+  podSelector:
+    matchLabels:
+      app: penpot-backend
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: keycloak
+          podSelector:
+            matchLabels:
+              app: keycloak
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# The allowlisting egress proxy is the only route to the internet.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: penpot-egress-proxy
+  namespace: penpot
+spec:
+  podSelector:
+    matchLabels:
+      app: penpot-backend
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: egress
+          podSelector:
+            matchLabels:
+              app: egress-proxy
+      ports:
+        - protocol: TCP
+          port: 3128

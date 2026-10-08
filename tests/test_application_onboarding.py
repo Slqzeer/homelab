@@ -1000,6 +1000,180 @@ class PenpotRegistrationTests(unittest.TestCase):
         self.assertIn("CREATE DATABASE penpot OWNER penpot", script)
         self.assertNotIn("password: penpot", script)
 
+    @staticmethod
+    def pod_set(selector):
+        # The Penpot components a podSelector picks out: "*" for every pod,
+        # otherwise the `app` values it names via matchLabels or `app In`.
+        if selector == {}:
+            return "*"
+        labels = selector.get("matchLabels", {})
+        if labels:
+            return frozenset({labels["app"]})
+        expression, = selector["matchExpressions"]
+        assert (expression["key"], expression["operator"]) == ("app", "In"), expression
+        return frozenset(expression["values"])
+
+    @staticmethod
+    def peer_key(peer):
+        # (namespace or None for "this namespace", labels as sorted pairs).
+        # A namespace-wide peer has labels None, so it can never compare
+        # equal to a pod-scoped one.
+        namespace = None
+        if "namespaceSelector" in peer:
+            namespace = peer["namespaceSelector"]["matchLabels"][
+                "kubernetes.io/metadata.name"]
+        labels = peer.get("podSelector", {}).get("matchLabels")
+        return namespace, tuple(sorted(labels.items())) if labels is not None else None
+
+    def policy_flows(self, policy):
+        # Every (direction, selected pods, peer, port) a policy grants.
+        flows = set()
+        selected = self.pod_set(policy["spec"]["podSelector"])
+        for direction, peers_key in (("ingress", "from"), ("egress", "to")):
+            for rule in policy["spec"].get(direction, []):
+                # No rule may omit its peers or ports: either means "any".
+                self.assertTrue(rule.get(peers_key), policy["metadata"]["name"])
+                self.assertTrue(rule.get("ports"), policy["metadata"]["name"])
+                for peer in rule[peers_key]:
+                    for port in rule["ports"]:
+                        self.assertNotIn("endPort", port)
+                        flows.add((direction, selected, self.peer_key(peer),
+                                   port.get("protocol", "TCP"), port["port"]))
+        return flows
+
+    def test_penpot_network_policies_fence_the_namespace(self):
+        policies = self.load("apps/penpot/config/networkpolicy.yaml")
+        by_name = {item["metadata"]["name"]: item for item in policies}
+        self.assertEqual(len(policies), len(by_name), "duplicate policy name")
+        for item in policies:
+            self.assertEqual("penpot", item["metadata"]["namespace"])
+        for direction in ("ingress", "egress"):
+            deny = by_name.pop(f"default-deny-{direction}")
+            self.assertEqual({}, deny["spec"]["podSelector"])
+            self.assertEqual([direction.capitalize()], deny["spec"]["policyTypes"])
+            self.assertNotIn(direction, deny["spec"])
+
+        def app(name):
+            return frozenset({f"penpot-{name}"})
+
+        def local(name):
+            return None, (("app", f"penpot-{name}"),)
+
+        tailnet = ("tailscale", (
+            ("tailscale.com/parent-resource", "ingress"),
+            ("tailscale.com/parent-resource-type", "proxygroup"),
+        ))
+        kube_dns = ("kube-system", None)
+        postgres = ("databases", (("app", "postgres"),))
+        redis = ("databases", (("app", "redis"),))
+        keycloak = ("keycloak", (("app", "keycloak"),))
+        egress_proxy = ("egress", (("app", "egress-proxy"),))
+
+        expected = {
+            "penpot-dns": {
+                ("egress", "*", kube_dns, "UDP", 53),
+                ("egress", "*", kube_dns, "TCP", 53),
+            },
+            # Only the frontend is reachable from the tailnet, on 8080 only.
+            "penpot-tailnet": {("ingress", app("frontend"), tailnet, "TCP", 8080)},
+            # In-namespace flows: default-deny-egress covers every pod, so
+            # each needs an ingress grant on the receiver AND an egress
+            # grant on the sender.
+            "penpot-frontend-to-backend": {
+                ("ingress", app("backend"), local("frontend"), "TCP", 6060)},
+            "penpot-frontend-to-mcp": {
+                ("ingress", app("mcp"), local("frontend"), "TCP", 4401),
+                ("ingress", app("mcp"), local("frontend"), "TCP", 4402),
+            },
+            "penpot-frontend-to-exporter": {
+                ("ingress", app("exporter"), local("frontend"), "TCP", 6061)},
+            "penpot-exporter-to-frontend": {
+                ("ingress", app("frontend"), local("exporter"), "TCP", 8080)},
+            "penpot-frontend-egress": {
+                ("egress", app("frontend"), local("backend"), "TCP", 6060),
+                ("egress", app("frontend"), local("exporter"), "TCP", 6061),
+                ("egress", app("frontend"), local("mcp"), "TCP", 4401),
+                ("egress", app("frontend"), local("mcp"), "TCP", 4402),
+            },
+            "penpot-exporter-egress": {
+                ("egress", app("exporter"), local("frontend"), "TCP", 8080)},
+            # Only the backend speaks to PostgreSQL.
+            "penpot-postgres": {("egress", app("backend"), postgres, "TCP", 5432)},
+            # Backend, exporter and MCP consume the Redis URI; the frontend
+            # does not.
+            "penpot-redis": {
+                ("egress", app("backend") | app("exporter") | app("mcp"),
+                 redis, "TCP", 6379)},
+            "penpot-keycloak": {("egress", app("backend"), keycloak, "TCP", 8080)},
+            "penpot-egress-proxy": {
+                ("egress", app("backend"), egress_proxy, "TCP", 3128)},
+        }
+        # Exact equality: a policy added, dropped or widened fails here. In
+        # particular there is no penpot-metrics: nothing in this namespace
+        # serves /metrics (the exporter's 6061 is a rendering endpoint).
+        actual = {name: self.policy_flows(policy) for name, policy in by_name.items()}
+        self.assertEqual(expected, actual)
+        self.assertNotIn("penpot-metrics", actual)
+
+        flows = set().union(*actual.values())
+        # Both sides of every in-namespace flow are granted.
+        for direction, selected, peer, protocol, port in flows:
+            if peer[0] is not None or selected == "*":
+                continue
+            here, = selected
+            there = dict(peer[1])["app"]
+            opposite = "ingress" if direction == "egress" else "egress"
+            mirror = (opposite, frozenset({there}), local(here[len("penpot-"):]),
+                      protocol, port)
+            self.assertIn(mirror, flows, (direction, here, there, port))
+
+        # The MCP invariant: 4401/4402 are admitted from the frontend and
+        # from nothing else, and the tailnet reaches only frontend:8080.
+        for direction, selected, peer, protocol, port in flows:
+            if direction == "ingress" and port in (4401, 4402):
+                self.assertEqual(local("frontend"), peer)
+            if peer[0] == "tailscale":
+                self.assertEqual(("ingress", app("frontend"), 8080),
+                                 (direction, selected, port))
+
+        text = yaml.safe_dump_all(policies)
+        self.assertNotIn("0.0.0.0/0", text)
+        self.assertNotIn("endPort: 65535", text)
+
+    def test_databases_admit_exactly_the_penpot_components_that_need_them(self):
+        postgres_policies = {
+            item["metadata"]["name"]: item
+            for item in self.load("platform/databases/postgres/config/networkpolicy.yaml")}
+        redis_policies = {
+            item["metadata"]["name"]: item
+            for item in self.load("platform/databases/redis/config/networkpolicy.yaml")}
+        clients = {
+            "postgres-clients": postgres_policies["postgres-clients"],
+            "redis-clients": redis_policies["redis-clients"],
+        }
+        penpot_flows = {
+            name: {flow for flow in self.policy_flows(policy) if flow[2][0] == "penpot"}
+            for name, policy in clients.items()
+        }
+        self.assertEqual({
+            # Only the backend uses PostgreSQL.
+            "postgres-clients": {
+                ("ingress", frozenset({"postgres"}),
+                 ("penpot", (("app", "penpot-backend"),)), "TCP", 5432)},
+            # Backend, exporter and MCP all read the Redis URI.
+            "redis-clients": {
+                ("ingress", frozenset({"redis"}),
+                 ("penpot", (("app", f"penpot-{component}"),)), "TCP", 6379)
+                for component in ("backend", "exporter", "mcp")},
+        }, penpot_flows)
+        # No namespace-wide penpot peer: that would admit the MCP server and
+        # anything else that ever lands in the namespace.
+        for name, policy in clients.items():
+            for rule in policy["spec"]["ingress"]:
+                for peer in rule["from"]:
+                    if self.peer_key(peer)[0] == "penpot":
+                        self.assertIn("podSelector", peer, name)
+
     def test_penpot_config_renders_and_is_wired_into_ci(self):
         workflow, = self.load(".github/workflows/validate.yaml")
         conform_steps = workflow["jobs"]["kubeconform"]["steps"]
