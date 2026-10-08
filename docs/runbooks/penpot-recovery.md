@@ -60,6 +60,17 @@ Three steps happen outside git. None is reproduced by a cluster rebuild.
    If one copy is missing or empty it repairs that one with `vault kv patch`,
    which cannot disturb the other keys. Only when neither copy holds a usable
    value does it stop and ask you to seed one.
+
+   `redis-uri` is **derived, not generated**: it is
+   `redis://:<password>@redis.databases.svc.cluster.local:6379/3`, where the
+   password is the shared Redis's one `requirepass` from `homelab/redis`
+   (`password`). On every run the script rebuilds that URI and patches
+   `redis-uri` if what is stored differs. So **after rotating
+   `homelab/redis`, re-run the script and then restart the Penpot backend**
+   (`sg k3s-admin -c 'kubectl -n penpot rollout restart deployment/penpot-backend'`)
+   — until both happen Penpot still presents the old password and loses
+   Redis. If `homelab/redis` has no usable password the script stops before
+   writing anything.
 2. **MCP key.** In Penpot: *Your account → Integrations → MCP Server* →
    enable, then generate a key. It is shown **once** and is not
    recoverable. Store it in a password manager, then seed it into Vault.
@@ -68,7 +79,7 @@ Three steps happen outside git. None is reproduced by a cluster rebuild.
    authenticated there. Paste the key at the `MCP key:` prompt:
 
    ```sh
-   sg k3s-admin -c 'kubectl -n vault exec -it statefulset/vault-0 -- sh -c '"'"'
+   sg k3s-admin -c 'kubectl -n vault exec -it vault-0 -- sh -c '"'"'
      umask 077
      MCP_KEY_FILE=$(mktemp)
      trap "rm -f \"$MCP_KEY_FILE\"" EXIT

@@ -718,6 +718,12 @@ echo "==> seeding homelab/penpot, homelab/penpot/data and homelab/penpot-client"
 #     from whichever copy already exists. Same one-source-of-truth rule
 #     apps/tle-dev already follows.
 #
+# redis-uri is NOT generated. The shared Redis in `databases` has exactly one
+# requirepass, rendered from homelab/redis/password, so a password minted here
+# would be one Redis rejects. The URI is derived from that password on EVERY
+# run and rewritten whenever it differs, so re-running this script after a
+# rotation of homelab/redis carries the new password to Penpot.
+#
 # NO mcp-key. Penpot issues that key from its Integrations page and shows it
 # once, so it cannot be generated ahead of time, and a placeholder here would
 # imply the MCP integration works before a real key exists. The Ceremonies
@@ -729,20 +735,45 @@ PENPOT_REDIS_URI=$(mktemp)
 PENPOT_API_SECRET=$(mktemp)
 PENPOT_OIDC_SECRET=$(mktemp)
 PENPOT_CHECK=$(mktemp)
-trap 'rm -f "$PENPOT_READ" "$PENPOT_CHECK" "$PENPOT_DB_PASSWORD" "$PENPOT_REDIS_URI" "$PENPOT_API_SECRET" "$PENPOT_OIDC_SECRET"' EXIT
+PENPOT_REDIS_PW=$(mktemp)
+trap 'rm -f "$PENPOT_READ" "$PENPOT_CHECK" "$PENPOT_REDIS_PW" "$PENPOT_DB_PASSWORD" "$PENPOT_REDIS_URI" "$PENPOT_API_SECRET" "$PENPOT_OIDC_SECRET"' EXIT
 
 penpot_unusable() {
-  # $1 = path, $2 = its field, $3 = sibling path, $4 = sibling field. NEITHER
-  # copy of this credential holds a usable value, so there is nothing to copy
-  # from and this block will not invent a replacement for a key an operator may
-  # have deliberately emptied. Repair is a one-line `kv patch` once one side
-  # holds a value; see the message for the exact form.
-  echo "neither $1/$2 nor $3/$4 holds a usable value, so the two copies of" >&2
+  # $1 = path, $2 = its field, $3 = what penpot_field found there,
+  # $4 = sibling path, $5 = its field, $6 = what penpot_field found there.
+  # NEITHER copy of this credential holds a usable value, so there is nothing
+  # to copy from and this block will not invent a replacement for a key an
+  # operator may have deliberately emptied.
+  echo "neither $1/$2 nor $4/$5 holds a usable value, so the two copies of" >&2
   echo "this credential cannot be made to agree from what is already in" >&2
-  echo "Vault." >&2
-  echo "Seed ONE of them by hand -- vault kv patch $3/$4=@FILE, never a" >&2
-  echo "kv put, which would replace every other key at $3 -- then re-run" >&2
-  echo "this script and it will copy that value to the other path." >&2
+  echo "Vault. Seed ONE of them by hand from a file holding the value, then" >&2
+  echo "re-run this script and it will copy that value to the other path:" >&2
+  penpot_seed_hint "$1" "$2" "$3"
+  penpot_seed_hint "$4" "$5" "$6"
+  echo "Prefer patching a path that already exists: kv patch merges one key," >&2
+  echo "while kv put replaces every key at its path, so put is only for a" >&2
+  echo "path that does not exist yet." >&2
+  exit 1
+}
+
+penpot_seed_hint() {
+  # $1 = path, $2 = field, $3 = missing (the path does not exist) or blank
+  # (it exists without a usable value). Prints the one correct command form.
+  if [ "$3" = missing ]; then
+    echo "    vault kv put $1 $2=@FILE      ($1 does not exist yet)" >&2
+  else
+    echo "    vault kv patch $1 $2=@FILE    ($1 exists)" >&2
+  fi
+}
+
+penpot_reread_failed() {
+  # $1 = path, $2 = field. The value was usable when probed a moment ago and is
+  # not on the read that would copy it, so it changed or vanished mid-run.
+  # Nothing has been written yet.
+  echo "$1/$2 held a usable value when this run probed it, but reading it" >&2
+  echo "again returned nothing usable: it changed or was removed while this" >&2
+  echo "script was running. Nothing has been written. Find out what else is" >&2
+  echo "writing to $1, then re-run this script." >&2
   exit 1
 }
 
@@ -778,12 +809,13 @@ penpot_field() {
 }
 
 penpot_recover() {
-  # $1 = path, $2 = its field, $3 = file to fill, $4 = sibling path,
-  # $5 = sibling field. Copies the existing value rather than minting a second
-  # one, which is the only way two copies of one credential stay equal.
+  # $1 = path, $2 = its field, $3 = file to fill. Copies the existing value
+  # rather than minting a second one, which is the only way two copies of one
+  # credential stay equal. Only called for a copy just probed as usable, so a
+  # failure here is a race, not an empty credential.
   vault_optional_get "$1" "$2" "$3" || exit 1
   if [ "$VAULT_READ_STATUS" != present ] || [ ! -s "$3" ]; then
-    penpot_unusable "$1" "$2" "$4" "$5"
+    penpot_reread_failed "$1" "$2"
   fi
 }
 
@@ -820,9 +852,9 @@ penpot_shared() {
     return 0
   fi
   if [ "$PENPOT_HERE_FIELD" = usable ]; then
-    penpot_recover "$1" "$2" "$5" "$3" "$4"
+    penpot_recover "$1" "$2" "$5"
   elif [ "$PENPOT_THERE_FIELD" = usable ]; then
-    penpot_recover "$3" "$4" "$5" "$1" "$2"
+    penpot_recover "$3" "$4" "$5"
   elif [ "$PENPOT_HERE_FIELD" = missing ] && [ "$PENPOT_THERE_FIELD" = missing ]; then
     # Cold start: neither path exists, so there is nothing to preserve and
     # nothing to disagree with. Alphanumeric only for both credentials: these
@@ -833,7 +865,7 @@ penpot_shared() {
     # At least one path EXISTS and holds nothing usable, so there is no value
     # to copy and this block will not invent a replacement for a key an
     # operator may have deliberately emptied.
-    penpot_unusable "$1" "$2" "$3" "$4"
+    penpot_unusable "$1" "$2" "$PENPOT_HERE_FIELD" "$3" "$4" "$PENPOT_THERE_FIELD"
   fi
 }
 
@@ -858,6 +890,20 @@ penpot_data_status=$VAULT_READ_STATUS
 vault_optional_get homelab/penpot-client - "$PENPOT_READ" || exit 1
 penpot_client_status=$VAULT_READ_STATUS
 
+# The shared Redis password, which the redis-uri below is derived from. Seeded
+# by the homelab/redis step near the top of this script, so it should always be
+# here; if it is not, there is no URI Redis would accept and this stops.
+# Unreserved URI characters only: the value is spliced into redis://:<pw>@...
+# verbatim, and a / @ : or % would change what the URI means rather than fail.
+vault_optional_get homelab/redis password "$PENPOT_REDIS_PW" || exit 1
+if [ "$VAULT_READ_STATUS" != present ] || [ ! -s "$PENPOT_REDIS_PW" ] ||
+   [ "$(LC_ALL=C tr -d 'A-Za-z0-9._~-' <"$PENPOT_REDIS_PW" | wc -c)" -ne 0 ]; then
+  echo "homelab/redis/password is missing, empty, or not URI-safe, so there is" >&2
+  echo "no Redis URI to derive for Penpot. It is seeded by the homelab/redis" >&2
+  echo "step of this script; fix that path, then re-run. Nothing was written." >&2
+  exit 1
+fi
+
 # Resolve the two credentials that live at two paths each, in full, before
 # anything is written.
 penpot_shared homelab/penpot postgres-password homelab/penpot/data password \
@@ -875,27 +921,28 @@ penpot_field homelab/penpot postgres-username
 PENPOT_USER_FIELD=$PENPOT_FIELD
 penpot_field homelab/penpot redis-uri
 PENPOT_REDIS_FIELD=$PENPOT_FIELD
-if [ "$PENPOT_REDIS_FIELD" != usable ]; then
-  # Hex 24 bytes, 192 bits, and NOT base64: this password is interpolated
-  # into the redis:// URI below, where base64's + and / would first need
-  # percent-encoding. A hand-rolled escape is exactly the kind of thing that
-  # yields a URI Redis rejects, long after the cause. Hex needs no escaping.
-  #
-  # Database index 3, not 0: this Redis is shared and index 0 may hold keys.
-  # The password is streamed straight into the file rather than captured in
-  # a variable, so it never becomes an argument to anything.
-  {
-    printf 'redis://:'
-    head -c 4096 /dev/urandom | tr -dc 'a-f0-9' | head -c 48
-    printf '@redis.databases.svc.cluster.local:6379/3'
-  } >"$PENPOT_REDIS_URI"
+# Derived, never generated: the one requirepass of the shared Redis, in a URI
+# for database index 3 (not 0: this Redis is shared and index 0 may hold
+# keys). Streamed straight into the file, so the password never becomes an
+# argument and is never printed. The stored value is compared with cmp, not
+# echoed, and rewritten only when it differs -- which is how a rotation of
+# homelab/redis reaches Penpot on the next run of this script.
+{
+  printf 'redis://:'
+  cat "$PENPOT_REDIS_PW"
+  printf '@redis.databases.svc.cluster.local:6379/3'
+} >"$PENPOT_REDIS_URI"
+PENPOT_REDIS_STALE=no
+if [ "$PENPOT_REDIS_FIELD" = usable ]; then
+  # penpot_field left the stored value in PENPOT_READ.
+  cmp -s "$PENPOT_READ" "$PENPOT_REDIS_URI" || PENPOT_REDIS_STALE=yes
 fi
+: >"$PENPOT_READ"
 penpot_field homelab/penpot api-secret-key
 PENPOT_API_FIELD=$PENPOT_FIELD
 if [ "$PENPOT_API_FIELD" != usable ]; then
-  # Hex for the same reason as above, and because this key only ever encrypts
-  # client API keys at rest -- it is never pasted into a login form. Same
-  # idiom as the omniroute api-key-secret above.
+  # Hex: this key only ever encrypts client API keys at rest -- it is never
+  # pasted into a login form. Same idiom as the omniroute api-key-secret above.
   head -c 4096 /dev/urandom | tr -dc 'a-f0-9' | head -c 64 >"$PENPOT_API_SECRET"
 fi
 
@@ -934,6 +981,10 @@ else
     penpot_assured "$PENPOT_REDIS_URI" "the Redis URI"
     vault kv patch homelab/penpot redis-uri=@"$PENPOT_REDIS_URI" >/dev/null
     echo "    repaired homelab/penpot/redis-uri"
+  elif [ "$PENPOT_REDIS_STALE" = yes ]; then
+    penpot_assured "$PENPOT_REDIS_URI" "the Redis URI"
+    vault kv patch homelab/penpot redis-uri=@"$PENPOT_REDIS_URI" >/dev/null
+    echo "    updated homelab/penpot/redis-uri to the current homelab/redis password"
   fi
   if [ "$PENPOT_API_FIELD" = blank ]; then
     penpot_assured "$PENPOT_API_SECRET" "the API secret key"
@@ -961,7 +1012,7 @@ elif [ "$PENPOT_OIDC_THERE" = blank ]; then
   vault kv patch homelab/penpot-client clientSecret=@"$PENPOT_OIDC_SECRET" >/dev/null
   echo "    repaired homelab/penpot-client/clientSecret"
 fi
-rm -f "$PENPOT_READ" "$PENPOT_CHECK" "$PENPOT_DB_PASSWORD" "$PENPOT_REDIS_URI" "$PENPOT_API_SECRET" "$PENPOT_OIDC_SECRET"
+rm -f "$PENPOT_READ" "$PENPOT_CHECK" "$PENPOT_REDIS_PW" "$PENPOT_DB_PASSWORD" "$PENPOT_REDIS_URI" "$PENPOT_API_SECRET" "$PENPOT_OIDC_SECRET"
 
 echo "==> policy vso-penpot-read"
 # One path per consumer, as vso-postgres-read above. The data/ segment is
