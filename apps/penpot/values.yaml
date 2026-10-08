@@ -35,6 +35,13 @@ config:
   #   Keycloak login may still create its Penpot account
   #   (backend/src/app/auth/oidc.clj). Without it every login is refused.
   # enable-login-with-oidc: the Keycloak button.
+  # disable-email-verification: OIDC-provisioned profiles are created with
+  #   is-active = (or is-active-claim email-verified (not email-verification-flag))
+  #   (backend/src/app/auth.clj), and email_verified defaults to false
+  #   (auth/oidc.clj). With verification on, a Keycloak user without
+  #   emailVerified=true gets an inactive profile and loops at login, and
+  #   there is no SMTP to deliver a verification mail. With password sign-up
+  #   and login disabled it guards nothing.
   # enable-mcp renders the MCP server. It is required -- see the ingress
   #   comment in environments/homelab/apps/penpot.yaml for why the MCP
   #   endpoint is reached through this same hostname.
@@ -47,6 +54,7 @@ config:
     disable-login-with-password
     enable-oidc-registration
     enable-login-with-oidc
+    disable-email-verification
     enable-mcp
 
   # The chart default is true. Nothing leaves this installation unasked.

@@ -847,9 +847,11 @@ class PenpotRegistrationTests(unittest.TestCase):
         # With registration off, only this lets a first Keycloak login create
         # its Penpot account (auth/oidc.clj).
         self.assertIn("enable-oidc-registration", flags)
-        # Email verification guards password sign-up, which is off; skipping
-        # it would only matter if registration came back.
-        self.assertNotIn("disable-email-verification", flags)
+        # OIDC-provisioned profiles are created inactive unless Keycloak
+        # asserts email_verified (auth.clj), and there is no SMTP to deliver
+        # verification mail. Password sign-up/login are off, so verification
+        # guards nothing; without this flag users loop at login.
+        self.assertIn("disable-email-verification", flags)
         # The chart default is on; nothing leaves this installation unasked.
         self.assertIs(False, config["telemetryEnabled"])
         # The admin console is a fifth deployment this installation does not need.
