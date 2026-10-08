@@ -834,8 +834,24 @@ class PenpotRegistrationTests(unittest.TestCase):
         flags = config["flags"].split()
         self.assertIn("enable-login-with-oidc", flags)
         self.assertIn("enable-mcp", flags)
-        # Registration stays off: Keycloak is the only way in.
+        # Keycloak is the only way in. Penpot 2.18.3's built-in defaults
+        # enable registration and password login, so leaving them out is not
+        # enough: each needs an explicit disable-.
+        self.assertIn("disable-registration", flags)
+        self.assertIn("disable-login-with-password", flags)
         self.assertNotIn("enable-registration", flags)
+        self.assertNotIn("enable-login-with-password", flags)
+        # `login` is the legacy alias the backend also accepts for password
+        # login (rpc/commands/auth.clj).
+        self.assertNotIn("enable-login", flags)
+        # With registration off, only this lets a first Keycloak login create
+        # its Penpot account (auth/oidc.clj).
+        self.assertIn("enable-oidc-registration", flags)
+        # Email verification guards password sign-up, which is off; skipping
+        # it would only matter if registration came back.
+        self.assertNotIn("disable-email-verification", flags)
+        # The chart default is on; nothing leaves this installation unasked.
+        self.assertIs(False, config["telemetryEnabled"])
         # The admin console is a fifth deployment this installation does not need.
         self.assertNotIn("enable-admin-console", flags)
         # Every flag carries the enable-/disable- prefix the chart requires;
@@ -891,6 +907,22 @@ class PenpotRegistrationTests(unittest.TestCase):
         ssrf = env["PENPOT_SSRF_ALLOWED_HOSTS"]["value"].split()
         self.assertIn("keycloak.keycloak.svc.cluster.local", ssrf)
         self.assertIn("keycloak.taildf6cd4.ts.net", ssrf)
+
+    def test_penpot_pods_satisfy_restricted_pod_security(self):
+        # Checked on values, not on a render: CI has no helm. Chart 1.11.3
+        # copies each component's two blocks verbatim into its Deployment
+        # (and the frontend's into the helm-test pod). Its own defaults fail
+        # `restricted` -- no seccompProfile, and `drop: [all]` in lower case.
+        values, = self.load("apps/penpot/values.yaml")
+        for component in ("backend", "frontend", "exporter", "mcp"):
+            pod = values[component]["podSecurityContext"]
+            self.assertEqual({"type": "RuntimeDefault"}, pod["seccompProfile"], component)
+            self.assertEqual(1001, pod["fsGroup"], component)
+            container = values[component]["containerSecurityContext"]
+            self.assertEqual(["ALL"], container["capabilities"]["drop"], component)
+            self.assertIs(True, container["runAsNonRoot"], component)
+            self.assertIs(False, container["allowPrivilegeEscalation"], component)
+            self.assertEqual(1001, container["runAsUser"], component)
 
     def test_penpot_values_contain_no_credential(self):
         text = (REPOSITORY_ROOT / "apps/penpot/values.yaml").read_text(encoding="utf-8")

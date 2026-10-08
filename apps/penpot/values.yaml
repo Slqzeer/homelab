@@ -13,22 +13,34 @@ config:
   # absolute links and OIDC redirects.
   publicUri: "https://penpot.taildf6cd4.ts.net"
 
-  # enable-login-with-oidc: Keycloak is the way in.
-  # enable-login-with-password stays on as a recovery route that is not
-  #   advertised on the login page.
-  # enable-registration is deliberately OFF: no self-service sign-up.
-  # enable-admin-console is deliberately OFF: a fifth deployment on port
-  #   3000 that a personal installation does not need.
+  # Keycloak is the only way in. These flags REPLACE the chart's default
+  # list, but Penpot itself starts from its own built-in defaults, which
+  # include enable-registration and enable-login-with-password (2.18.3,
+  # common/src/app/common/flags.cljc). Leaving a flag out therefore does
+  # not turn it off; only an explicit disable- does.
+  #
+  # disable-registration and disable-login-with-password: no password
+  #   sign-up and no password login, so nobody gets in around Keycloak.
+  # enable-oidc-registration: with general registration off, the first
+  #   Keycloak login may still create its Penpot account
+  #   (backend/src/app/auth/oidc.clj). Without it every login is refused.
+  # enable-login-with-oidc: the Keycloak button.
   # enable-mcp renders the MCP server. It is required -- see the ingress
   #   comment in environments/homelab/apps/penpot.yaml for why the MCP
   #   endpoint is reached through this same hostname.
+  # enable-admin-console is deliberately absent: a fifth deployment on port
+  #   3000 that a personal installation does not need.
   # Every token needs an enable-/disable- prefix; Penpot silently ignores
   # anything else, so a typo is a no-op rather than an error.
   flags: >-
-    enable-login-with-password
-    disable-email-verification
+    disable-registration
+    disable-login-with-password
+    enable-oidc-registration
     enable-login-with-oidc
     enable-mcp
+
+  # The chart default is true. Nothing leaves this installation unasked.
+  telemetryEnabled: false
 
   # PENPOT_SECRET_KEY, from Vault. Rotating it invalidates all sessions.
   existingSecret: penpot-secrets
@@ -72,7 +84,30 @@ config:
 # No global.postgresqlEnabled or global.valkeyEnabled: both are external.
 # The chart hard-fails if either is true.
 
+# Pod Security. The penpot namespace enforces `restricted`, and the chart's
+# own securityContext fails it twice: no seccompProfile, and
+# `capabilities.drop: [all]` in lower case where admission requires `ALL`.
+# Every Deployment below therefore carries the same two blocks. UID 1001 is
+# the `penpot` user the backend, frontend and exporter images create; the
+# chart runs the MCP image as 1001 too. fsGroup 1001 keeps the assets volume
+# writable by that user. The anchors keep the four copies identical.
+#
+# The chart's helm-test pod (penpot-test-connection) borrows the frontend's
+# two blocks, so it is admissible as well -- though Argo CD is expected not
+# to create `helm.sh/hook: test` resources at all (checked at go-live).
 backend:
+  podSecurityContext: &podSecurityContext
+    fsGroup: 1001
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext: &containerSecurityContext
+    runAsUser: 1001
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop: [ALL]
+
   # backend.extraEnvs, NOT config.extraEnvs. The chart injects
   # config.extraEnvs into all five components, so an OIDC client secret
   # placed there would also be handed to the MCP server and the exporter.
@@ -117,6 +152,18 @@ backend:
       value: preferred_username
     - name: PENPOT_OIDC_EMAIL_ATTR
       value: email
+
+frontend:
+  podSecurityContext: *podSecurityContext
+  containerSecurityContext: *containerSecurityContext
+
+exporter:
+  podSecurityContext: *podSecurityContext
+  containerSecurityContext: *containerSecurityContext
+
+mcp:
+  podSecurityContext: *podSecurityContext
+  containerSecurityContext: *containerSecurityContext
 
 # Uploaded images and SVG clips. The component's only volume, and the
 # reason homelab.io/state is durable.
