@@ -172,7 +172,8 @@ class ClientRegistrationTests(unittest.TestCase):
         config_map = resource(manifest, "ConfigMap", "keycloak-client-registration")
         return config_map["data"]["reconcile.sh"]
 
-    def run_hook(self, state, *, fail_list=False, leak_on_create=False, scope_noop=False):
+    def run_hook(self, state, *, fail_list=False, leak_on_create=False, scope_noop=False,
+                 penpot_secret="penpot-canary-secret"):
         with tempfile.TemporaryDirectory() as directory:
             temp = Path(directory)
             fake = temp / "kcadm.sh"
@@ -197,6 +198,12 @@ class ClientRegistrationTests(unittest.TestCase):
                        KC_CLI_PASSWORD="admin-canary-secret",
                        PORTAL_CLIENT_SECRET="portal-canary-secret",
                        PENPOT_CLIENT_SECRET="penpot-canary-secret")
+            # None models the optional secretKeyRef whose Secret does not
+            # exist yet: the kubelet leaves the variable unset entirely.
+            if penpot_secret is None:
+                del env["PENPOT_CLIENT_SECRET"]
+            else:
+                env["PENPOT_CLIENT_SECRET"] = penpot_secret
             if fail_list:
                 env["FAKE_FAIL_LIST"] = "1"
             if leak_on_create:
@@ -295,6 +302,26 @@ class ClientRegistrationTests(unittest.TestCase):
             "".join(run.stdout + run.stderr for run in runs),
         )
 
+    def test_absent_penpot_secret_skips_penpot_and_still_reconciles_portal(self):
+        # The penpot Application (wave 25) projects keycloak-penpot-client
+        # after this hook can first run. Until then the hook must not wedge
+        # the portal: it reconciles the portal, skips penpot with a warning
+        # and succeeds. "" covers a Secret present with an empty key.
+        for penpot_secret in (None, ""):
+            with self.subTest(penpot_secret=penpot_secret):
+                runs, state, events, _ = self.run_hook([], penpot_secret=penpot_secret)
+                self.assertEqual([0, 0], [run.returncode for run in runs],
+                                 [run.stderr for run in runs])
+                self.assertEqual(["homelab-portal"],
+                                 [client["clientId"] for client in state])
+                self.assertIn("groups", state[0]["_default_scopes"])
+                self.assertFalse(any("penpot" in " ".join(event["args"])
+                                     for event in events))
+                for run in runs:
+                    self.assertIn("WARNING: penpot client skipped", run.stderr)
+                    self.assertNotIn("portal-canary-secret", run.stdout + run.stderr)
+                    self.assertNotIn("admin-canary-secret", run.stdout + run.stderr)
+
     def test_drift_updates_only_allowlisted_client(self):
         unrelated = {"id": "other-id", "clientId": "unrelated", "secret": "untouched"}
         portal = {"id": "portal-id", "clientId": "homelab-portal", "secret": "old",
@@ -378,6 +405,12 @@ class ClientRegistrationTests(unittest.TestCase):
         self.assertEqual("keycloak-admin", env["KC_CLI_PASSWORD"]["valueFrom"]["secretKeyRef"]["name"])
         self.assertEqual("keycloak-portal-client", env["PORTAL_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"]["name"])
         self.assertEqual("keycloak-penpot-client", env["PENPOT_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"]["name"])
+        # Optional: the Secret belongs to the later penpot Application, and a
+        # required reference would hold the pod in CreateContainerConfigError.
+        self.assertIs(True, env["PENPOT_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"]["optional"])
+        # The admin and portal references stay required.
+        for name in ("KC_ADMIN_USERNAME", "KC_CLI_PASSWORD", "PORTAL_CLIENT_SECRET"):
+            self.assertNotIn("optional", env[name]["valueFrom"]["secretKeyRef"], name)
         script = self.script()
         self.assertIn("/tools/jq", script)
         self.assertIn("-f -", script)

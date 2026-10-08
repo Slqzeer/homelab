@@ -18,7 +18,10 @@ data:
     : "${KC_ADMIN_USERNAME:?missing admin username}"
     : "${KC_CLI_PASSWORD:?missing admin password}"
     : "${PORTAL_CLIENT_SECRET:?missing portal client secret}"
-    : "${PENPOT_CLIENT_SECRET:?missing penpot client secret}"
+    # PENPOT_CLIENT_SECRET is optional on purpose. Its Secret is projected by
+    # the penpot Application (sync wave 25), which syncs after this hook can
+    # first run; requiring it would wedge the hook, and the portal with it.
+    # Without it the penpot entry is skipped below, with a warning.
 
     # KC_CLI_PASSWORD is Keycloak's supported password input. A private
     # ephemeral config file holds the resulting session token.
@@ -183,8 +186,14 @@ data:
     # redirected to, and Keycloak's post.logout.redirect.uris is a browser
     # GET. Hence the empty path, giving the trailing "/" that lands on the
     # application root rather than a logout route.
-    reconcile_client penpot PENPOT_CLIENT_SECRET "Penpot" \
-      https://penpot.taildf6cd4.ts.net /api/oauth/redirect /
+    if [ -n "${PENPOT_CLIENT_SECRET:-}" ]; then
+      reconcile_client penpot PENPOT_CLIENT_SECRET "Penpot" \
+        https://penpot.taildf6cd4.ts.net /api/oauth/redirect /
+    else
+      echo "WARNING: penpot client skipped: Secret keycloak-penpot-client is" \
+        "not projected yet. Re-sync the keycloak Application after the" \
+        "penpot Application's first sync." >&2
+    fi
 ---
 apiVersion: batch/v1
 kind: Job
@@ -264,11 +273,14 @@ spec:
                 secretKeyRef:
                   name: keycloak-portal-client
                   key: clientSecret
+            # Optional: projected by the later penpot Application; the
+            # script skips the penpot client while it is absent.
             - name: PENPOT_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: keycloak-penpot-client
                   key: clientSecret
+                  optional: true
           volumeMounts:
             - name: script
               mountPath: /scripts
