@@ -683,10 +683,57 @@ class PenpotRegistrationTests(unittest.TestCase):
     chart_version = "1.11.3"
     app_version = "2.18.3"
 
+    # Every namespace bootstrap/namespaces/namespaces.yaml declares, in file
+    # order. Asserted as a whole list because the `namespaces` Application
+    # reconciles this file with prune: true: a document dropped from it
+    # DELETES that namespace and cascades to everything inside it.
+    expected_namespaces = [
+        "cert-manager", "vault", "tailscale", "vault-secrets-operator-system",
+        "databases", "apps", "monitoring", "logging", "keycloak", "portal",
+        "tle-dev", "omniroute", "egress", "agents", "penpot",
+    ]
+
+    # Each digest bound to the image it belongs to. Bare 64-hex substrings
+    # would pass on a runbook with any two rows transposed.
+    image_digests = (
+        (
+            "penpotapp/frontend:2.18.3",
+            "bb8abe27d53de84c95597f2c02c0e702b2779971fb0703e543f9ecf183e999f6",
+        ),
+        (
+            "penpotapp/backend:2.18.3",
+            "2df1b3440d2a82cc3571db211b4ffdfa2b89ccc910759e8d5e9387fb62971b5c",
+        ),
+        (
+            "penpotapp/exporter:2.18.3",
+            "418232d6ca3120b1c2bfde298a56a05a1f41f567cd8494deac3fe7fbc186cfbd",
+        ),
+        (
+            "penpotapp/mcp:2.18.3",
+            "5e811e6eeb179d80d8781fb0ffd2991560785d150b3676f1ac5e28d63ba9f7c2",
+        ),
+    )
+
     @staticmethod
     def load(path):
         with (REPOSITORY_ROOT / path).open(encoding="utf-8") as stream:
             return [document for document in yaml.safe_load_all(stream) if document]
+
+    def test_namespace_inventory_is_complete_and_ordered(self):
+        # A per-namespace filter cannot see a document that was merged into
+        # its neighbour and lost. `agents` is the canary: it is what a
+        # missing `---` separator between two Namespace documents swallows,
+        # silently, with no error from the parser. Only an assertion over
+        # every document in order catches that, and reordering too.
+        namespaces = self.load("bootstrap/namespaces/namespaces.yaml")
+        self.assertEqual(
+            ["Namespace"] * len(self.expected_namespaces),
+            [document["kind"] for document in namespaces],
+        )
+        self.assertEqual(
+            self.expected_namespaces,
+            [document["metadata"]["name"] for document in namespaces],
+        )
 
     def test_penpot_namespace_is_restricted_to_kubernetes_136(self):
         namespaces = self.load("bootstrap/namespaces/namespaces.yaml")
@@ -705,6 +752,12 @@ class PenpotRegistrationTests(unittest.TestCase):
         application, = self.load("environments/homelab/apps/penpot.yaml")
         metadata = application["metadata"]
         annotations = metadata["annotations"]
+        # Later tasks key off these three, so they are asserted in their own
+        # right and not merely implied by spec.destination.namespace below.
+        # A rename to `penpot-app` changes every Argo lookup by name.
+        self.assertEqual("penpot", metadata["name"])
+        self.assertEqual("argocd", metadata["namespace"])
+        self.assertEqual("default", application["spec"]["project"])
         self.assertEqual("25", annotations["argocd.argoproj.io/sync-wave"])
         self.assertEqual("v1", annotations["homelab.io/onboarding-contract"])
         self.assertEqual("personal-applications", annotations["homelab.io/owner"])
@@ -716,7 +769,12 @@ class PenpotRegistrationTests(unittest.TestCase):
 
         sources = application["spec"]["sources"]
         self.assertEqual(3, len(sources))
+        # repoURL is pinned on every source, not just checked on the chart.
+        # Two of the three sources render objects into a namespace that has
+        # a Vault connection, so a source silently repointed at a third-party
+        # repository would be applied with this repository's privileges.
         chart = next(source for source in sources if source.get("chart"))
+        self.assertEqual("http://helm.penpot.app", chart["repoURL"])
         self.assertEqual("penpot", chart["chart"])
         self.assertEqual(self.chart_version, chart["targetRevision"])
         self.assertNotIn("homelab.git", chart["repoURL"])
@@ -724,10 +782,12 @@ class PenpotRegistrationTests(unittest.TestCase):
             ["$values/apps/penpot/values.yaml"], chart["helm"]["valueFiles"]
         )
         values_source = next(source for source in sources if source.get("ref"))
+        self.assertEqual("git@github.com:Slqzeer/homelab.git", values_source["repoURL"])
         self.assertEqual("values", values_source["ref"])
         manifest_source = next(
             source for source in sources if source.get("path")
         )
+        self.assertEqual("git@github.com:Slqzeer/homelab.git", manifest_source["repoURL"])
         self.assertEqual("apps/penpot/config", manifest_source["path"])
         self.assertEqual("main", manifest_source["targetRevision"])
 
@@ -747,13 +807,16 @@ class PenpotRegistrationTests(unittest.TestCase):
         )
         self.assertEqual(0, tracked.returncode)
         text = runbook.read_text(encoding="utf-8")
-        for digest in (
-            "bb8abe27d53de84c95597f2c02c0e702b2779971fb0703e543f9ecf183e999f6",
-            "2df1b3440d2a82cc3571db211b4ffdfa2b89ccc910759e8d5e9387fb62971b5c",
-            "418232d6ca3120b1c2bfde298a56a05a1f41f567cd8494deac3fe7fbc186cfbd",
-            "5e811e6eeb179d80d8781fb0ffd2991560785d150b3676f1ac5e28d63ba9f7c2",
-        ):
-            self.assertIn(digest, text)
+        # Each digest is asserted against the image it is recorded beside, in
+        # the runbook's own pipe row, digest prefix included. A bare 64-hex
+        # assertion passes on a runbook with the frontend and backend rows
+        # transposed -- which is precisely the edit an upgrade makes, and the
+        # one that would leave a wrong digest trusted during a rollback.
+        # Whitespace is collapsed first so a row wrapped across lines matches.
+        normalized = " ".join(text.split())
+        for image, digest in self.image_digests:
+            with self.subTest(image=image):
+                self.assertIn(f"`{image}` | `sha256:{digest}`", normalized)
         self.assertIn(self.chart_version, text)
         self.assertIn(self.app_version, text)
         # The eviction deviation is a real operational hazard, so it has to

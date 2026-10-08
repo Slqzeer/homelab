@@ -137,15 +137,18 @@ cascades to the PVC and is not reversible.
 
 ## Known gaps
 
-- **The shared Redis eviction policy is not Penpot's recommendation.** This
-  cluster's Redis runs `maxmemory 128mb` with `maxmemory-policy allkeys-lru`;
-  Penpot documents `volatile-lfu`. Under `allkeys-lru` Penpot's websocket
+- **The shared cache's eviction policy is not Penpot's recommendation.** The
+  shared cache is the `redis:8.2-alpine` release in `databases`, configured
+  with `maxmemory 128mb` and `maxmemory-policy allkeys-lru`; Penpot
+  documents `volatile-lfu`. Under `allkeys-lru` Penpot's websocket
   coordination keys are evictable, and evicting one degrades live
   collaboration rather than merely slowing a cache. `maxmemory` and the
   policy are cluster-wide and cannot be varied per client. Watch
-  `evicted_keys` on the Redis instance; if Penpot evicts under real use the
-  fix is a **dedicated** Valkey instance for Penpot, not a change to the
-  shared one.
+  `evicted_keys` on that instance; if Penpot evicts under real use the fix is
+  a **dedicated** cache for Penpot -- its own `valkey/valkey` StatefulSet in
+  the `penpot` namespace, the same shape tle-dev already runs in
+  `apps/tle-dev/config/datastores.yaml` -- and not a change to the settings
+  of the shared one.
 - **No Penpot series reach Grafana Cloud.** No component of Penpot 2.18.3
   exposes a Prometheus endpoint, so there is no ServiceMonitor for it. The
   exporter is the trap: its name suggests it exports metrics, but port 6061
