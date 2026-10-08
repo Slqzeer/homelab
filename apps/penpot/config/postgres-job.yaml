@@ -1,0 +1,140 @@
+# The penpot database in the shared PostgreSQL (issue #1).
+#
+# Same arrangement as apps/tle-dev/config/postgres-job.yaml and
+# platform/keycloak/config/database-job.yaml: every object states
+# `namespace: databases` explicitly and lands outside this Application's
+# destination namespace. A Sync hook (not a plain Job) so a changed script
+# reaches the cluster; the `job: postgres-client` label is what the databases
+# NetworkPolicy selects.
+#
+# One role and one database, owned by penpot. The password is created in
+# Vault at homelab/penpot/data and applied here on every sync, so a rotated
+# password reaches the role without anyone editing SQL.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: penpot-db
+  namespace: databases
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultAuth
+metadata:
+  name: penpot-db
+  namespace: databases
+spec:
+  vaultConnectionRef: vault
+  method: kubernetes
+  mount: kubernetes
+  kubernetes:
+    role: vso-penpot-db
+    serviceAccount: penpot-db
+    audiences:
+      - vault
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultStaticSecret
+metadata:
+  name: penpot-db
+  namespace: databases
+spec:
+  vaultAuthRef: penpot-db
+  mount: homelab
+  type: kv-v2
+  path: penpot/data
+  refreshAfter: 300s
+  destination:
+    name: penpot-db
+    create: true
+    transformation:
+      excludeRaw: true
+      excludes:
+        - ".*"
+      templates:
+        password:
+          text: '{{ get .Secrets "password" }}'
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: penpot-database
+  namespace: databases
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        job: postgres-client
+    spec:
+      serviceAccountName: penpot-db
+      restartPolicy: Never
+      containers:
+        - name: psql
+          # Pinned per the immutable-image rule, same as apps/tle-dev.
+          image: >-
+            postgres:18.6-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: PGHOST
+              value: postgres.databases.svc.cluster.local
+            - name: PGUSER
+              value: postgres
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+            - name: PENPOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: penpot-db
+                  key: password
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              until pg_isready -q; do
+                echo "waiting for postgres"; sleep 2
+              done
+              role_exists=$(psql -v ON_ERROR_STOP=1 -tAc \
+                "SELECT 1 FROM pg_roles WHERE rolname='penpot'")
+              if [ "$role_exists" = 1 ]; then
+                echo "role penpot exists"
+              else
+                psql -v ON_ERROR_STOP=1 -c "CREATE ROLE penpot LOGIN"
+                echo "role penpot created"
+              fi
+              # The password travels through a psql variable, never
+              # interpolated into SQL text or argv (same \getenv pattern as
+              # apps/tle-dev/config/postgres-job.yaml). It runs unconditionally
+              # so a rotated password reaches the role on the next sync.
+              psql -v ON_ERROR_STOP=1 <<'SQL'
+              \getenv pw PENPOT_PASSWORD
+              ALTER ROLE penpot WITH PASSWORD :'pw';
+              SQL
+              db_exists=$(psql -v ON_ERROR_STOP=1 -tAc \
+                "SELECT 1 FROM pg_database WHERE datname='penpot'")
+              if [ "$db_exists" = 1 ]; then
+                echo "database penpot exists"
+              else
+                psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE penpot OWNER penpot"
+                echo "database penpot created"
+              fi
+              # Penpot's backend creates its own schema on first start, so the
+              # role needs only what CREATE on its own database implies.
+              echo "done"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi

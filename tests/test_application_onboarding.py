@@ -897,6 +897,129 @@ class PenpotRegistrationTests(unittest.TestCase):
         for forbidden in ("apiSecretKey: \"", "password: penpot", "mcp-key"):
             self.assertNotIn(forbidden, text)
 
+    def test_penpot_vso_projects_only_required_keys(self):
+        resources = self.load("apps/penpot/config/vault-secrets.yaml")
+        by_kind = {}
+        for resource in resources:
+            by_kind.setdefault(resource["kind"], []).append(resource)
+
+        self.assertEqual(["penpot"], [item["metadata"]["name"]
+                                      for item in by_kind["ServiceAccount"]])
+        auth, = by_kind["VaultAuth"]
+        self.assertEqual("vso-penpot", auth["spec"]["kubernetes"]["role"])
+        self.assertEqual("penpot", auth["spec"]["kubernetes"]["serviceAccount"])
+        self.assertEqual(["vault"], auth["spec"]["kubernetes"]["audiences"])
+
+        secrets = {item["metadata"]["name"]: item for item in by_kind["VaultStaticSecret"]}
+        self.assertEqual({"penpot", "penpot-redis", "keycloak-penpot-client"}, set(secrets))
+
+        penpot = secrets["penpot"]
+        self.assertEqual("homelab", penpot["spec"]["mount"])
+        self.assertEqual("penpot", penpot["spec"]["path"])
+        self.assertEqual("300s", penpot["spec"]["refreshAfter"])
+        self.assertIs(True, penpot["spec"]["hmacSecretData"])
+        transformation = penpot["spec"]["destination"]["transformation"]
+        self.assertEqual("penpot-secrets", penpot["spec"]["destination"]["name"])
+        self.assertIs(True, transformation["excludeRaw"])
+        self.assertEqual([".*"], transformation["excludes"])
+        # redis-uri lives in its own Secret (penpot-redis), not here.
+        self.assertEqual(
+            {"postgres-username", "postgres-password",
+             "api-secret-key", "oidc-client-secret"},
+            set(transformation["templates"]),
+        )
+        # The MCP key is issued by Penpot after first login; projecting it
+        # before it exists would leave the pod waiting on a value nobody has.
+        self.assertNotIn("mcp-key", transformation["templates"])
+        # Exactly the Deployments whose chart 1.11.3 render references
+        # penpot-secrets (backend and exporter; frontend and mcp do not).
+        self.assertEqual(
+            [{"kind": "Deployment", "name": "penpot-backend"},
+             {"kind": "Deployment", "name": "penpot-exporter"}],
+            penpot["spec"]["rolloutRestartTargets"],
+        )
+
+        redis = secrets["penpot-redis"]
+        self.assertEqual("penpot", redis["metadata"]["namespace"])
+        self.assertEqual("penpot", redis["spec"]["vaultAuthRef"])
+        self.assertEqual("homelab", redis["spec"]["mount"])
+        self.assertEqual("kv-v2", redis["spec"]["type"])
+        self.assertEqual("redis", redis["spec"]["path"])
+        self.assertEqual("300s", redis["spec"]["refreshAfter"])
+        self.assertIs(True, redis["spec"]["hmacSecretData"])
+        destination = redis["spec"]["destination"]
+        self.assertEqual("penpot-redis", destination["name"])
+        self.assertIs(True, destination["create"])
+        self.assertIs(True, destination["transformation"]["excludeRaw"])
+        self.assertEqual([".*"], destination["transformation"]["excludes"])
+        templates = destination["transformation"]["templates"]
+        self.assertEqual({"redis-uri"}, set(templates))
+        self.assertEqual(
+            'redis://:{{ get .Secrets "password" }}'
+            "@redis.databases.svc.cluster.local:6379/3",
+            templates["redis-uri"]["text"],
+        )
+        self.assertEqual(
+            [{"kind": "Deployment", "name": "penpot-backend"},
+             {"kind": "Deployment", "name": "penpot-exporter"},
+             {"kind": "Deployment", "name": "penpot-mcp"}],
+            redis["spec"]["rolloutRestartTargets"],
+        )
+
+        client = secrets["keycloak-penpot-client"]
+        self.assertEqual("keycloak", client["metadata"]["namespace"])
+        self.assertEqual("penpot-client", client["spec"]["path"])
+        self.assertEqual("keycloak-penpot-client",
+                         client["spec"]["destination"]["name"])
+        client_transformation = client["spec"]["destination"]["transformation"]
+        self.assertIs(True, client_transformation["excludeRaw"])
+        self.assertEqual({"clientSecret"}, set(client_transformation["templates"]))
+        self.assertEqual('{{ get .Secrets "clientSecret" }}',
+                         client_transformation["templates"]["clientSecret"]["text"])
+
+    def test_penpot_database_job_creates_role_and_database_idempotently(self):
+        job, = [item for item in self.load("apps/penpot/config/postgres-job.yaml")
+                if item["kind"] == "Job"]
+        self.assertEqual("databases", job["metadata"]["namespace"])
+        self.assertEqual("Sync", job["metadata"]["annotations"]["argocd.argoproj.io/hook"])
+        pod = job["spec"]["template"]["spec"]
+        self.assertEqual("penpot-db", pod["serviceAccountName"])
+        self.assertEqual({"job": "postgres-client"},
+                         job["spec"]["template"]["metadata"]["labels"])
+        container, = pod["containers"]
+        env = {entry["name"]: entry for entry in container["env"]}
+        self.assertEqual("postgres-credentials",
+                         env["PGPASSWORD"]["valueFrom"]["secretKeyRef"]["name"])
+        self.assertEqual("penpot-db",
+                         env["PENPOT_PASSWORD"]["valueFrom"]["secretKeyRef"]["name"])
+        self.assertEqual("postgres.databases.svc.cluster.local", env["PGHOST"]["value"])
+        # \getenv, not string interpolation into SQL text.
+        script = " ".join(container["command"])
+        self.assertIn("\\getenv pw PENPOT_PASSWORD", script)
+        self.assertIn("CREATE ROLE penpot LOGIN", script)
+        self.assertIn("CREATE DATABASE penpot OWNER penpot", script)
+        self.assertNotIn("password: penpot", script)
+
+    def test_penpot_config_renders_and_is_wired_into_ci(self):
+        workflow, = self.load(".github/workflows/validate.yaml")
+        conform_steps = workflow["jobs"]["kubeconform"]["steps"]
+        render_command = next(
+            step["run"] for step in conform_steps
+            if step.get("name") == "Render application configs"
+        )
+        self.assertIn("kustomize build apps/penpot/config", render_command)
+        self.assertIn("rendered/penpot-config.yaml", render_command)
+
+        kustomization, = self.load("apps/penpot/config/kustomization.yaml")
+        # No namespace: field on purpose -- this directory holds objects in
+        # penpot, databases and keycloak, and kustomize rewrites even an
+        # explicit namespace.
+        self.assertNotIn("namespace", kustomization)
+        self.assertEqual(
+            ["vault-secrets.yaml", "networkpolicy.yaml", "postgres-job.yaml"],
+            kustomization["resources"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
