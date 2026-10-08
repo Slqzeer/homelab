@@ -1194,6 +1194,30 @@ class PenpotRegistrationTests(unittest.TestCase):
             kustomization["resources"],
         )
 
+    def test_penpot_ingress_routes_only_the_frontend_and_is_unpublished(self):
+        ingress, = [item for item in self.load(
+            "infrastructure/ingress/config/penpot-ingress.yaml")
+            if item["kind"] == "Ingress"]
+        metadata = ingress["metadata"]
+        annotations = metadata["annotations"]
+        self.assertEqual("tailscale", ingress["spec"]["ingressClassName"])
+        self.assertEqual("ingress", annotations["tailscale.com/proxy-group"])
+        self.assertEqual([{"hosts": ["penpot"]}], ingress["spec"]["tls"])
+        # Unpublished until OIDC login has been verified live.
+        self.assertFalse(any(key.startswith("portal.homelab.io/")
+                             for key in annotations))
+
+        # The chart names the frontend Service `penpot`, not `penpot-frontend`
+        # (verified by helm template; the selector is penpot-frontend).
+        backend = ingress["spec"]["defaultBackend"]["service"]
+        self.assertEqual("penpot", backend["name"])
+        self.assertEqual({"name": "http"}, backend["port"])
+
+        # The backend, exporter and MCP ports must never appear here.
+        text = yaml.safe_dump(ingress)
+        for forbidden in ("6060", "6061", "4401", "4402", "admin-console"):
+            self.assertNotIn(forbidden, text)
+
 
 if __name__ == "__main__":
     unittest.main()
