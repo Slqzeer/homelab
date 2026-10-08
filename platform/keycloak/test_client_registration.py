@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
@@ -127,7 +128,15 @@ elif args[:2] in (["kv", "put"], ["kv", "patch"]):
     for item in args[3:]:
         key, value = item.split("=", 1)
         if not value.startswith("@"):
-            sys.exit(3)
+            # A real `vault kv put` accepts a literal as well as key=@file. The
+            # penpot block seeds postgres-username=penpot, a constant, so a test
+            # that executes that block asks for literals. Default stays OFF, so
+            # the tests that exist to catch a secret interpolated into argv
+            # still see this exit 3.
+            if not os.environ.get("FAKE_VAULT_ALLOW_LITERAL"):
+                sys.exit(3)
+            body[key] = value
+            continue
         body[key] = Path(value[1:]).read_text()
     if args[1] == "put":
         state[path] = body
@@ -407,22 +416,39 @@ class ClientRegistrationTests(unittest.TestCase):
         `bound_service_account_names=penpot` sits inside
         `bound_service_account_names=penpot-db`, and `...=penpot` matches a
         role naming `penpot-db` or `penpot-x`. Comparing whole values closes
-        both, and catches a setting the block was not supposed to have.
+        both.
+
+        A duplicate field is a dict entry too, and the last one wins -- which
+        would let `bound_service_account_names=penpot-x` followed by
+        `bound_service_account_names=penpot` pass. Hence the length check:
+        the dict must hold exactly one line's worth of settings. Vault also
+        takes only the last of a repeated CLI key, so a repeat is never what
+        the author meant.
         """
         settings = {}
-        for line in role_block.strip().splitlines():
+        lines = role_block.strip().splitlines()
+        for line in lines:
             field, _, value = line.strip().partition("=")
             settings[field] = value.rstrip("\\ ").strip()
+        self.assertEqual(len(lines), len(settings),
+                         f"a field is repeated: {sorted(settings)}")
         return settings
 
     def test_vault_penpot_paths_and_roles_are_narrow(self):
         script = (ROOT / "platform/vault/configure-vault.sh").read_text(encoding="utf-8")
         for path in ("homelab/penpot", "homelab/penpot/data", "homelab/penpot-client"):
             self.assertIn(f"vault_optional_get {path}", script)
-            self.assertIn(f"vault kv put {path}", script)
-        for key in ("postgres-password", "postgres-username", "redis-uri",
-                    "api-secret-key", "oidc-client-secret"):
-            self.assertIn(f"{key}=", script)
+            # Anchored, or the first case is satisfied by `... penpot/data`.
+            self.assertRegex(script, rf"(?m)^ *vault kv put {re.escape(path)}( |\n)")
+        for key in ("postgres-password", "redis-uri", "api-secret-key", "oidc-client-secret"):
+            # The `@` is load-bearing: it is what proves the value is read from
+            # a FILE. Without it, a generated secret interpolated straight into
+            # the command line would satisfy the assertion while being visible
+            # in `ps`.
+            self.assertIn(f"{key}=@", script)
+        # The one literal: a constant, and the only value in this block that is
+        # not read from a file.
+        self.assertIn("postgres-username=penpot", script)
         # The MCP key is issued by Penpot and cannot be seeded here.
         self.assertNotIn("mcp-key=@", script)
         self.assertIn('path "homelab/data/penpot"', script)
@@ -439,7 +465,7 @@ class ClientRegistrationTests(unittest.TestCase):
                          r"^vault kv put homelab/penpot-client clientSecret=@")
 
         # The keycloak namespace reads the Penpot client secret through its own
-        # vso-keycloak-read role, so that policy must grant the dedicated path.
+        # vso-keycloak-read policy, so that policy must grant the dedicated path.
         # It must NOT be widened to homelab/data/penpot: Keycloak needs one
         # credential from Penpot, not its database password, Redis URI or API
         # secret key. The closing quote is what makes each of these exact --
@@ -449,6 +475,29 @@ class ClientRegistrationTests(unittest.TestCase):
         self.assertIn('path "homelab/data/penpot-client"', keycloak_read)
         self.assertNotIn('path "homelab/data/penpot"', keycloak_read)
         self.assertNotIn("*", keycloak_read)
+
+        # Least privilege, whatever the new policy is called: exactly one policy in the
+        # whole script may grant homelab/data/penpot, and it is vso-penpot-read's.
+        # Without this, adding a second policy that grants the path and binding
+        # it to vso-keycloak would satisfy every other assertion here.
+        policies = {}
+        for chunk in script.split("vault policy write ")[1:]:
+            name, _, body = chunk.partition(" - <<'POLICY'\n")
+            policies[name] = body.split("\nPOLICY", 1)[0]
+        granting_penpot = [name for name, body in policies.items()
+                           if 'path "homelab/data/penpot"' in body]
+        self.assertEqual(["vso-penpot-read"], granting_penpot)
+
+        # And the keycloak role must name only the policy that carries the
+        # dedicated path -- one `token_policies`, not a list of them.
+        self.assertEqual({
+            "bound_service_account_names": "keycloak",
+            "bound_service_account_namespaces": "keycloak",
+            "audience": "vault",
+            "token_policies": "vso-keycloak-read",
+            "ttl": "1h",
+        }, self.roleSettings(script.split("vault write auth/kubernetes/role/vso-keycloak \\\n", 1)[1]
+                             .split("\n\n", 1)[0]))
 
         # One role per ServiceAccount. `vso-penpot` matches its own header only:
         # the db role is `vso-penpot-db`, which this search string cannot reach.
@@ -473,6 +522,152 @@ class ClientRegistrationTests(unittest.TestCase):
             "ttl": "1h",
         }, self.roleSettings(db_role))
         self.assertNotIn("*", db_role)
+
+    def run_penpot_seed(self, state, allow_literal=True):
+        """Execute the real penpot seed block against FAKE_VAULT, twice.
+
+        The block calls vault_optional_get, which is defined earlier in the
+        script, so the test has to supply it -- the same way the tests above
+        supply only the block they exercise.
+        """
+        source = (ROOT / "platform/vault/configure-vault.sh").read_text(encoding="utf-8")
+        header = ('echo "==> seeding homelab/penpot, homelab/penpot/data '
+                  'and homelab/penpot-client"')
+        seed = source.split(header, 1)[1]
+        seed = seed.split('echo "==> policy vso-penpot-read"', 1)[0]
+        helper = source.split("vault_optional_get() {", 1)[1].split("\n}\n", 1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            temp = Path(directory)
+            vault = temp / "vault"
+            vault.write_text(FAKE_VAULT, encoding="utf-8")
+            vault.chmod(0o700)
+            script = temp / "seed.sh"
+            script.write_text(
+                "set -eu\numask 077\n"
+                'PORTAL_READ_ERROR_FILE=$(mktemp)\n'
+                "vault_optional_get() {" + helper + "\n}\n" + header + seed,
+                encoding="utf-8")
+            state_path = temp / "vault.json"
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+            events_path = temp / "vault-events.jsonl"
+            # The fake only appends on a write, so start it: a run that writes
+            # nothing is a result this test needs to be able to read.
+            events_path.write_text("")
+            env = dict(os.environ, PATH=f"{temp}:{os.environ['PATH']}",
+                       FAKE_VAULT_STATE=str(state_path), FAKE_VAULT_EVENTS=str(events_path))
+            if allow_literal:
+                env["FAKE_VAULT_ALLOW_LITERAL"] = "1"
+            runs, per_run_events = [], []
+            for _ in range(2):
+                runs.append(subprocess.run(["/bin/sh", str(script)], env=env, text=True,
+                                           capture_output=True, check=False))
+                per_run_events.append(events_path.read_text())
+            return runs, json.loads(state_path.read_text()), per_run_events
+
+    def test_vault_penpot_seed_gives_each_shared_credential_exactly_one_value(self):
+        """Every combination of which of the three paths already exists.
+
+        Two credentials live at two paths each: the database password at
+        homelab/penpot/postgres-password and homelab/penpot/data/password, and
+        the OIDC client secret at homelab/penpot/oidc-client-secret and
+        homelab/penpot-client/clientSecret. 2^3 = 8 starting states, which
+        between them cover all four states of both pairs (neither, first only,
+        second only, both). In every one of them each credential must end up
+        identical in both of its paths and non-empty.
+
+        The state that needs this most -- homelab/penpot/data present while
+        homelab/penpot is absent -- is the one where a guard keyed only on the
+        data path leaves the password unresolved, and the block then writes the
+        zero-byte mktemp as the chart's database password.
+        """
+        def app_at(password, oidc):
+            """homelab/penpot populated, with the two shared values it carries."""
+            return {"postgres-username": "penpot", "postgres-password": password,
+                    "redis-uri": "redis://:abc@redis.databases.svc.cluster.local:6379/3",
+                    "api-secret-key": "app-api", "oidc-client-secret": oidc}
+
+        data = {"homelab/penpot/data": {"password": "db-shared"}}
+        client = {"homelab/penpot-client": {"clientSecret": "oidc-shared"}}
+        cases = (
+            # Starting state, expected password, expected client secret. None
+            # means the script generated it, and only the two-copies-match and
+            # non-empty properties are asserted. A fixture that gave one
+            # credential two different values would be a state no run of this
+            # script can produce, so the shared value is always "…-shared".
+            ("neither present", {}, None, None),
+            ("app only", {"homelab/penpot": app_at("db-shared", "oidc-shared")},
+             "db-shared", "oidc-shared"),
+            ("data only", dict(data), "db-shared", None),
+            ("client only", dict(client), None, "oidc-shared"),
+            ("app + data", dict(data, **{"homelab/penpot": app_at("db-shared", "oidc-shared")}),
+             "db-shared", "oidc-shared"),
+            ("app + client", dict(client, **{"homelab/penpot": app_at("db-shared", "oidc-shared")}),
+             "db-shared", "oidc-shared"),
+            ("data + client", {**data, **client}, "db-shared", "oidc-shared"),
+            ("all three", {**data, **client,
+                           "homelab/penpot": app_at("db-shared", "oidc-shared")},
+             "db-shared", "oidc-shared"),
+        )
+        for label, seeded, password, oidc in cases:
+            with self.subTest(starting=label):
+                runs, state, per_run_events = self.run_penpot_seed(seeded)
+                self.assertEqual(0, runs[0].returncode, runs[0].stderr)
+                self.assertEqual(
+                    {"homelab/penpot", "homelab/penpot/data", "homelab/penpot-client"},
+                    set(state))
+
+                written = state["homelab/penpot"]["postgres-password"]
+                self.assertNotEqual("", written, "an empty password was seeded")
+                self.assertEqual(written, state["homelab/penpot/data"]["password"],
+                                 "the two copies of the database password differ")
+                secret = state["homelab/penpot"]["oidc-client-secret"]
+                self.assertNotEqual("", secret, "an empty client secret was seeded")
+                self.assertEqual(secret, state["homelab/penpot-client"]["clientSecret"],
+                                 "the two copies of the OIDC client secret differ")
+
+                # Where the pair was only partly present, the surviving copy wins.
+                if password is not None:
+                    self.assertEqual(password, written)
+                if oidc is not None:
+                    self.assertEqual(oidc, secret)
+
+                # Idempotent: a second run writes nothing and changes nothing.
+                self.assertEqual(0, runs[1].returncode, runs[1].stderr)
+                self.assertEqual(per_run_events[0], per_run_events[1])
+                # No value ever reaches the terminal.
+                output = runs[0].stdout + runs[0].stderr + runs[1].stdout + runs[1].stderr
+                for canary in ("db-shared", "oidc-shared", "app-api"):
+                    self.assertNotIn(canary, output)
+
+    def test_vault_penpot_seed_refuses_an_empty_or_missing_shared_value(self):
+        """A path that exists without a usable value must stop the run.
+
+        `vault kv put` accepts an empty string, so a resolved-to-nothing
+        password would be stored silently and the second run would leave it
+        there forever. Only `vault kv patch` could repair that without
+        replacing the other four keys, and the block never patches.
+        """
+        helper = {"postgres-username": "penpot", "postgres-password": "app-pw",
+                  "redis-uri": "redis://:abc@redis.databases.svc.cluster.local:6379/3",
+                  "api-secret-key": "app-api"}
+        cases = (
+            ("data password is the empty string",
+             {"homelab/penpot/data": {"password": ""}}),
+            ("data exists without a password field",
+             {"homelab/penpot/data": {}}),
+            ("app has no oidc-client-secret",
+             {"homelab/penpot": dict(helper),
+              "homelab/penpot-client": {"clientSecret": "client-oidc"}}),
+            ("client secret is the empty string",
+             {"homelab/penpot-client": {"clientSecret": ""}}),
+        )
+        for label, seeded in cases:
+            with self.subTest(case=label):
+                runs, state, _ = self.run_penpot_seed(seeded)
+                self.assertNotEqual(0, runs[0].returncode, runs[0].stdout)
+                self.assertIn("penpot", runs[0].stderr)
+                # Nothing was written, so nothing was half-created.
+                self.assertEqual(seeded, state)
 
     def test_vault_seed_repairs_empty_key_and_preserves_rotation_key(self):
         source = (ROOT / "platform/vault/configure-vault.sh").read_text(encoding="utf-8")

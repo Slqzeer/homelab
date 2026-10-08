@@ -48,13 +48,30 @@ every upgrade; a mismatch means an upstream tag moved.
 
 Three steps happen outside git. None is reproduced by a cluster rebuild.
 
-1. **Vault seed.** Run `platform/vault/configure-vault.sh`. It seeds
-   `homelab/penpot` (`postgres-password`, `redis-uri`, `api-secret-key`,
-   `oidc-client-secret`) and `homelab/penpot/data` (`password`).
+1. **Vault seed.** Run `platform/vault/configure-vault.sh`. It seeds three
+   paths: `homelab/penpot` (`postgres-password`, `postgres-username`,
+   `redis-uri`, `api-secret-key`, `oidc-client-secret`),
+   `homelab/penpot/data` (`password`), and `homelab/penpot-client`
+   (`clientSecret`). The password and the client secret each live at **two**
+   paths on purpose — a Job and the chart read different copies — so the
+   script writes both copies from one value and refuses to run if either
+   exists without a usable value.
 2. **MCP key.** In Penpot: *Your account → Integrations → MCP Server* →
    enable, then generate a key. It is shown **once** and is not
-   recoverable. Store it in a password manager and seed it into Vault at
-   `homelab/penpot` as `mcp-key`.
+   recoverable. Store it in a password manager, then seed it into Vault:
+
+   ```sh
+   # Write the key to a private file first, so it never becomes an argument.
+   # A password on a command line is visible in `ps`.
+   vault kv patch homelab/penpot mcp-key=@"$MCP_KEY_FILE"
+   ```
+
+   **`kv patch`, not `kv put`.** `homelab/penpot` already carries
+   `postgres-password`, `postgres-username`, `redis-uri`, `api-secret-key` and
+   `oidc-client-secret`, and a KV v2 `put` replaces every key at the path. A
+   `put` here would delete all five, leaving Penpot unable to reach
+   PostgreSQL or to complete an OIDC login, and the loss is invisible until
+   the workload fails. `patch` merges the one key in.
 
    | Field | Value |
    | --- | --- |

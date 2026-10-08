@@ -415,12 +415,12 @@ path "homelab/data/keycloak-portal" {
 }
 
 # The `penpot` OIDC client secret lives at homelab/penpot-client, NOT at
-# homelab/penpot. This role is what Task 5's keycloak-penpot-client projection
-# reads through, and Keycloak needs exactly one credential from Penpot: the
-# client secret. Granting homelab/data/penpot here instead would hand the
-# Keycloak pod Penpot's database password, its Redis URI and its API secret
-# key as well -- none of which Keycloak has any use for. One credential, one
-# path; the same separation homelab/keycloak-portal makes for the portal.
+# homelab/penpot. Task 5's keycloak-penpot-client projection reads this policy
+# through role vso-keycloak, and Keycloak needs exactly one credential from
+# Penpot: the client secret. Granting homelab/data/penpot here instead would
+# hand the Keycloak pod Penpot's database password, its Redis URI and its API
+# secret key as well -- none of which Keycloak has any use for. One credential,
+# one path; the same separation homelab/keycloak-portal makes for the portal.
 path "homelab/data/penpot-client" {
   capabilities = ["read"]
 }
@@ -711,7 +711,7 @@ echo "==> seeding homelab/penpot, homelab/penpot/data and homelab/penpot-client"
 #   OIDC client secret  homelab/penpot/oidc-client-secret
 #                       homelab/penpot-client/clientSecret
 #     Task 5's keycloak-penpot-client projection reads homelab/penpot-client
-#     through the keycloak namespace's own vso-keycloak-read role, because
+#     through the keycloak namespace's own vso-keycloak-read policy, because
 #     granting that role homelab/data/penpot would hand Keycloak Penpot's
 #     database password, Redis URI and API secret key as well. One credential,
 #     two paths, so they are written from one generated value -- and read back
@@ -730,16 +730,85 @@ PENPOT_API_SECRET=$(mktemp)
 PENPOT_OIDC_SECRET=$(mktemp)
 trap 'rm -f "$PENPOT_READ" "$PENPOT_DB_PASSWORD" "$PENPOT_REDIS_URI" "$PENPOT_API_SECRET" "$PENPOT_OIDC_SECRET"' EXIT
 
+penpot_unusable() {
+  # $1 = path, $2 = its field, $3 = sibling path, $4 = sibling field. This copy
+  # exists but carries no usable value. There is no safe automatic repair: a
+  # `vault kv put` on a path that already exists replaces its other keys too,
+  # and this block never patches. Deleting the broken path always works,
+  # because the sibling then becomes the copy everything is recovered from.
+  echo "$1 exists but has no usable $2, so $3/$4 cannot be given a matching" >&2
+  echo "value. This block will not `vault kv put` over a path that already" >&2
+  echo "exists, because that would replace its other keys." >&2
+  echo "Seed $1/$2 by hand, or delete $1 and re-run this script: the value is" >&2
+  echo "recovered from $3/$4. Do not delete $3 instead -- that leaves the two" >&2
+  echo "copies disagreeing, and each consumer reads only one of them." >&2
+  exit 1
+}
+
+# Sets PENPOT_FIELD. Three states, and conflating any two of them is the bug
+# this exists to prevent: the path is absent, the path is present and carries
+# the field, or the path is present WITHOUT it. The third is the dangerous one,
+# because a present path is skipped by the write below, so the consumer goes on
+# reading a key that is not there.
+penpot_field() {
+  vault_optional_get "$1" "$2" "$PENPOT_READ" || exit 1
+  if [ "$VAULT_READ_STATUS" = present ]; then
+    if [ -s "$PENPOT_READ" ]; then PENPOT_FIELD=usable; else PENPOT_FIELD=blank; fi
+    return 0
+  fi
+  vault_optional_get "$1" - "$PENPOT_READ" || exit 1
+  if [ "$VAULT_READ_STATUS" = present ]; then PENPOT_FIELD=blank; else PENPOT_FIELD=missing; fi
+}
+
 penpot_recover() {
-  # $1 = vault path, $2 = field, $3 = file to fill. Copies an existing value
-  # out of Vault rather than minting a second one for the sibling path, which
-  # is the only way the two copies of a credential stay equal. Fails loudly if
-  # the copy that exists carries no usable value.
+  # $1 = path, $2 = its field, $3 = file to fill, $4 = sibling path,
+  # $5 = sibling field. Copies the existing value rather than minting a second
+  # one, which is the only way two copies of one credential stay equal.
   vault_optional_get "$1" "$2" "$3" || exit 1
   if [ "$VAULT_READ_STATUS" != present ] || [ ! -s "$3" ]; then
-    echo "$1 holds no usable $2, so the other copy of this credential cannot be" >&2
-    echo "seeded without leaving the two disagreeing. Seed it by hand, or delete" >&2
-    echo "both paths and re-run this script." >&2
+    penpot_unusable "$1" "$2" "$4" "$5"
+  fi
+}
+
+penpot_shared() {
+  # Resolve ONE credential that lives at two paths. $1/$2 = first path and
+  # field, $3/$4 = sibling path and field, $5 = file to fill, $6 = character
+  # class, $7 = length. Both pairs go through here so the rule cannot be
+  # applied to one and forgotten for the other.
+  #
+  # The trigger is "EITHER copy is not already usable", NEVER "the path I am
+  # about to write happens to be missing". Keying it on one path is how this
+  # block once seeded a zero-byte mktemp as the chart's database password: the
+  # data path was present so nothing resolved, while the app path was absent
+  # and was written from the untouched file. Vault accepts an empty value
+  # silently and the next run finds that path present and leaves it alone, so
+  # the divergence is permanent.
+  penpot_field "$1" "$2"
+  penpot_here=$PENPOT_FIELD
+  penpot_field "$3" "$4"
+  penpot_there=$PENPOT_FIELD
+  if [ "$penpot_here" = blank ]; then penpot_unusable "$1" "$2" "$3" "$4"; fi
+  if [ "$penpot_there" = blank ]; then penpot_unusable "$3" "$4" "$1" "$2"; fi
+  if [ "$penpot_here" = usable ] && [ "$penpot_there" = usable ]; then
+    return 0
+  fi
+  if [ "$penpot_here" = usable ]; then
+    penpot_recover "$1" "$2" "$5" "$3" "$4"
+  elif [ "$penpot_there" = usable ]; then
+    penpot_recover "$3" "$4" "$5" "$1" "$2"
+  else
+    head -c 4096 /dev/urandom | tr -dc "$6" | head -c "$7" >"$5"
+  fi
+}
+
+penpot_assured() {
+  # $1 = file, $2 = what it holds. The last line of defence: if a guard above
+  # ever stops firing when it should, this refuses rather than let Vault store
+  # "" without complaint.
+  if [ ! -s "$1" ]; then
+    echo "refusing to seed $2: it resolved to an empty value." >&2
+    echo "Vault would store the empty string without complaint, and the two" >&2
+    echo "copies of this credential could never match afterwards." >&2
     exit 1
   fi
 }
@@ -753,26 +822,11 @@ penpot_data_status=$VAULT_READ_STATUS
 vault_optional_get homelab/penpot-client - "$PENPOT_READ" || exit 1
 penpot_client_status=$VAULT_READ_STATUS
 
-# Decide each shared credential ONCE, before any write, so the two paths that
-# carry it cannot disagree.
-if [ "$penpot_data_status" = absent ]; then
-  if [ "$penpot_status" = present ]; then
-    penpot_recover homelab/penpot postgres-password "$PENPOT_DB_PASSWORD"
-  else
-    # Alphanumeric only: this value is composed into the postgres:// URI the
-    # chart builds, where a / or @ breaks parsing far from the cause.
-    head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32 >"$PENPOT_DB_PASSWORD"
-  fi
-fi
-if [ "$penpot_status" = absent ] || [ "$penpot_client_status" = absent ]; then
-  if [ "$penpot_client_status" = present ]; then
-    penpot_recover homelab/penpot-client clientSecret "$PENPOT_OIDC_SECRET"
-  elif [ "$penpot_status" = present ]; then
-    penpot_recover homelab/penpot oidc-client-secret "$PENPOT_OIDC_SECRET"
-  else
-    head -c 512 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 48 >"$PENPOT_OIDC_SECRET"
-  fi
-fi
+# Resolve both shared credentials, in full, before anything is written.
+penpot_shared homelab/penpot postgres-password homelab/penpot/data password \
+  "$PENPOT_DB_PASSWORD" 'A-Za-z0-9' 32
+penpot_shared homelab/penpot oidc-client-secret homelab/penpot-client clientSecret \
+  "$PENPOT_OIDC_SECRET" 'A-Za-z0-9' 48
 
 if [ "$penpot_status" = present ]; then
   echo "    homelab/penpot already present, leaving the credential alone"
@@ -794,6 +848,8 @@ else
   # client API keys at rest -- it is never pasted into a login form. Same
   # idiom as the omniroute api-key-secret above.
   head -c 4096 /dev/urandom | tr -dc 'a-f0-9' | head -c 64 >"$PENPOT_API_SECRET"
+  penpot_assured "$PENPOT_DB_PASSWORD" "the database password"
+  penpot_assured "$PENPOT_OIDC_SECRET" "the OIDC client secret"
   vault kv put homelab/penpot \
       postgres-username=penpot \
       postgres-password=@"$PENPOT_DB_PASSWORD" \
@@ -806,6 +862,7 @@ fi
 if [ "$penpot_data_status" = present ]; then
   echo "    homelab/penpot/data already present, leaving the role password alone"
 else
+  penpot_assured "$PENPOT_DB_PASSWORD" "the database password"
   vault kv put homelab/penpot/data password=@"$PENPOT_DB_PASSWORD" >/dev/null
   echo "    generated"
 fi
@@ -813,6 +870,7 @@ fi
 if [ "$penpot_client_status" = present ]; then
   echo "    homelab/penpot-client already present, leaving the client secret alone"
 else
+  penpot_assured "$PENPOT_OIDC_SECRET" "the OIDC client secret"
   vault kv put homelab/penpot-client clientSecret=@"$PENPOT_OIDC_SECRET" >/dev/null
   echo "    generated"
 fi
