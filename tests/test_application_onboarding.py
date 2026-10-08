@@ -678,5 +678,91 @@ class PortalIngressPublicationTests(unittest.TestCase):
 
         self.assertEqual(len(self.approved_catalogue), published_count)
 
+
+class PenpotRegistrationTests(unittest.TestCase):
+    chart_version = "1.11.3"
+    app_version = "2.18.3"
+
+    @staticmethod
+    def load(path):
+        with (REPOSITORY_ROOT / path).open(encoding="utf-8") as stream:
+            return [document for document in yaml.safe_load_all(stream) if document]
+
+    def test_penpot_namespace_is_restricted_to_kubernetes_136(self):
+        namespaces = self.load("bootstrap/namespaces/namespaces.yaml")
+        matches = [
+            document for document in namespaces
+            if document.get("kind") == "Namespace"
+            and document.get("metadata", {}).get("name") == "penpot"
+        ]
+        self.assertEqual(1, len(matches))
+        labels = matches[0]["metadata"]["labels"]
+        for mode in ("enforce", "audit", "warn"):
+            self.assertEqual("restricted", labels[f"pod-security.kubernetes.io/{mode}"])
+            self.assertEqual("v1.36", labels[f"pod-security.kubernetes.io/{mode}-version"])
+
+    def test_penpot_application_pins_chart_and_site_manifests(self):
+        application, = self.load("environments/homelab/apps/penpot.yaml")
+        metadata = application["metadata"]
+        annotations = metadata["annotations"]
+        self.assertEqual("25", annotations["argocd.argoproj.io/sync-wave"])
+        self.assertEqual("v1", annotations["homelab.io/onboarding-contract"])
+        self.assertEqual("personal-applications", annotations["homelab.io/owner"])
+        self.assertEqual("durable", annotations["homelab.io/state"])
+        self.assertEqual(
+            "docs/runbooks/penpot-recovery.md",
+            annotations["backup.homelab.io/restore-runbook"],
+        )
+
+        sources = application["spec"]["sources"]
+        self.assertEqual(3, len(sources))
+        chart = next(source for source in sources if source.get("chart"))
+        self.assertEqual("penpot", chart["chart"])
+        self.assertEqual(self.chart_version, chart["targetRevision"])
+        self.assertNotIn("homelab.git", chart["repoURL"])
+        self.assertEqual(
+            ["$values/apps/penpot/values.yaml"], chart["helm"]["valueFiles"]
+        )
+        values_source = next(source for source in sources if source.get("ref"))
+        self.assertEqual("values", values_source["ref"])
+        manifest_source = next(
+            source for source in sources if source.get("path")
+        )
+        self.assertEqual("apps/penpot/config", manifest_source["path"])
+        self.assertEqual("main", manifest_source["targetRevision"])
+
+        self.assertEqual("penpot", application["spec"]["destination"]["namespace"])
+        sync_policy = application["spec"]["syncPolicy"]
+        self.assertEqual({"prune": True, "selfHeal": True}, sync_policy["automated"])
+        self.assertIn("ServerSideApply=true", sync_policy["syncOptions"])
+        self.assertNotIn("CreateNamespace=true", sync_policy["syncOptions"])
+
+    def test_penpot_runbook_is_checked_in_and_records_the_release(self):
+        runbook = REPOSITORY_ROOT / "docs/runbooks/penpot-recovery.md"
+        self.assertTrue(runbook.is_file())
+        tracked = subprocess.run(
+            ["git", "-C", str(REPOSITORY_ROOT), "ls-files", "--error-unmatch", "--",
+             "docs/runbooks/penpot-recovery.md"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        )
+        self.assertEqual(0, tracked.returncode)
+        text = runbook.read_text(encoding="utf-8")
+        for digest in (
+            "bb8abe27d53de84c95597f2c02c0e702b2779971fb0703e543f9ecf183e999f6",
+            "2df1b3440d2a82cc3571db211b4ffdfa2b89ccc910759e8d5e9387fb62971b5c",
+            "418232d6ca3120b1c2bfde298a56a05a1f41f567cd8494deac3fe7fbc186cfbd",
+            "5e811e6eeb179d80d8781fb0ffd2991560785d150b3676f1ac5e28d63ba9f7c2",
+        ):
+            self.assertIn(digest, text)
+        self.assertIn(self.chart_version, text)
+        self.assertIn(self.app_version, text)
+        # The eviction deviation is a real operational hazard, so it has to
+        # survive edits to this file rather than living only in a commit
+        # message. Asserted here because Task 1 is what creates the runbook.
+        self.assertIn("allkeys-lru", text)
+        self.assertIn("volatile-lfu", text)
+        self.assertIn("dedicated", text)
+
+
 if __name__ == "__main__":
     unittest.main()

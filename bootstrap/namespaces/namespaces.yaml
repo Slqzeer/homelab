@@ -169,3 +169,22 @@ metadata:
     pod-security.kubernetes.io/audit-version: v1.36
     pod-security.kubernetes.io/warn: restricted
     pod-security.kubernetes.io/warn-version: v1.36
+---
+# Penpot, the design platform, and its MCP server. A dedicated namespace
+# because the onboarding contract requires one, and because this component
+# owns an assets PVC that must not share a lifecycle with anything else.
+#
+# Its database is NOT here: `penpot` lives in the shared PostgreSQL in
+# `databases` via a dedicated database and Job, the same arrangement as
+# Keycloak and tle-dev. See docs/runbooks/penpot-recovery.md.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: penpot
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: v1.36
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: v1.36
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: v1.36
