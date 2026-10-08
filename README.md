@@ -26,6 +26,7 @@ manifest ever applied by hand.
 | `observability/logging/` | Grafana Alloy shipping pod logs to Grafana Cloud Loki: Helm values, the collector pipeline and its credential wiring. See `observability/logging/README.md` |
 | `apps` namespace | Created by `bootstrap/namespaces/namespaces.yaml`; holds `beacon` and the GHCR pull Secret it consumes — **not** the same thing as the `apps/` directory below, despite the shared name |
 | `apps/` | Site-specific application values/manifests and a non-deployed `_template/`; never child Application objects |
+| `apps/penpot/` | Penpot site values and the VSO, NetworkPolicy and database manifests the chart does not own. See `docs/runbooks/penpot-recovery.md` |
 
 ## Adding a component
 
@@ -69,6 +70,11 @@ wave belongs at or below 23, not above it out of habit — `beacon`,
 `monitoring-config` and `keycloak` sit above it because they do, for three
 different reasons. Platform (10) gates apps (20) and wave 21 the same way
 infrastructure gates platform — see below for what that means on a rebuild.
+
+Wave 25 now holds three Applications: `homelab-portal`, `tle-dev` and
+`penpot`. All three depend on Keycloak at wave 24, and `penpot` additionally
+needs PostgreSQL and Redis at wave 23 for its data and cache. None of them
+depends on another, so they reconcile in parallel and none gates anything.
 
 Every Application object belongs in `environments/homelab/apps/` — `root.yaml`
 recurses only that directory. The top-level `apps/` directory is a different
@@ -249,6 +255,12 @@ and OIDC setup are documented in `platform/keycloak/README.md`. Dashboards,
 metrics and logs are in **Grafana Cloud** (login with the grafana.com
 account; see `observability/monitoring/README.md`). Argo CD deliberately is
 not an OIDC client yet.
+
+Penpot is at **<https://penpot.taildf6cd4.ts.net>**, signing in through
+Keycloak. Its MCP endpoint is reached through that same hostname at
+`/mcp/stream` with an MCP key from Penpot's Integrations page — it is not a
+separate service on the tailnet, deliberately; see
+`docs/runbooks/penpot-recovery.md`.
 
 For Argo CD, if Tailscale itself is unavailable, port-forward still works:
 
@@ -551,6 +563,27 @@ last thought about it.
   `VaultStaticSecret`'s own SYNCED/HEALTHY/READY columns —
   `kubectl -n apps get vaultstaticsecret ghcr-pull` for `registry`,
   `kubectl -n vault get vaultstaticsecret vault-canary` for `vso-config`.
+- **Penpot's MCP server has no authentication of its own.** Chart `1.11.3`
+  renders it, and the frontend proxies `/mcp/stream` to it, so the MCP key is
+  what authenticates the request. The NetworkPolicy admits ports 4401 and 4402
+  only from the frontend. That control is one NetworkPolicy away from silently
+  disappearing: any future rule admitting those ports from the tailnet
+  publishes unauthenticated read/write access to every design file.
+- **Penpot's images are not digest-pinned.** The chart renders
+  `repository:tag` with no digest field, so pinning is not expressible through
+  chart values. This matches every other chart here, and the deployed digests
+  are recorded in `docs/runbooks/penpot-recovery.md` so an upgrade can be
+  checked against them.
+- **Penpot's egress-proxy grant is inert.** `apps/penpot/config/networkpolicy.yaml`
+  lets the backend reach the egress proxy on 3128, but the `egress` namespace's
+  `egress-proxy-clients` policy admits only `omniroute`, and Penpot's values
+  configure no proxy. Outbound mail and external providers are therefore
+  unavailable until both sides are wired.
+- **Penpot shares the cache's password and its eviction policy.** It reads the
+  shared Redis password through VSO from `homelab/redis`, so rotating that
+  password restarts `penpot-backend`, `penpot-exporter` and `penpot-mcp` via
+  `rolloutRestartTargets`. Its websocket coordination keys also sit in a Redis
+  running `allkeys-lru`; see `docs/runbooks/penpot-recovery.md`.
 
 ## Documentation
 
