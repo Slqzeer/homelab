@@ -639,33 +639,129 @@ class ClientRegistrationTests(unittest.TestCase):
                 for canary in ("db-shared", "oidc-shared", "app-api"):
                     self.assertNotIn(canary, output)
 
-    def test_vault_penpot_seed_refuses_an_empty_or_missing_shared_value(self):
-        """A path that exists without a usable value must stop the run.
+    def test_vault_penpot_seed_repairs_a_present_path_missing_a_field(self):
+        """A path that exists but lacks a field is repaired with kv patch.
 
-        `vault kv put` accepts an empty string, so a resolved-to-nothing
-        password would be stored silently and the second run would leave it
-        there forever. Only `vault kv patch` could repair that without
-        replacing the other four keys, and the block never patches.
+        This is the same shape as tle_ensure_field and omni_ensure_field: a KV
+        v2 `put` replaces every key at a path, so a path that already exists is
+        only ever `patch`ed, one field at a time. The other keys must survive,
+        which is what makes repairing better than refusing.
         """
-        helper = {"postgres-username": "penpot", "postgres-password": "app-pw",
-                  "redis-uri": "redis://:abc@redis.databases.svc.cluster.local:6379/3",
-                  "api-secret-key": "app-api"}
+        app = {"postgres-username": "penpot", "postgres-password": "shared-pw",
+               "redis-uri": "redis://:abc@redis.databases.svc.cluster.local:6379/3",
+               "api-secret-key": "app-api", "oidc-client-secret": "shared-oidc"}
+        client = {"homelab/penpot-client": {"clientSecret": "shared-oidc"}}
+        data = {"homelab/penpot/data": {"password": "shared-pw"}}
+        without_oidc = {k: v for k, v in app.items() if k != "oidc-client-secret"}
+        without_uris = {k: v for k, v in app.items()
+                        if k not in ("redis-uri", "api-secret-key")}
+        cases = (
+            # label, starting state, the field that must be repaired
+            ("app path missing oidc-client-secret",
+             {"homelab/penpot": without_oidc, **client, **data},
+             ("homelab/penpot", "oidc-client-secret", "shared-oidc")),
+            ("app path missing postgres-username",
+             {"homelab/penpot": {k: v for k, v in app.items()
+                                 if k != "postgres-username"}, **client, **data},
+             ("homelab/penpot", "postgres-username", "penpot")),
+            ("data path missing password",
+             {"homelab/penpot": app, **client, "homelab/penpot/data": {}},
+             ("homelab/penpot/data", "password", "shared-pw")),
+        )
+        for label, seeded, (path, field, expected) in cases:
+            with self.subTest(case=label):
+                runs, state, per_run_events = self.run_penpot_seed(seeded)
+                self.assertEqual(0, runs[0].returncode, runs[0].stderr)
+                self.assertEqual(expected, state[path][field])
+                self.assertIn("repaired", runs[0].stdout)
+                # Every other key that was there before is still there: a `put`
+                # would have replaced them all.
+                for key, value in seeded.get(path, {}).items():
+                    self.assertEqual(value, state[path][key], key)
+                for other, body in seeded.items():
+                    if other != path:
+                        self.assertEqual(body, state[other], other)
+                # Repaired, and then a second run writes nothing.
+                self.assertEqual(0, runs[1].returncode, runs[1].stderr)
+                self.assertEqual(per_run_events[0], per_run_events[1])
+                for canary in ("shared-pw", "shared-oidc", "app-api"):
+                    self.assertNotIn(canary, runs[0].stdout + runs[0].stderr)
+
+        # A field with no sibling to copy from is generated, then patched.
+        runs, state, _ = self.run_penpot_seed(
+            {"homelab/penpot": without_uris, **client, **data})
+        self.assertEqual(0, runs[0].returncode, runs[0].stderr)
+        self.assertRegex(state["homelab/penpot"]["redis-uri"],
+                         r"^redis://:[0-9a-f]{48}@redis\.databases\.svc\.cluster\.local:6379/3$")
+        self.assertRegex(state["homelab/penpot"]["api-secret-key"], r"^[0-9a-f]{64}$")
+        for key in ("postgres-username", "postgres-password", "oidc-client-secret"):
+            self.assertEqual(without_uris[key], state["homelab/penpot"][key], key)
+
+    def test_vault_penpot_seed_refuses_two_copies_that_differ(self):
+        """Both copies usable but not equal must stop the run, silently fixed never.
+
+        Reachable by hand, and the plan leads an operator straight into it: the
+        rotation ceremony says to change "the" database password, and with the
+        credential at two paths that instruction changes only one copy. The
+        block must not paper over it by preferring either value, because either
+        preference hides a split behind a login that still works.
+        """
+        app = {"postgres-username": "penpot", "postgres-password": "shared-pw",
+               "redis-uri": "redis://:abc@redis.databases.svc.cluster.local:6379/3",
+               "api-secret-key": "app-api", "oidc-client-secret": "shared-oidc"}
+        cases = (
+            ("database password differs",
+             {"homelab/penpot": dict(app, postgres_password="left-pw"),
+              "homelab/penpot/data": {"password": "right-pw"},
+              "homelab/penpot-client": {"clientSecret": "shared-oidc"}},
+             "homelab/penpot/postgres-password", "homelab/penpot/data/password",
+             ("left-pw", "right-pw")),
+            ("OIDC client secret differs",
+             {"homelab/penpot": dict(app, oidc_client_secret="left-oidc"),
+              "homelab/penpot/data": {"password": "shared-pw"},
+              "homelab/penpot-client": {"clientSecret": "right-oidc"}},
+             "homelab/penpot/oidc-client-secret", "homelab/penpot-client/clientSecret",
+             ("left-oidc", "right-oidc")),
+        )
+        for label, seeded, left, right, values in cases:
+            with self.subTest(case=label):
+                runs, state, _ = self.run_penpot_seed(seeded)
+                self.assertNotEqual(0, runs[0].returncode, runs[0].stdout)
+                # Both paths are named, and the values are not printed.
+                self.assertIn(left, runs[0].stderr)
+                self.assertIn(right, runs[0].stderr)
+                output = runs[0].stdout + runs[0].stderr
+                for value in values:
+                    self.assertNotIn(value, output)
+                # Nothing was written: not even the pair that agreed.
+                self.assertEqual(seeded, state)
+
+    def test_vault_penpot_seed_refuses_when_no_copy_holds_a_usable_value(self):
+        """Nothing to copy from: stop rather than invent a credential.
+
+        A KV v2 `put` accepts an empty string without complaint, so a password
+        resolved to nothing would be stored silently and the next run would
+        leave it there forever. Generating a replacement for a key an operator
+        may have deliberately emptied is not this block's call to make, so it
+        stops and says which field to seed by hand.
+        """
         cases = (
             ("data password is the empty string",
              {"homelab/penpot/data": {"password": ""}}),
-            ("data exists without a password field",
+            ("data path exists without a password field",
              {"homelab/penpot/data": {}}),
-            ("app has no oidc-client-secret",
-             {"homelab/penpot": dict(helper),
-              "homelab/penpot-client": {"clientSecret": "client-oidc"}}),
             ("client secret is the empty string",
              {"homelab/penpot-client": {"clientSecret": ""}}),
+            ("both copies blank",
+             {"homelab/penpot": {"postgres-password": "", "oidc-client-secret": ""},
+              "homelab/penpot/data": {"password": ""},
+              "homelab/penpot-client": {"clientSecret": ""}}),
         )
         for label, seeded in cases:
             with self.subTest(case=label):
                 runs, state, _ = self.run_penpot_seed(seeded)
                 self.assertNotEqual(0, runs[0].returncode, runs[0].stdout)
-                self.assertIn("penpot", runs[0].stderr)
+                self.assertIn("usable value", runs[0].stderr)
                 # Nothing was written, so nothing was half-created.
                 self.assertEqual(seeded, state)
 

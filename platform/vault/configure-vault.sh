@@ -712,7 +712,7 @@ echo "==> seeding homelab/penpot, homelab/penpot/data and homelab/penpot-client"
 #                       homelab/penpot-client/clientSecret
 #     Task 5's keycloak-penpot-client projection reads homelab/penpot-client
 #     through the keycloak namespace's own vso-keycloak-read policy, because
-#     granting that role homelab/data/penpot would hand Keycloak Penpot's
+#     granting that policy homelab/data/penpot would hand Keycloak Penpot's
 #     database password, Redis URI and API secret key as well. One credential,
 #     two paths, so they are written from one generated value -- and read back
 #     from whichever copy already exists. Same one-source-of-truth rule
@@ -728,28 +728,45 @@ PENPOT_DB_PASSWORD=$(mktemp)
 PENPOT_REDIS_URI=$(mktemp)
 PENPOT_API_SECRET=$(mktemp)
 PENPOT_OIDC_SECRET=$(mktemp)
-trap 'rm -f "$PENPOT_READ" "$PENPOT_DB_PASSWORD" "$PENPOT_REDIS_URI" "$PENPOT_API_SECRET" "$PENPOT_OIDC_SECRET"' EXIT
+PENPOT_CHECK=$(mktemp)
+trap 'rm -f "$PENPOT_READ" "$PENPOT_CHECK" "$PENPOT_DB_PASSWORD" "$PENPOT_REDIS_URI" "$PENPOT_API_SECRET" "$PENPOT_OIDC_SECRET"' EXIT
 
 penpot_unusable() {
-  # $1 = path, $2 = its field, $3 = sibling path, $4 = sibling field. This copy
-  # exists but carries no usable value. There is no safe automatic repair: a
-  # `vault kv put` on a path that already exists replaces its other keys too,
-  # and this block never patches. Deleting the broken path always works,
-  # because the sibling then becomes the copy everything is recovered from.
-  echo "$1 exists but has no usable $2, so $3/$4 cannot be given a matching" >&2
-  echo "value. This block will not `vault kv put` over a path that already" >&2
-  echo "exists, because that would replace its other keys." >&2
-  echo "Seed $1/$2 by hand, or delete $1 and re-run this script: the value is" >&2
-  echo "recovered from $3/$4. Do not delete $3 instead -- that leaves the two" >&2
-  echo "copies disagreeing, and each consumer reads only one of them." >&2
+  # $1 = path, $2 = its field, $3 = sibling path, $4 = sibling field. NEITHER
+  # copy of this credential holds a usable value, so there is nothing to copy
+  # from and this block will not invent a replacement for a key an operator may
+  # have deliberately emptied. Repair is a one-line `kv patch` once one side
+  # holds a value; see the message for the exact form.
+  echo "neither $1/$2 nor $3/$4 holds a usable value, so the two copies of" >&2
+  echo "this credential cannot be made to agree from what is already in" >&2
+  echo "Vault." >&2
+  echo "Seed ONE of them by hand -- vault kv patch $3/$4=@FILE, never a" >&2
+  echo "kv put, which would replace every other key at $3 -- then re-run" >&2
+  echo "this script and it will copy that value to the other path." >&2
   exit 1
 }
 
-# Sets PENPOT_FIELD. Three states, and conflating any two of them is the bug
-# this exists to prevent: the path is absent, the path is present and carries
-# the field, or the path is present WITHOUT it. The third is the dangerous one,
-# because a present path is skipped by the write below, so the consumer goes on
-# reading a key that is not there.
+penpot_diverged() {
+  # $1 = path, $2 = its field, $3 = sibling path, $4 = sibling field. Both
+  # copies exist, both are usable, and they are not the same value. This block
+  # will NOT pick one for the operator: it cannot know which is correct, and
+  # choosing silently would hide a mismatch behind a login that still works --
+  # the same silent split as the empty-password defect, one state later.
+  # Neither value is printed.
+  echo "$1/$2 and $3/$4 hold DIFFERENT values for one credential." >&2
+  echo "Both were read just now and neither matches the other, so each" >&2
+  echo "consumer of this credential is using a different secret." >&2
+  echo "Decide which value is right, then bring the other path into line with" >&2
+  echo "a vault kv patch of that one field, which merges; a kv put would" >&2
+  echo "replace every other key at that path." >&2
+  exit 1
+}
+
+# Sets PENPOT_FIELD to one of three states, and conflating any two of them is
+# the bug this exists to prevent: the path is absent, the path is present and
+# carries the field, or the path is present WITHOUT it. The third is repaired
+# below with `vault kv patch`, so a path that exists is never left missing a
+# key its consumer reads.
 penpot_field() {
   vault_optional_get "$1" "$2" "$PENPOT_READ" || exit 1
   if [ "$VAULT_READ_STATUS" = present ]; then
@@ -774,7 +791,8 @@ penpot_shared() {
   # Resolve ONE credential that lives at two paths. $1/$2 = first path and
   # field, $3/$4 = sibling path and field, $5 = file to fill, $6 = character
   # class, $7 = length. Both pairs go through here so the rule cannot be
-  # applied to one and forgotten for the other.
+  # applied to one and forgotten for the other. Sets PENPOT_HERE_FIELD and
+  # PENPOT_THERE_FIELD for the write below.
   #
   # The trigger is "EITHER copy is not already usable", NEVER "the path I am
   # about to write happens to be missing". Keying it on one path is how this
@@ -784,20 +802,38 @@ penpot_shared() {
   # silently and the next run finds that path present and leaves it alone, so
   # the divergence is permanent.
   penpot_field "$1" "$2"
-  penpot_here=$PENPOT_FIELD
+  PENPOT_HERE_FIELD=$PENPOT_FIELD
   penpot_field "$3" "$4"
-  penpot_there=$PENPOT_FIELD
-  if [ "$penpot_here" = blank ]; then penpot_unusable "$1" "$2" "$3" "$4"; fi
-  if [ "$penpot_there" = blank ]; then penpot_unusable "$3" "$4" "$1" "$2"; fi
-  if [ "$penpot_here" = usable ] && [ "$penpot_there" = usable ]; then
+  PENPOT_THERE_FIELD=$PENPOT_FIELD
+
+  if [ "$PENPOT_HERE_FIELD" = usable ] && [ "$PENPOT_THERE_FIELD" = usable ]; then
+    # Both copies exist, so they must hold the SAME value -- not merely two
+    # values. Each consumer reads one of them, so a mismatch is a silent split.
+    # Compared here rather than assumed, because the rotation ceremony in
+    # docs/superpowers/plans tells an operator to change "the" database
+    # password, and with the credential at two paths that instruction changes
+    # only one of them. Never printed: only compared.
+    vault_optional_get "$1" "$2" "$5" || exit 1
+    vault_optional_get "$3" "$4" "$PENPOT_CHECK" || exit 1
+    cmp -s "$5" "$PENPOT_CHECK" || penpot_diverged "$1" "$2" "$3" "$4"
+    : >"$5"
     return 0
   fi
-  if [ "$penpot_here" = usable ]; then
+  if [ "$PENPOT_HERE_FIELD" = usable ]; then
     penpot_recover "$1" "$2" "$5" "$3" "$4"
-  elif [ "$penpot_there" = usable ]; then
+  elif [ "$PENPOT_THERE_FIELD" = usable ]; then
     penpot_recover "$3" "$4" "$5" "$1" "$2"
-  else
+  elif [ "$PENPOT_HERE_FIELD" = missing ] && [ "$PENPOT_THERE_FIELD" = missing ]; then
+    # Cold start: neither path exists, so there is nothing to preserve and
+    # nothing to disagree with. Alphanumeric only for both credentials: these
+    # values are composed into the postgres:// URI the chart builds and handed
+    # to Keycloak, where a / or @ breaks parsing far from the cause.
     head -c 4096 /dev/urandom | tr -dc "$6" | head -c "$7" >"$5"
+  else
+    # At least one path EXISTS and holds nothing usable, so there is no value
+    # to copy and this block will not invent a replacement for a key an
+    # operator may have deliberately emptied.
+    penpot_unusable "$1" "$2" "$3" "$4"
   fi
 }
 
@@ -822,15 +858,24 @@ penpot_data_status=$VAULT_READ_STATUS
 vault_optional_get homelab/penpot-client - "$PENPOT_READ" || exit 1
 penpot_client_status=$VAULT_READ_STATUS
 
-# Resolve both shared credentials, in full, before anything is written.
+# Resolve the two credentials that live at two paths each, in full, before
+# anything is written.
 penpot_shared homelab/penpot postgres-password homelab/penpot/data password \
   "$PENPOT_DB_PASSWORD" 'A-Za-z0-9' 32
+PENPOT_PG_HERE=$PENPOT_HERE_FIELD
+PENPOT_PG_THERE=$PENPOT_THERE_FIELD
 penpot_shared homelab/penpot oidc-client-secret homelab/penpot-client clientSecret \
   "$PENPOT_OIDC_SECRET" 'A-Za-z0-9' 48
+PENPOT_OIDC_HERE=$PENPOT_HERE_FIELD
+PENPOT_OIDC_THERE=$PENPOT_THERE_FIELD
 
-if [ "$penpot_status" = present ]; then
-  echo "    homelab/penpot already present, leaving the credential alone"
-else
+# The three fields that live at exactly one path. Generated only when that path
+# does not already hold a usable value.
+penpot_field homelab/penpot postgres-username
+PENPOT_USER_FIELD=$PENPOT_FIELD
+penpot_field homelab/penpot redis-uri
+PENPOT_REDIS_FIELD=$PENPOT_FIELD
+if [ "$PENPOT_REDIS_FIELD" != usable ]; then
   # Hex 24 bytes, 192 bits, and NOT base64: this password is interpolated
   # into the redis:// URI below, where base64's + and / would first need
   # percent-encoding. A hand-rolled escape is exactly the kind of thing that
@@ -844,12 +889,25 @@ else
     head -c 4096 /dev/urandom | tr -dc 'a-f0-9' | head -c 48
     printf '@redis.databases.svc.cluster.local:6379/3'
   } >"$PENPOT_REDIS_URI"
+fi
+penpot_field homelab/penpot api-secret-key
+PENPOT_API_FIELD=$PENPOT_FIELD
+if [ "$PENPOT_API_FIELD" != usable ]; then
   # Hex for the same reason as above, and because this key only ever encrypts
   # client API keys at rest -- it is never pasted into a login form. Same
   # idiom as the omniroute api-key-secret above.
   head -c 4096 /dev/urandom | tr -dc 'a-f0-9' | head -c 64 >"$PENPOT_API_SECRET"
+fi
+
+# `vault kv put` REPLACES every key at a path, so it is used exactly once per
+# path: when that path does not exist yet. An existing path is only ever
+# `patch`ed, one field at a time, which merges and cannot disturb the fields
+# already there -- the same rule tle_ensure_field and omni_ensure_field use.
+if [ "$penpot_status" = absent ]; then
   penpot_assured "$PENPOT_DB_PASSWORD" "the database password"
   penpot_assured "$PENPOT_OIDC_SECRET" "the OIDC client secret"
+  penpot_assured "$PENPOT_REDIS_URI" "the Redis URI"
+  penpot_assured "$PENPOT_API_SECRET" "the API secret key"
   vault kv put homelab/penpot \
       postgres-username=penpot \
       postgres-password=@"$PENPOT_DB_PASSWORD" \
@@ -857,24 +915,53 @@ else
       api-secret-key=@"$PENPOT_API_SECRET" \
       oidc-client-secret=@"$PENPOT_OIDC_SECRET" >/dev/null
   echo "    generated"
+else
+  if [ "$PENPOT_USER_FIELD" = blank ]; then
+    vault kv patch homelab/penpot postgres-username=penpot >/dev/null
+    echo "    repaired homelab/penpot/postgres-username"
+  fi
+  if [ "$PENPOT_PG_HERE" = blank ]; then
+    penpot_assured "$PENPOT_DB_PASSWORD" "the database password"
+    vault kv patch homelab/penpot postgres-password=@"$PENPOT_DB_PASSWORD" >/dev/null
+    echo "    repaired homelab/penpot/postgres-password"
+  fi
+  if [ "$PENPOT_OIDC_HERE" = blank ]; then
+    penpot_assured "$PENPOT_OIDC_SECRET" "the OIDC client secret"
+    vault kv patch homelab/penpot oidc-client-secret=@"$PENPOT_OIDC_SECRET" >/dev/null
+    echo "    repaired homelab/penpot/oidc-client-secret"
+  fi
+  if [ "$PENPOT_REDIS_FIELD" = blank ]; then
+    penpot_assured "$PENPOT_REDIS_URI" "the Redis URI"
+    vault kv patch homelab/penpot redis-uri=@"$PENPOT_REDIS_URI" >/dev/null
+    echo "    repaired homelab/penpot/redis-uri"
+  fi
+  if [ "$PENPOT_API_FIELD" = blank ]; then
+    penpot_assured "$PENPOT_API_SECRET" "the API secret key"
+    vault kv patch homelab/penpot api-secret-key=@"$PENPOT_API_SECRET" >/dev/null
+    echo "    repaired homelab/penpot/api-secret-key"
+  fi
 fi
 
-if [ "$penpot_data_status" = present ]; then
-  echo "    homelab/penpot/data already present, leaving the role password alone"
-else
+if [ "$penpot_data_status" = absent ]; then
   penpot_assured "$PENPOT_DB_PASSWORD" "the database password"
   vault kv put homelab/penpot/data password=@"$PENPOT_DB_PASSWORD" >/dev/null
   echo "    generated"
+elif [ "$PENPOT_PG_THERE" = blank ]; then
+  penpot_assured "$PENPOT_DB_PASSWORD" "the database password"
+  vault kv patch homelab/penpot/data password=@"$PENPOT_DB_PASSWORD" >/dev/null
+  echo "    repaired homelab/penpot/data/password"
 fi
 
-if [ "$penpot_client_status" = present ]; then
-  echo "    homelab/penpot-client already present, leaving the client secret alone"
-else
+if [ "$penpot_client_status" = absent ]; then
   penpot_assured "$PENPOT_OIDC_SECRET" "the OIDC client secret"
   vault kv put homelab/penpot-client clientSecret=@"$PENPOT_OIDC_SECRET" >/dev/null
   echo "    generated"
+elif [ "$PENPOT_OIDC_THERE" = blank ]; then
+  penpot_assured "$PENPOT_OIDC_SECRET" "the OIDC client secret"
+  vault kv patch homelab/penpot-client clientSecret=@"$PENPOT_OIDC_SECRET" >/dev/null
+  echo "    repaired homelab/penpot-client/clientSecret"
 fi
-rm -f "$PENPOT_READ" "$PENPOT_DB_PASSWORD" "$PENPOT_REDIS_URI" "$PENPOT_API_SECRET" "$PENPOT_OIDC_SECRET"
+rm -f "$PENPOT_READ" "$PENPOT_CHECK" "$PENPOT_DB_PASSWORD" "$PENPOT_REDIS_URI" "$PENPOT_API_SECRET" "$PENPOT_OIDC_SECRET"
 
 echo "==> policy vso-penpot-read"
 # One path per consumer, as vso-postgres-read above. The data/ segment is

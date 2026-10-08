@@ -53,20 +53,39 @@ Three steps happen outside git. None is reproduced by a cluster rebuild.
    `redis-uri`, `api-secret-key`, `oidc-client-secret`),
    `homelab/penpot/data` (`password`), and `homelab/penpot-client`
    (`clientSecret`). The password and the client secret each live at **two**
-   paths on purpose — a Job and the chart read different copies — so the
-   script writes both copies from one value and refuses to run if either
-   exists without a usable value.
+   paths on purpose — a Job and the chart read different copies. The script
+   writes both copies from one value, and on every run it **compares** them.
+   If they differ it stops and names both paths rather than choosing for you,
+   because either choice would hide a split behind a login that still works.
+   If one copy is missing or empty it repairs that one with `vault kv patch`,
+   which cannot disturb the other keys. Only when neither copy holds a usable
+   value does it stop and ask you to seed one.
 2. **MCP key.** In Penpot: *Your account → Integrations → MCP Server* →
    enable, then generate a key. It is shown **once** and is not
-   recoverable. Store it in a password manager, then seed it into Vault:
+   recoverable. Store it in a password manager, then seed it into Vault.
+   This runs **inside the Vault pod**, the same way
+   `platform/vault/configure-vault.sh` does — the `vault` CLI is only
+   authenticated there. Paste the key at the `MCP key:` prompt:
 
    ```sh
-   # Write the key to a private file first, so it never becomes an argument.
-   # A password on a command line is visible in `ps`.
-   vault kv patch homelab/penpot mcp-key=@"$MCP_KEY_FILE"
+   sg k3s-admin -c 'kubectl -n vault exec -it statefulset/vault-0 -- sh -c '"'"'
+     umask 077
+     MCP_KEY_FILE=$(mktemp)
+     trap "rm -f \"$MCP_KEY_FILE\"" EXIT
+     printf "MCP key: "
+     read -r MCP_KEY < /dev/tty && printf "\n"
+     printf %s "$MCP_KEY" >"$MCP_KEY_FILE"
+     unset MCP_KEY
+     vault kv patch homelab/penpot mcp-key=@"$MCP_KEY_FILE"
+     vault kv get -field=mcp-key homelab/penpot >/dev/null && echo "mcp-key stored"
+   '"'"''
    ```
 
-   **`kv patch`, not `kv put`.** `homelab/penpot` already carries
+   The key is read from the pod's terminal and written straight to a private
+   `mktemp` file, so it never reaches this machine's disk, `argv`, or `ps` —
+   the same `key=@<path>` rule the seed script follows.
+
+   **`vault kv patch`, not `vault kv put`.** `homelab/penpot` already carries
    `postgres-password`, `postgres-username`, `redis-uri`, `api-secret-key` and
    `oidc-client-secret`, and a KV v2 `put` replaces every key at the path. A
    `put` here would delete all five, leaving Penpot unable to reach
