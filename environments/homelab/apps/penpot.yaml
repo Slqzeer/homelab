@@ -1,0 +1,62 @@
+# Penpot, the homelab's design platform, with its MCP server.
+#
+# Wave 25 -- it genuinely depends on three things below it: PostgreSQL and
+# Redis at wave 23 for its data and cache, and Keycloak at wave 24 for OIDC
+# sign-in. It joins homelab-portal and tle-dev at 25 rather than opening
+# wave 26. Nothing sits behind Penpot, so it gates nothing.
+#
+# Three sources, the arrangement platform/vault already uses. The chart is
+# pinned to an exact version because its repoURL is not this repository, and
+# the onboarding contract requires an immutable release revision from any
+# external source.
+#
+# The MCP server is NOT deployed here and needs no Ingress of its own. The
+# chart already renders it from the official penpotapp/mcp image, because
+# config.flags defaults to include `enable-mcp`, and the frontend proxies
+# /mcp/stream to it. Clients use this same hostname:
+#   https://penpot.taildf6cd4.ts.net/mcp/stream?userToken=<MCP_KEY>
+# That indirection is the security boundary -- the MCP server authenticates
+# nobody on its own. See docs/superpowers/specs/2026-10-07-penpot-design.md.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: penpot
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "25"
+    homelab.io/onboarding-contract: v1
+    homelab.io/owner: personal-applications
+    homelab.io/state: durable
+    backup.homelab.io/restore-runbook: docs/runbooks/penpot-recovery.md
+    homelab.io/chart-version: "1.11.3"
+    homelab.io/app-version: "2.18.3"
+spec:
+  project: default
+  sources:
+    - repoURL: http://helm.penpot.app
+      chart: penpot
+      targetRevision: 1.11.3
+      helm:
+        releaseName: penpot
+        valueFiles:
+          - $values/apps/penpot/values.yaml
+    - repoURL: git@github.com:Slqzeer/homelab.git
+      targetRevision: main
+      ref: values
+    # VSO objects, NetworkPolicies and the database Job are not part of the
+    # chart and need a source of their own, exactly as the unsealer does for
+    # Vault. path is apps/penpot/config, NOT apps/penpot, which also holds
+    # values.yaml: every YAML under a directory `path` is applied as a
+    # manifest, and a Helm values file has no kind.
+    - repoURL: git@github.com:Slqzeer/homelab.git
+      targetRevision: main
+      path: apps/penpot/config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: penpot
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

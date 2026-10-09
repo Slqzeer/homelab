@@ -1,5 +1,7 @@
-# Reconcile only the explicitly allowlisted personal-application client.
+# Reconcile only the explicitly allowlisted personal-application clients.
 # This PostSync hook runs after Keycloak becomes healthy and is safe to rerun.
+# Each allowlist entry carries its own origin and OIDC callback path; they
+# are per-entry arguments, never constants inside reconcile_client.
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -16,6 +18,10 @@ data:
     : "${KC_ADMIN_USERNAME:?missing admin username}"
     : "${KC_CLI_PASSWORD:?missing admin password}"
     : "${PORTAL_CLIENT_SECRET:?missing portal client secret}"
+    # PENPOT_CLIENT_SECRET is optional on purpose. Its Secret is projected by
+    # the penpot Application (sync wave 25), which syncs after this hook can
+    # first run; requiring it would wedge the hook, and the portal with it.
+    # Without it the penpot entry is skipped below, with a warning.
 
     # KC_CLI_PASSWORD is Keycloak's supported password input. A private
     # ephemeral config file holds the resulting session token.
@@ -26,132 +32,168 @@ data:
 
     # This is the entire mutation allowlist. Query errors and duplicate IDs
     # abort the hook; neither may be interpreted as an absent client.
-    client_id=homelab-portal
-    clients_json=$("$KCADM" get clients -r homelab \
-      -q clientId=homelab-portal --fields id,clientId \
-      --config /tmp/kcadm.config)
-    client_uuid=$(printf '%s' "$clients_json" | "$JQ" -er \
-      --arg client_id "$client_id" \
-      '[.[] | select(.clientId == $client_id)] |
-       if length == 0 then ""
-       elif length == 1 then .[0].id
-       else error("duplicate client ID: homelab-portal") end')
-
-    # --arg carries only public identifiers and URIs. jq reads the secret
-    # directly from its environment, keeping it out of process arguments.
-    desired_json=$("$JQ" -n \
-      --arg client_id "$client_id" \
-      --arg redirect 'https://portal.taildf6cd4.ts.net/auth/callback' \
-      --arg origin 'https://portal.taildf6cd4.ts.net' \
-      --arg logout 'https://portal.taildf6cd4.ts.net/auth/logout' \
-      '{clientId: $client_id,
-        name: "Homelab Portal",
-        protocol: "openid-connect",
-        enabled: true,
-        publicClient: false,
-        clientAuthenticatorType: "client-secret",
-        standardFlowEnabled: true,
-        implicitFlowEnabled: false,
-        directAccessGrantsEnabled: false,
-        serviceAccountsEnabled: false,
-        redirectUris: [$redirect],
-        webOrigins: [$origin],
-        defaultClientScopes: ["profile", "email", "groups"],
-        attributes: {"post.logout.redirect.uris": $logout},
-        secret: env.PORTAL_CLIENT_SECRET}')
-
-    # Project only fields this hook owns. Keycloak adds server-side fields
-    # and other operators may set unrelated client fields. Never print the
-    # secret-bearing response or desired body during comparison.
-    canonical() {
-      "$JQ" -cS '
-        del(.secret) |
-        {clientId, name, protocol, enabled, publicClient,
-         clientAuthenticatorType, standardFlowEnabled,
-         implicitFlowEnabled, directAccessGrantsEnabled,
-         serviceAccountsEnabled, redirectUris, webOrigins,
-         attributes: {"post.logout.redirect.uris": .attributes["post.logout.redirect.uris"]}}
-      '
-    }
-    desired_public=$(printf '%s' "$desired_json" | canonical)
-
-    if [ -z "$client_uuid" ]; then
-      if ! printf '%s' "$desired_json" | "$KCADM" create clients -r homelab \
-          --config /tmp/kcadm.config -f - >/dev/null 2>&1; then
-        echo 'homelab-portal client create failed' >&2
-        exit 1
-      fi
-      echo 'created homelab-portal client'
+    # Arguments are positional: client_id, secret env var, display name,
+    # origin, callback path, logout path. The origin and the OIDC callback
+    # path are per entry, never constants inside this function: Penpot's
+    # callback is /api/oauth/redirect, which is NOT the portal's
+    # /auth/callback, and a shared constant would rewrite the portal's.
+    reconcile_client() {
+      client_id=$1 secret_var=$2 display_name=$3 origin=$4
+      callback=$5 logout_path=$6
+      # jq reads the secret, not the shell: $secret_var (the NAME) goes into
+      # argv and the value comes back out of jq's own environment. The value
+      # never becomes a process argument of anything: --arg is handed the
+      # name only, and handing it the value instead would put the secret in
+      # every argument list. A coreutils environment reader would do the same
+      # job, but it is used nowhere else in this repository and cannot be
+      # assumed present in the Keycloak image, where its absence would abort
+      # the hook under set -e. jq is already a hard dependency below; if it
+      # were missing this hook could not work at all, so this adds no new way
+      # to fail.
+      secret_value=$("$JQ" -nr --arg env_name "$secret_var" 'env[$env_name]')
       clients_json=$("$KCADM" get clients -r homelab \
-        -q clientId=homelab-portal --fields id,clientId \
+        -q clientId="$client_id" --fields id,clientId \
         --config /tmp/kcadm.config)
       client_uuid=$(printf '%s' "$clients_json" | "$JQ" -er \
         --arg client_id "$client_id" \
         '[.[] | select(.clientId == $client_id)] |
-         if length == 1 then .[0].id
-         else error("created client lookup was not unique") end')
-    else
-      current_json=$("$KCADM" get "clients/$client_uuid" -r homelab \
-        --config /tmp/kcadm.config)
-      current_public=$(printf '%s' "$current_json" | canonical)
-      current_secret_json=$("$KCADM" get "clients/$client_uuid/client-secret" \
-        -r homelab --config /tmp/kcadm.config)
-      current_secret=$(printf '%s' "$current_secret_json" | "$JQ" -r '.value // ""')
-      if [ "$current_public" = "$desired_public" ] && \
-         [ "$current_secret" = "$PORTAL_CLIENT_SECRET" ]; then
-        echo 'homelab-portal client already current'
-      else
-        # --merge retains unrelated client fields; Keycloak does not apply
-        # default-client-scope mappings through this representation update.
-        if ! printf '%s' "$desired_json" | "$KCADM" update "clients/$client_uuid" \
-            -r homelab --config /tmp/kcadm.config --merge -f - >/dev/null 2>&1; then
-          echo 'homelab-portal client update failed' >&2
+         if length == 0 then ""
+         elif length == 1 then .[0].id
+         else error("duplicate client ID: " + $client_id) end')
+
+      desired_json=$("$JQ" -n \
+        --arg client_id "$client_id" \
+        --arg name "$display_name" \
+        --arg redirect "${origin}${callback}" \
+        --arg origin "$origin" \
+        --arg logout "${origin}${logout_path}" \
+        --arg env_name "$secret_var" \
+        '{clientId: $client_id,
+          name: $name,
+          protocol: "openid-connect",
+          enabled: true,
+          publicClient: false,
+          clientAuthenticatorType: "client-secret",
+          standardFlowEnabled: true,
+          implicitFlowEnabled: false,
+          directAccessGrantsEnabled: false,
+          serviceAccountsEnabled: false,
+          redirectUris: [$redirect],
+          webOrigins: [$origin],
+          attributes: {"post.logout.redirect.uris": $logout},
+          secret: env[$env_name]}')
+
+      # Project only fields this hook owns. Keycloak adds server-side fields
+      # and other operators may set unrelated client fields. Never print the
+      # secret-bearing response or desired body during comparison.
+      canonical() {
+        "$JQ" -cS '
+          del(.secret) |
+          {clientId, name, protocol, enabled, publicClient,
+           clientAuthenticatorType, standardFlowEnabled,
+           implicitFlowEnabled, directAccessGrantsEnabled,
+           serviceAccountsEnabled, redirectUris, webOrigins,
+           attributes: {"post.logout.redirect.uris":
+                        .attributes["post.logout.redirect.uris"]}}
+        '
+      }
+      desired_public=$(printf '%s' "$desired_json" | canonical)
+
+      if [ -z "$client_uuid" ]; then
+        if ! printf '%s' "$desired_json" | "$KCADM" create clients -r homelab \
+            --config /tmp/kcadm.config -f - >/dev/null 2>&1; then
+          echo "$client_id client create failed" >&2
           exit 1
         fi
-        echo 'updated homelab-portal client'
-      fi
-    fi
-
-    # Client scope mappings are a separate Keycloak resource. Add only the
-    # required defaults; preserve any other scopes operators attached.
-    current_scopes=$("$KCADM" get "clients/$client_uuid/default-client-scopes" \
-      -r homelab --config /tmp/kcadm.config)
-    available_scopes=
-    for scope_name in profile email groups; do
-      if printf '%s' "$current_scopes" | "$JQ" -e \
-          --arg name "$scope_name" 'any(.[]; .name == $name)' >/dev/null; then
-        continue
-      fi
-      if [ -z "$available_scopes" ]; then
-        available_scopes=$("$KCADM" get client-scopes -r homelab \
+        echo "created $client_id client"
+        clients_json=$("$KCADM" get clients -r homelab \
+          -q clientId="$client_id" --fields id,clientId \
           --config /tmp/kcadm.config)
+        client_uuid=$(printf '%s' "$clients_json" | "$JQ" -er \
+          --arg client_id "$client_id" \
+          '[.[] | select(.clientId == $client_id)] |
+           if length == 1 then .[0].id
+           else error("created client lookup was not unique") end')
+      else
+        current_json=$("$KCADM" get "clients/$client_uuid" -r homelab \
+          --config /tmp/kcadm.config)
+        current_public=$(printf '%s' "$current_json" | canonical)
+        current_secret_json=$("$KCADM" get "clients/$client_uuid/client-secret" \
+          -r homelab --config /tmp/kcadm.config)
+        current_secret=$(printf '%s' "$current_secret_json" | "$JQ" -r '.value // ""')
+        if [ "$current_public" = "$desired_public" ] && \
+           [ "$current_secret" = "$secret_value" ]; then
+          echo "$client_id client already current"
+        else
+          # --merge retains unrelated client fields. This body carries no
+          # defaultClientScopes, so client scopes are not touched here at
+          # all: the explicit scope loop below is their only owner, and it
+          # adds what is missing rather than replacing the whole mapping.
+          if ! printf '%s' "$desired_json" | "$KCADM" update "clients/$client_uuid" \
+              -r homelab --config /tmp/kcadm.config --merge -f - >/dev/null 2>&1; then
+            echo "$client_id client update failed" >&2
+            exit 1
+          fi
+          echo "updated $client_id client"
+        fi
       fi
-      scope_uuid=$(printf '%s' "$available_scopes" | "$JQ" -er \
-        --arg name "$scope_name" \
-        '[.[] | select(.name == $name)] |
-         if length == 1 then .[0].id
-         else error("required client scope missing or duplicated") end')
-      if ! "$KCADM" update "clients/$client_uuid/default-client-scopes/$scope_uuid" \
-          -r homelab --config /tmp/kcadm.config >/dev/null 2>&1; then
-        echo 'homelab-portal default scope update failed' >&2
-        exit 1
-      fi
+
+      # Client scope mappings are a separate Keycloak resource. Add only the
+      # required defaults; preserve any other scopes operators attached.
       current_scopes=$("$KCADM" get "clients/$client_uuid/default-client-scopes" \
         -r homelab --config /tmp/kcadm.config)
-      if ! printf '%s' "$current_scopes" | "$JQ" -e \
-          --arg name "$scope_name" 'any(.[]; .name == $name)' >/dev/null; then
-        echo 'homelab-portal default scope verification failed' >&2
-        exit 1
-      fi
-    done
-    # Verify the complete required set, not merely the most recent add.
-    for scope_name in profile email groups; do
-      if ! printf '%s' "$current_scopes" | "$JQ" -e \
-          --arg name "$scope_name" 'any(.[]; .name == $name)' >/dev/null; then
-        echo 'homelab-portal default scope verification failed' >&2
-        exit 1
-      fi
-    done
+      available_scopes=
+      for scope_name in profile email groups; do
+        if printf '%s' "$current_scopes" | "$JQ" -e \
+            --arg name "$scope_name" 'any(.[]; .name == $name)' >/dev/null; then
+          continue
+        fi
+        if [ -z "$available_scopes" ]; then
+          available_scopes=$("$KCADM" get client-scopes -r homelab \
+            --config /tmp/kcadm.config)
+        fi
+        scope_uuid=$(printf '%s' "$available_scopes" | "$JQ" -er \
+          --arg name "$scope_name" \
+          '[.[] | select(.name == $name)] |
+           if length == 1 then .[0].id
+           else error("required client scope missing or duplicated") end')
+        if ! "$KCADM" update "clients/$client_uuid/default-client-scopes/$scope_uuid" \
+            -r homelab --config /tmp/kcadm.config >/dev/null 2>&1; then
+          echo "$client_id default scope update failed" >&2
+          exit 1
+        fi
+        current_scopes=$("$KCADM" get "clients/$client_uuid/default-client-scopes" \
+          -r homelab --config /tmp/kcadm.config)
+        if ! printf '%s' "$current_scopes" | "$JQ" -e \
+            --arg name "$scope_name" 'any(.[]; .name == $name)' >/dev/null; then
+          echo "$client_id default scope verification failed" >&2
+          exit 1
+        fi
+      done
+      # Verify the complete required set, not merely the most recent add.
+      for scope_name in profile email groups; do
+        if ! printf '%s' "$current_scopes" | "$JQ" -e \
+            --arg name "$scope_name" 'any(.[]; .name == $name)' >/dev/null; then
+          echo "$client_id default scope verification failed" >&2
+          exit 1
+        fi
+      done
+    }
+
+    reconcile_client homelab-portal PORTAL_CLIENT_SECRET "Homelab Portal" \
+      https://portal.taildf6cd4.ts.net /auth/callback /auth/logout
+    # Penpot does expose POST /api/logout, but nothing a browser can be
+    # redirected to, and Keycloak's post.logout.redirect.uris is a browser
+    # GET. Hence the empty path, giving the trailing "/" that lands on the
+    # application root rather than a logout route.
+    if [ -n "${PENPOT_CLIENT_SECRET:-}" ]; then
+      reconcile_client penpot PENPOT_CLIENT_SECRET "Penpot" \
+        https://penpot.taildf6cd4.ts.net /api/oauth/redirect /
+    else
+      echo "WARNING: penpot client skipped: Secret keycloak-penpot-client is" \
+        "not projected yet. Re-sync the keycloak Application after the" \
+        "penpot Application's first sync." >&2
+    fi
 ---
 apiVersion: batch/v1
 kind: Job
@@ -231,6 +273,14 @@ spec:
                 secretKeyRef:
                   name: keycloak-portal-client
                   key: clientSecret
+            # Optional: projected by the later penpot Application; the
+            # script skips the penpot client while it is absent.
+            - name: PENPOT_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-penpot-client
+                  key: clientSecret
+                  optional: true
           volumeMounts:
             - name: script
               mountPath: /scripts

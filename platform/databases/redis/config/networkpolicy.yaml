@@ -4,9 +4,9 @@
 # anchor; these two rules are Redis's own, shipped by the `redis`
 # Application so that each component owns the opening it needs.
 #
-# Nothing but the exporter talks to Redis today -- it is a cache with no
-# consumer yet. That is exactly why writing this down now is cheap: the
-# policy says what is true, and the next consumer has to add itself.
+# The exporter was the only client until Penpot, the first consumer, added
+# itself below. The policy says what is true; the next consumer has to add
+# itself the same way.
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -21,9 +21,32 @@ spec:
     - Ingress
   ingress:
     - from:
+        # A bare podSelector means pods in THIS namespace. The exporter.
         - podSelector:
             matchLabels:
               app: redis-exporter
+        # Penpot: the backend and its exporter (both PENPOT_REDIS_URI) and
+        # the MCP server (PENPOT_MCP_REDIS_URI).
+        # One peer each, not the whole namespace -- the frontend has no
+        # Redis URI and gets no path here.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: penpot
+          podSelector:
+            matchLabels:
+              app: penpot-backend
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: penpot
+          podSelector:
+            matchLabels:
+              app: penpot-exporter
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: penpot
+          podSelector:
+            matchLabels:
+              app: penpot-mcp
       ports:
         - protocol: TCP
           port: 6379

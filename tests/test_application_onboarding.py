@@ -678,5 +678,599 @@ class PortalIngressPublicationTests(unittest.TestCase):
 
         self.assertEqual(len(self.approved_catalogue), published_count)
 
+
+class PenpotRegistrationTests(unittest.TestCase):
+    chart_version = "1.11.3"
+    app_version = "2.18.3"
+
+    # Every namespace bootstrap/namespaces/namespaces.yaml declares, in file
+    # order. Asserted as a whole list because the `namespaces` Application
+    # reconciles this file with prune: true: a document dropped from it
+    # DELETES that namespace and cascades to everything inside it.
+    expected_namespaces = [
+        "cert-manager", "vault", "tailscale", "vault-secrets-operator-system",
+        "databases", "apps", "monitoring", "logging", "keycloak", "portal",
+        "tle-dev", "omniroute", "egress", "agents", "penpot",
+    ]
+
+    # Each digest bound to the image it belongs to. Bare 64-hex substrings
+    # would pass on a runbook with any two rows transposed.
+    image_digests = (
+        (
+            "penpotapp/frontend:2.18.3",
+            "bb8abe27d53de84c95597f2c02c0e702b2779971fb0703e543f9ecf183e999f6",
+        ),
+        (
+            "penpotapp/backend:2.18.3",
+            "2df1b3440d2a82cc3571db211b4ffdfa2b89ccc910759e8d5e9387fb62971b5c",
+        ),
+        (
+            "penpotapp/exporter:2.18.3",
+            "418232d6ca3120b1c2bfde298a56a05a1f41f567cd8494deac3fe7fbc186cfbd",
+        ),
+        (
+            "penpotapp/mcp:2.18.3",
+            "5e811e6eeb179d80d8781fb0ffd2991560785d150b3676f1ac5e28d63ba9f7c2",
+        ),
+    )
+
+    @staticmethod
+    def load(path):
+        with (REPOSITORY_ROOT / path).open(encoding="utf-8") as stream:
+            return [document for document in yaml.safe_load_all(stream) if document]
+
+    def test_namespace_inventory_is_complete_and_ordered(self):
+        # A per-namespace filter cannot see a document that was merged into
+        # its neighbour and lost. `agents` is the canary: it is what a
+        # missing `---` separator between two Namespace documents swallows,
+        # silently, with no error from the parser. Only an assertion over
+        # every document in order catches that, and reordering too.
+        namespaces = self.load("bootstrap/namespaces/namespaces.yaml")
+        self.assertEqual(
+            ["Namespace"] * len(self.expected_namespaces),
+            [document["kind"] for document in namespaces],
+        )
+        self.assertEqual(
+            self.expected_namespaces,
+            [document["metadata"]["name"] for document in namespaces],
+        )
+
+    def test_penpot_namespace_is_restricted_to_kubernetes_136(self):
+        namespaces = self.load("bootstrap/namespaces/namespaces.yaml")
+        matches = [
+            document for document in namespaces
+            if document.get("kind") == "Namespace"
+            and document.get("metadata", {}).get("name") == "penpot"
+        ]
+        self.assertEqual(1, len(matches))
+        labels = matches[0]["metadata"]["labels"]
+        for mode in ("enforce", "audit", "warn"):
+            self.assertEqual("restricted", labels[f"pod-security.kubernetes.io/{mode}"])
+            self.assertEqual("v1.36", labels[f"pod-security.kubernetes.io/{mode}-version"])
+
+    def test_penpot_application_pins_chart_and_site_manifests(self):
+        application, = self.load("environments/homelab/apps/penpot.yaml")
+        metadata = application["metadata"]
+        annotations = metadata["annotations"]
+        # Later tasks key off these three, so they are asserted in their own
+        # right and not merely implied by spec.destination.namespace below.
+        # A rename to `penpot-app` changes every Argo lookup by name.
+        self.assertEqual("penpot", metadata["name"])
+        self.assertEqual("argocd", metadata["namespace"])
+        self.assertEqual("default", application["spec"]["project"])
+        self.assertEqual("25", annotations["argocd.argoproj.io/sync-wave"])
+        self.assertEqual("v1", annotations["homelab.io/onboarding-contract"])
+        self.assertEqual("personal-applications", annotations["homelab.io/owner"])
+        self.assertEqual("durable", annotations["homelab.io/state"])
+        self.assertEqual(
+            "docs/runbooks/penpot-recovery.md",
+            annotations["backup.homelab.io/restore-runbook"],
+        )
+
+        sources = application["spec"]["sources"]
+        self.assertEqual(3, len(sources))
+        # repoURL is pinned on every source, not just checked on the chart.
+        # Two of the three sources render objects into a namespace that has
+        # a Vault connection, so a source silently repointed at a third-party
+        # repository would be applied with this repository's privileges.
+        chart = next(source for source in sources if source.get("chart"))
+        self.assertEqual("http://helm.penpot.app", chart["repoURL"])
+        self.assertEqual("penpot", chart["chart"])
+        self.assertEqual(self.chart_version, chart["targetRevision"])
+        self.assertNotIn("homelab.git", chart["repoURL"])
+        self.assertEqual(
+            ["$values/apps/penpot/values.yaml"], chart["helm"]["valueFiles"]
+        )
+        values_source = next(source for source in sources if source.get("ref"))
+        self.assertEqual("git@github.com:Slqzeer/homelab.git", values_source["repoURL"])
+        self.assertEqual("values", values_source["ref"])
+        manifest_source = next(
+            source for source in sources if source.get("path")
+        )
+        self.assertEqual("git@github.com:Slqzeer/homelab.git", manifest_source["repoURL"])
+        self.assertEqual("apps/penpot/config", manifest_source["path"])
+        self.assertEqual("main", manifest_source["targetRevision"])
+
+        self.assertEqual("penpot", application["spec"]["destination"]["namespace"])
+        sync_policy = application["spec"]["syncPolicy"]
+        self.assertEqual({"prune": True, "selfHeal": True}, sync_policy["automated"])
+        self.assertIn("ServerSideApply=true", sync_policy["syncOptions"])
+        self.assertNotIn("CreateNamespace=true", sync_policy["syncOptions"])
+
+    def test_penpot_runbook_is_checked_in_and_records_the_release(self):
+        runbook = REPOSITORY_ROOT / "docs/runbooks/penpot-recovery.md"
+        self.assertTrue(runbook.is_file())
+        tracked = subprocess.run(
+            ["git", "-C", str(REPOSITORY_ROOT), "ls-files", "--error-unmatch", "--",
+             "docs/runbooks/penpot-recovery.md"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        )
+        self.assertEqual(0, tracked.returncode)
+        text = runbook.read_text(encoding="utf-8")
+        # Each digest is asserted against the image it is recorded beside, in
+        # the runbook's own pipe row, digest prefix included. A bare 64-hex
+        # assertion passes on a runbook with the frontend and backend rows
+        # transposed -- which is precisely the edit an upgrade makes, and the
+        # one that would leave a wrong digest trusted during a rollback.
+        # Whitespace is collapsed first so a row wrapped across lines matches.
+        normalized = " ".join(text.split())
+        for image, digest in self.image_digests:
+            with self.subTest(image=image):
+                self.assertIn(f"`{image}` | `sha256:{digest}`", normalized)
+        self.assertIn(self.chart_version, text)
+        self.assertIn(self.app_version, text)
+        # The eviction deviation is a real operational hazard, so it has to
+        # survive edits to this file rather than living only in a commit
+        # message. Asserted here because Task 1 is what creates the runbook.
+        self.assertIn("allkeys-lru", text)
+        self.assertIn("volatile-lfu", text)
+        self.assertIn("dedicated", text)
+
+    def test_penpot_values_wire_shared_datastores_and_oidc(self):
+        values, = self.load("apps/penpot/values.yaml")
+        config = values["config"]
+        self.assertEqual("https://penpot.taildf6cd4.ts.net", config["publicUri"])
+
+        flags = config["flags"].split()
+        self.assertIn("enable-login-with-oidc", flags)
+        self.assertIn("enable-mcp", flags)
+        # Keycloak is the only way in. Penpot 2.18.3's built-in defaults
+        # enable registration and password login, so leaving them out is not
+        # enough: each needs an explicit disable-.
+        self.assertIn("disable-registration", flags)
+        self.assertIn("disable-login-with-password", flags)
+        self.assertNotIn("enable-registration", flags)
+        self.assertNotIn("enable-login-with-password", flags)
+        # `login` is the legacy alias the backend also accepts for password
+        # login (rpc/commands/auth.clj).
+        self.assertNotIn("enable-login", flags)
+        # With registration off, only this lets a first Keycloak login create
+        # its Penpot account (auth/oidc.clj).
+        self.assertIn("enable-oidc-registration", flags)
+        # OIDC-provisioned profiles are created inactive unless Keycloak
+        # asserts email_verified (auth.clj), and there is no SMTP to deliver
+        # verification mail. Password sign-up/login are off, so verification
+        # guards nothing; without this flag users loop at login.
+        self.assertIn("disable-email-verification", flags)
+        # The chart default is on; nothing leaves this installation unasked.
+        self.assertIs(False, config["telemetryEnabled"])
+        # The admin console is a fifth deployment this installation does not need.
+        self.assertNotIn("enable-admin-console", flags)
+        # Every flag carries the enable-/disable- prefix the chart requires;
+        # a bare token is silently ignored by Penpot.
+        for flag in flags:
+            self.assertTrue(flag.startswith(("enable-", "disable-")), flag)
+
+        self.assertEqual("penpot-secrets", config["existingSecret"])
+        self.assertEqual("api-secret-key", config["secretKeys"]["apiSecretKey"])
+
+        postgres = config["postgresql"]
+        self.assertEqual("postgres.databases.svc.cluster.local", postgres["host"])
+        self.assertEqual(5432, postgres["port"])
+        self.assertEqual("penpot", postgres["database"])
+        self.assertEqual("penpot-secrets", postgres["existingSecret"])
+        self.assertEqual("postgres-username", postgres["secretKeys"]["usernameKey"])
+        self.assertEqual("postgres-password", postgres["secretKeys"]["passwordKey"])
+        # A URI key would carry the password inside the URI; the chart builds
+        # a credential-free URI when only the username/password keys are set.
+        self.assertEqual("", postgres["secretKeys"]["postgresqlUriKey"])
+        self.assertNotIn("password", postgres)
+
+        redis = config["redis"]
+        self.assertEqual("redis.databases.svc.cluster.local", redis["host"])
+        self.assertEqual("6379", redis["port"])
+        # Index 3, not 0: this Redis is shared and index 0 may hold keys.
+        self.assertEqual("3", redis["database"])
+        # A separate Secret: a second VaultStaticSecret renders the URI from
+        # the shared Redis password, and two cannot own one destination.
+        self.assertEqual("penpot-redis", redis["existingSecret"])
+        self.assertEqual("redis-uri", redis["secretKeys"]["redisUriKey"])
+
+        assets = values["persistence"]["assets"]
+        self.assertIs(True, assets["enabled"])
+        self.assertEqual("local-path", assets["storageClass"])
+
+        # OIDC lives in backend.extraEnvs, not config.extraEnvs: the chart
+        # injects config.extraEnvs into all five components, so putting the
+        # client secret there would hand it to the MCP server too.
+        env = {entry["name"]: entry for entry in values["backend"]["extraEnvs"]}
+        self.assertEqual("penpot", env["PENPOT_OIDC_CLIENT_ID"]["value"])
+        self.assertEqual(
+            "penpot-secrets",
+            env["PENPOT_OIDC_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"]["name"],
+        )
+        auth = env["PENPOT_OIDC_AUTH_URI"]["value"]
+        self.assertIn("keycloak.taildf6cd4.ts.net", auth)
+        for name in ("PENPOT_OIDC_TOKEN_URI", "PENPOT_OIDC_USER_URI",
+                     "PENPOT_OIDC_JWKS_URI"):
+            self.assertIn(
+                "keycloak.keycloak.svc.cluster.local", env[name]["value"], name,
+            )
+        ssrf = env["PENPOT_SSRF_ALLOWED_HOSTS"]["value"].split()
+        self.assertIn("keycloak.keycloak.svc.cluster.local", ssrf)
+        self.assertIn("keycloak.taildf6cd4.ts.net", ssrf)
+
+    def test_penpot_pods_satisfy_restricted_pod_security(self):
+        # Checked on values, not on a render: CI has no helm. Chart 1.11.3
+        # copies each component's two blocks verbatim into its Deployment
+        # (and the frontend's into the helm-test pod). Its own defaults fail
+        # `restricted` -- no seccompProfile, and `drop: [all]` in lower case.
+        values, = self.load("apps/penpot/values.yaml")
+        for component in ("backend", "frontend", "exporter", "mcp"):
+            pod = values[component]["podSecurityContext"]
+            self.assertEqual({"type": "RuntimeDefault"}, pod["seccompProfile"], component)
+            self.assertEqual(1001, pod["fsGroup"], component)
+            container = values[component]["containerSecurityContext"]
+            self.assertEqual(["ALL"], container["capabilities"]["drop"], component)
+            self.assertIs(True, container["runAsNonRoot"], component)
+            self.assertIs(False, container["allowPrivilegeEscalation"], component)
+            self.assertEqual(1001, container["runAsUser"], component)
+
+    def test_penpot_pods_do_not_wear_the_vso_service_account(self):
+        # Checked on values plus the site manifests, not on a render: CI has
+        # no helm. The chart creates a ServiceAccount named
+        # serviceAccount.name and runs every pod as it; `penpot` belongs to
+        # VSO (Vault role vso-penpot) and is defined in apps/penpot/config.
+        values, = self.load("apps/penpot/values.yaml")
+        account = values["serviceAccount"]
+        self.assertEqual("penpot-workload", account["name"])
+        site_accounts = {
+            document["metadata"]["name"]
+            for path in sorted((REPOSITORY_ROOT / "apps/penpot/config").glob("*.yaml"))
+            if path.name != "kustomization.yaml"
+            for document in self.load(path.relative_to(REPOSITORY_ROOT).as_posix())
+            if document.get("kind") == "ServiceAccount"
+            and document["metadata"].get("namespace") == "penpot"
+        }
+        self.assertIn("penpot", site_accounts)
+        self.assertNotIn(account["name"], site_accounts)
+
+    def test_penpot_values_contain_no_credential(self):
+        text = (REPOSITORY_ROOT / "apps/penpot/values.yaml").read_text(encoding="utf-8")
+        for forbidden in ("apiSecretKey: \"", "password: penpot", "mcp-key"):
+            self.assertNotIn(forbidden, text)
+
+    def test_penpot_vso_projects_only_required_keys(self):
+        resources = self.load("apps/penpot/config/vault-secrets.yaml")
+        by_kind = {}
+        for resource in resources:
+            by_kind.setdefault(resource["kind"], []).append(resource)
+
+        self.assertEqual(["penpot"], [item["metadata"]["name"]
+                                      for item in by_kind["ServiceAccount"]])
+        auth, = by_kind["VaultAuth"]
+        self.assertEqual("vso-penpot", auth["spec"]["kubernetes"]["role"])
+        self.assertEqual("penpot", auth["spec"]["kubernetes"]["serviceAccount"])
+        self.assertEqual(["vault"], auth["spec"]["kubernetes"]["audiences"])
+
+        secrets = {item["metadata"]["name"]: item for item in by_kind["VaultStaticSecret"]}
+        self.assertEqual({"penpot", "penpot-redis", "keycloak-penpot-client"}, set(secrets))
+
+        penpot = secrets["penpot"]
+        self.assertEqual("homelab", penpot["spec"]["mount"])
+        self.assertEqual("penpot", penpot["spec"]["path"])
+        self.assertEqual("300s", penpot["spec"]["refreshAfter"])
+        self.assertIs(True, penpot["spec"]["hmacSecretData"])
+        transformation = penpot["spec"]["destination"]["transformation"]
+        self.assertEqual("penpot-secrets", penpot["spec"]["destination"]["name"])
+        self.assertIs(True, transformation["excludeRaw"])
+        self.assertEqual([".*"], transformation["excludes"])
+        # redis-uri lives in its own Secret (penpot-redis), not here.
+        self.assertEqual(
+            {"postgres-username", "postgres-password",
+             "api-secret-key", "oidc-client-secret"},
+            set(transformation["templates"]),
+        )
+        # The MCP key is issued by Penpot after first login; projecting it
+        # before it exists would leave the pod waiting on a value nobody has.
+        self.assertNotIn("mcp-key", transformation["templates"])
+        # Exactly the Deployments whose chart 1.11.3 render references
+        # penpot-secrets (backend and exporter; frontend and mcp do not).
+        self.assertEqual(
+            [{"kind": "Deployment", "name": "penpot-backend"},
+             {"kind": "Deployment", "name": "penpot-exporter"}],
+            penpot["spec"]["rolloutRestartTargets"],
+        )
+
+        redis = secrets["penpot-redis"]
+        self.assertEqual("penpot", redis["metadata"]["namespace"])
+        self.assertEqual("penpot", redis["spec"]["vaultAuthRef"])
+        self.assertEqual("homelab", redis["spec"]["mount"])
+        self.assertEqual("kv-v2", redis["spec"]["type"])
+        self.assertEqual("redis", redis["spec"]["path"])
+        self.assertEqual("300s", redis["spec"]["refreshAfter"])
+        self.assertIs(True, redis["spec"]["hmacSecretData"])
+        destination = redis["spec"]["destination"]
+        self.assertEqual("penpot-redis", destination["name"])
+        self.assertIs(True, destination["create"])
+        self.assertIs(True, destination["transformation"]["excludeRaw"])
+        self.assertEqual([".*"], destination["transformation"]["excludes"])
+        templates = destination["transformation"]["templates"]
+        self.assertEqual({"redis-uri"}, set(templates))
+        self.assertEqual(
+            'redis://:{{ get .Secrets "password" }}'
+            "@redis.databases.svc.cluster.local:6379/3",
+            templates["redis-uri"]["text"],
+        )
+        self.assertEqual(
+            [{"kind": "Deployment", "name": "penpot-backend"},
+             {"kind": "Deployment", "name": "penpot-exporter"},
+             {"kind": "Deployment", "name": "penpot-mcp"}],
+            redis["spec"]["rolloutRestartTargets"],
+        )
+
+        client = secrets["keycloak-penpot-client"]
+        self.assertEqual("keycloak", client["metadata"]["namespace"])
+        self.assertEqual("penpot-client", client["spec"]["path"])
+        self.assertEqual("keycloak-penpot-client",
+                         client["spec"]["destination"]["name"])
+        client_transformation = client["spec"]["destination"]["transformation"]
+        self.assertIs(True, client_transformation["excludeRaw"])
+        self.assertEqual({"clientSecret"}, set(client_transformation["templates"]))
+        self.assertEqual('{{ get .Secrets "clientSecret" }}',
+                         client_transformation["templates"]["clientSecret"]["text"])
+
+    def test_penpot_database_job_creates_role_and_database_idempotently(self):
+        job, = [item for item in self.load("apps/penpot/config/postgres-job.yaml")
+                if item["kind"] == "Job"]
+        self.assertEqual("databases", job["metadata"]["namespace"])
+        self.assertEqual("Sync", job["metadata"]["annotations"]["argocd.argoproj.io/hook"])
+        pod = job["spec"]["template"]["spec"]
+        self.assertEqual("penpot-db", pod["serviceAccountName"])
+        self.assertEqual({"job": "postgres-client"},
+                         job["spec"]["template"]["metadata"]["labels"])
+        container, = pod["containers"]
+        env = {entry["name"]: entry for entry in container["env"]}
+        self.assertEqual("postgres-credentials",
+                         env["PGPASSWORD"]["valueFrom"]["secretKeyRef"]["name"])
+        self.assertEqual("penpot-db",
+                         env["PENPOT_PASSWORD"]["valueFrom"]["secretKeyRef"]["name"])
+        self.assertEqual("postgres.databases.svc.cluster.local", env["PGHOST"]["value"])
+        # \getenv, not string interpolation into SQL text.
+        script = " ".join(container["command"])
+        self.assertIn("\\getenv pw PENPOT_PASSWORD", script)
+        self.assertIn("CREATE ROLE penpot LOGIN", script)
+        self.assertIn("CREATE DATABASE penpot OWNER penpot", script)
+        self.assertNotIn("password: penpot", script)
+
+    @staticmethod
+    def pod_set(selector):
+        # The Penpot components a podSelector picks out: "*" for every pod,
+        # otherwise the `app` values it names via matchLabels or `app In`.
+        if selector == {}:
+            return "*"
+        labels = selector.get("matchLabels", {})
+        if labels:
+            return frozenset({labels["app"]})
+        expression, = selector["matchExpressions"]
+        assert (expression["key"], expression["operator"]) == ("app", "In"), expression
+        return frozenset(expression["values"])
+
+    @staticmethod
+    def peer_key(peer):
+        # (namespace or None for "this namespace", labels as sorted pairs).
+        # A namespace-wide peer has labels None, so it can never compare
+        # equal to a pod-scoped one.
+        namespace = None
+        if "namespaceSelector" in peer:
+            namespace = peer["namespaceSelector"]["matchLabels"][
+                "kubernetes.io/metadata.name"]
+        labels = peer.get("podSelector", {}).get("matchLabels")
+        return namespace, tuple(sorted(labels.items())) if labels is not None else None
+
+    def policy_flows(self, policy):
+        # Every (direction, selected pods, peer, port) a policy grants.
+        flows = set()
+        selected = self.pod_set(policy["spec"]["podSelector"])
+        for direction, peers_key in (("ingress", "from"), ("egress", "to")):
+            for rule in policy["spec"].get(direction, []):
+                # No rule may omit its peers or ports: either means "any".
+                self.assertTrue(rule.get(peers_key), policy["metadata"]["name"])
+                self.assertTrue(rule.get("ports"), policy["metadata"]["name"])
+                for peer in rule[peers_key]:
+                    for port in rule["ports"]:
+                        self.assertNotIn("endPort", port)
+                        flows.add((direction, selected, self.peer_key(peer),
+                                   port.get("protocol", "TCP"), port["port"]))
+        return flows
+
+    def test_penpot_network_policies_fence_the_namespace(self):
+        policies = self.load("apps/penpot/config/networkpolicy.yaml")
+        by_name = {item["metadata"]["name"]: item for item in policies}
+        self.assertEqual(len(policies), len(by_name), "duplicate policy name")
+        for item in policies:
+            self.assertEqual("penpot", item["metadata"]["namespace"])
+        for direction in ("ingress", "egress"):
+            deny = by_name.pop(f"default-deny-{direction}")
+            self.assertEqual({}, deny["spec"]["podSelector"])
+            self.assertEqual([direction.capitalize()], deny["spec"]["policyTypes"])
+            self.assertNotIn(direction, deny["spec"])
+
+        def app(name):
+            return frozenset({f"penpot-{name}"})
+
+        def local(name):
+            return None, (("app", f"penpot-{name}"),)
+
+        tailnet = ("tailscale", (
+            ("tailscale.com/parent-resource", "ingress"),
+            ("tailscale.com/parent-resource-type", "proxygroup"),
+        ))
+        kube_dns = ("kube-system", None)
+        postgres = ("databases", (("app", "postgres"),))
+        redis = ("databases", (("app", "redis"),))
+        keycloak = ("keycloak", (("app", "keycloak"),))
+        egress_proxy = ("egress", (("app", "egress-proxy"),))
+
+        expected = {
+            "penpot-dns": {
+                ("egress", "*", kube_dns, "UDP", 53),
+                ("egress", "*", kube_dns, "TCP", 53),
+            },
+            # Only the frontend is reachable from the tailnet, on 8080 only.
+            "penpot-tailnet": {("ingress", app("frontend"), tailnet, "TCP", 8080)},
+            # In-namespace flows: default-deny-egress covers every pod, so
+            # each needs an ingress grant on the receiver AND an egress
+            # grant on the sender.
+            "penpot-frontend-to-backend": {
+                ("ingress", app("backend"), local("frontend"), "TCP", 6060)},
+            "penpot-frontend-to-mcp": {
+                ("ingress", app("mcp"), local("frontend"), "TCP", 4401),
+                ("ingress", app("mcp"), local("frontend"), "TCP", 4402),
+            },
+            "penpot-frontend-to-exporter": {
+                ("ingress", app("exporter"), local("frontend"), "TCP", 6061)},
+            "penpot-exporter-to-frontend": {
+                ("ingress", app("frontend"), local("exporter"), "TCP", 8080)},
+            "penpot-frontend-egress": {
+                ("egress", app("frontend"), local("backend"), "TCP", 6060),
+                ("egress", app("frontend"), local("exporter"), "TCP", 6061),
+                ("egress", app("frontend"), local("mcp"), "TCP", 4401),
+                ("egress", app("frontend"), local("mcp"), "TCP", 4402),
+            },
+            "penpot-exporter-egress": {
+                ("egress", app("exporter"), local("frontend"), "TCP", 8080)},
+            # Only the backend speaks to PostgreSQL.
+            "penpot-postgres": {("egress", app("backend"), postgres, "TCP", 5432)},
+            # Backend, exporter and MCP consume the Redis URI; the frontend
+            # does not.
+            "penpot-redis": {
+                ("egress", app("backend") | app("exporter") | app("mcp"),
+                 redis, "TCP", 6379)},
+            "penpot-keycloak": {("egress", app("backend"), keycloak, "TCP", 8080)},
+            "penpot-egress-proxy": {
+                ("egress", app("backend"), egress_proxy, "TCP", 3128)},
+        }
+        # Exact equality: a policy added, dropped or widened fails here. In
+        # particular there is no penpot-metrics: nothing in this namespace
+        # serves /metrics (the exporter's 6061 is a rendering endpoint).
+        actual = {name: self.policy_flows(policy) for name, policy in by_name.items()}
+        self.assertEqual(expected, actual)
+        self.assertNotIn("penpot-metrics", actual)
+
+        flows = set().union(*actual.values())
+        # Both sides of every in-namespace flow are granted.
+        for direction, selected, peer, protocol, port in flows:
+            if peer[0] is not None or selected == "*":
+                continue
+            here, = selected
+            there = dict(peer[1])["app"]
+            opposite = "ingress" if direction == "egress" else "egress"
+            mirror = (opposite, frozenset({there}), local(here[len("penpot-"):]),
+                      protocol, port)
+            self.assertIn(mirror, flows, (direction, here, there, port))
+
+        # The MCP invariant: 4401/4402 are admitted from the frontend and
+        # from nothing else, and the tailnet reaches only frontend:8080.
+        for direction, selected, peer, protocol, port in flows:
+            if direction == "ingress" and port in (4401, 4402):
+                self.assertEqual(local("frontend"), peer)
+            if peer[0] == "tailscale":
+                self.assertEqual(("ingress", app("frontend"), 8080),
+                                 (direction, selected, port))
+
+        text = yaml.safe_dump_all(policies)
+        self.assertNotIn("0.0.0.0/0", text)
+        self.assertNotIn("endPort: 65535", text)
+
+    def test_databases_admit_exactly_the_penpot_components_that_need_them(self):
+        postgres_policies = {
+            item["metadata"]["name"]: item
+            for item in self.load("platform/databases/postgres/config/networkpolicy.yaml")}
+        redis_policies = {
+            item["metadata"]["name"]: item
+            for item in self.load("platform/databases/redis/config/networkpolicy.yaml")}
+        clients = {
+            "postgres-clients": postgres_policies["postgres-clients"],
+            "redis-clients": redis_policies["redis-clients"],
+        }
+        penpot_flows = {
+            name: {flow for flow in self.policy_flows(policy) if flow[2][0] == "penpot"}
+            for name, policy in clients.items()
+        }
+        self.assertEqual({
+            # Only the backend uses PostgreSQL.
+            "postgres-clients": {
+                ("ingress", frozenset({"postgres"}),
+                 ("penpot", (("app", "penpot-backend"),)), "TCP", 5432)},
+            # Backend, exporter and MCP all read the Redis URI.
+            "redis-clients": {
+                ("ingress", frozenset({"redis"}),
+                 ("penpot", (("app", f"penpot-{component}"),)), "TCP", 6379)
+                for component in ("backend", "exporter", "mcp")},
+        }, penpot_flows)
+        # No namespace-wide penpot peer: that would admit the MCP server and
+        # anything else that ever lands in the namespace.
+        for name, policy in clients.items():
+            for rule in policy["spec"]["ingress"]:
+                for peer in rule["from"]:
+                    if self.peer_key(peer)[0] == "penpot":
+                        self.assertIn("podSelector", peer, name)
+
+    def test_penpot_config_renders_and_is_wired_into_ci(self):
+        workflow, = self.load(".github/workflows/validate.yaml")
+        conform_steps = workflow["jobs"]["kubeconform"]["steps"]
+        render_command = next(
+            step["run"] for step in conform_steps
+            if step.get("name") == "Render application configs"
+        )
+        self.assertIn("kustomize build apps/penpot/config", render_command)
+        self.assertIn("rendered/penpot-config.yaml", render_command)
+
+        kustomization, = self.load("apps/penpot/config/kustomization.yaml")
+        # No namespace: field on purpose -- this directory holds objects in
+        # penpot, databases and keycloak, and kustomize rewrites even an
+        # explicit namespace.
+        self.assertNotIn("namespace", kustomization)
+        self.assertEqual(
+            ["vault-secrets.yaml", "networkpolicy.yaml", "postgres-job.yaml"],
+            kustomization["resources"],
+        )
+
+    def test_penpot_ingress_routes_only_the_frontend_and_is_unpublished(self):
+        ingress, = [item for item in self.load(
+            "infrastructure/ingress/config/penpot-ingress.yaml")
+            if item["kind"] == "Ingress"]
+        metadata = ingress["metadata"]
+        annotations = metadata["annotations"]
+        self.assertEqual("tailscale", ingress["spec"]["ingressClassName"])
+        self.assertEqual("ingress", annotations["tailscale.com/proxy-group"])
+        self.assertEqual([{"hosts": ["penpot"]}], ingress["spec"]["tls"])
+        # Unpublished until OIDC login has been verified live.
+        self.assertFalse(any(key.startswith("portal.homelab.io/")
+                             for key in annotations))
+
+        # The chart names the frontend Service `penpot`, not `penpot-frontend`
+        # (verified by helm template; the selector is penpot-frontend).
+        backend = ingress["spec"]["defaultBackend"]["service"]
+        self.assertEqual("penpot", backend["name"])
+        self.assertEqual({"name": "http"}, backend["port"])
+
+        # The backend, exporter and MCP ports must never appear here.
+        text = yaml.safe_dump(ingress)
+        for forbidden in ("6060", "6061", "4401", "4402", "admin-console"):
+            self.assertNotIn(forbidden, text)
+
+
 if __name__ == "__main__":
     unittest.main()

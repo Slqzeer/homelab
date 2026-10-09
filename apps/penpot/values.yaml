@@ -1,0 +1,192 @@
+# Penpot site values for chart penpot 1.11.3 (appVersion 2.18.3).
+#
+# Only site integration lives here. Every credential arrives by VSO
+# projection from Vault, so no value below is a secret and this file is
+# safe to read in a diff.
+#
+# The chart pins images as repository:tag with no digest field, so images
+# are not digest-pinnable through values. The digests actually deployed are
+# recorded in docs/runbooks/penpot-recovery.md.
+
+# The chart's own ServiceAccount, worn by every Penpot pod. Not `penpot`:
+# that name belongs to the ServiceAccount in apps/penpot/config, which is
+# VSO's Vault identity (role vso-penpot) and nothing else's. Sharing it
+# would render one object from two sources and hand every Penpot pod the
+# right to read Penpot's Vault paths. Chart 1.11.3 exposes no value to turn
+# off token automount; this ServiceAccount has no RBAC bindings.
+serviceAccount:
+  enabled: true
+  name: penpot-workload
+
+config:
+  # The tailnet name the browser uses, and what Penpot puts in its own
+  # absolute links and OIDC redirects.
+  publicUri: "https://penpot.taildf6cd4.ts.net"
+
+  # Keycloak is the only way in. These flags REPLACE the chart's default
+  # list, but Penpot itself starts from its own built-in defaults, which
+  # include enable-registration and enable-login-with-password (2.18.3,
+  # common/src/app/common/flags.cljc). Leaving a flag out therefore does
+  # not turn it off; only an explicit disable- does.
+  #
+  # disable-registration and disable-login-with-password: no password
+  #   sign-up and no password login, so nobody gets in around Keycloak.
+  # enable-oidc-registration: with general registration off, the first
+  #   Keycloak login may still create its Penpot account
+  #   (backend/src/app/auth/oidc.clj). Without it every login is refused.
+  # enable-login-with-oidc: the Keycloak button.
+  # disable-email-verification: OIDC-provisioned profiles are created with
+  #   is-active = (or is-active-claim email-verified (not email-verification-flag))
+  #   (backend/src/app/auth.clj), and email_verified defaults to false
+  #   (auth/oidc.clj). With verification on, a Keycloak user without
+  #   emailVerified=true gets an inactive profile and loops at login, and
+  #   there is no SMTP to deliver a verification mail. With password sign-up
+  #   and login disabled it guards nothing.
+  # enable-mcp renders the MCP server. It is required -- see the ingress
+  #   comment in environments/homelab/apps/penpot.yaml for why the MCP
+  #   endpoint is reached through this same hostname.
+  # enable-admin-console is deliberately absent: a fifth deployment on port
+  #   3000 that a personal installation does not need.
+  # Every token needs an enable-/disable- prefix; Penpot silently ignores
+  # anything else, so a typo is a no-op rather than an error.
+  flags: >-
+    disable-registration
+    disable-login-with-password
+    enable-oidc-registration
+    enable-login-with-oidc
+    disable-email-verification
+    enable-mcp
+
+  # The chart default is true. Nothing leaves this installation unasked.
+  telemetryEnabled: false
+
+  # PENPOT_SECRET_KEY, from Vault. Rotating it invalidates all sessions.
+  existingSecret: penpot-secrets
+  secretKeys:
+    apiSecretKey: api-secret-key
+
+  # The shared PostgreSQL in `databases`, own database and role created by
+  # the Job in apps/penpot/config/postgres-job.yaml.
+  #
+  # Only usernameKey and passwordKey are set. With postgresqlUriKey empty
+  # the chart builds `postgresql://host:port/database` -- no credentials
+  # in the URI -- and reads the two credentials from the Secret separately.
+  postgresql:
+    host: postgres.databases.svc.cluster.local
+    port: 5432
+    database: penpot
+    existingSecret: penpot-secrets
+    secretKeys:
+      usernameKey: postgres-username
+      passwordKey: postgres-password
+      postgresqlUriKey: ""
+
+  # The shared Redis in `databases`. It runs with requirepass, so a host and
+  # port are not enough: the chart needs one fully-formed URI including the
+  # password, which is why redisUriKey is set rather than a bare host.
+  #
+  # VSO renders that URI from the shared Redis password (Vault
+  # homelab/redis) into its own Secret, penpot-redis: two VaultStaticSecrets
+  # cannot own one destination Secret, so it is not a penpot-secrets key.
+  #
+  # Database index 3, not 0. This Redis is shared, and Penpot's websocket
+  # coordination keys must not collide with another consumer's.
+  redis:
+    host: redis.databases.svc.cluster.local
+    port: "6379"
+    database: "3"
+    existingSecret: penpot-redis
+    secretKeys:
+      redisUriKey: redis-uri
+
+# No global.postgresqlEnabled or global.valkeyEnabled: both are external.
+# The chart hard-fails if either is true.
+
+# Pod Security. The penpot namespace enforces `restricted`, and the chart's
+# own securityContext fails it twice: no seccompProfile, and
+# `capabilities.drop: [all]` in lower case where admission requires `ALL`.
+# Every Deployment below therefore carries the same two blocks. UID 1001 is
+# the `penpot` user the backend, frontend and exporter images create; the
+# chart runs the MCP image as 1001 too. fsGroup 1001 keeps the assets volume
+# writable by that user. The anchors keep the four copies identical.
+#
+# The chart's helm-test pod (penpot-test-connection) borrows the frontend's
+# two blocks, so it is admissible as well -- though Argo CD is expected not
+# to create `helm.sh/hook: test` resources at all (checked at go-live).
+backend:
+  podSecurityContext: &podSecurityContext
+    fsGroup: 1001
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext: &containerSecurityContext
+    runAsUser: 1001
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop: [ALL]
+
+  # backend.extraEnvs, NOT config.extraEnvs. The chart injects
+  # config.extraEnvs into all five components, so an OIDC client secret
+  # placed there would also be handed to the MCP server and the exporter.
+  #
+  # The endpoint split is not optional. A pod cannot resolve
+  # keycloak.taildf6cd4.ts.net through cluster DNS, so the browser-facing
+  # authorization endpoint uses the tailnet name while the backend's token,
+  # userinfo and JWKS endpoints use the in-cluster Service. Keycloak derives
+  # a token's `iss` from the host used to reach it, so a mismatch here shows
+  # up as an ID token validation failure -- verify login live before
+  # publishing the portal entry.
+  extraEnvs:
+    - name: PENPOT_OIDC_CLIENT_ID
+      value: penpot
+    - name: PENPOT_OIDC_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: penpot-secrets
+          key: oidc-client-secret
+    - name: PENPOT_OIDC_BASE_URI
+      value: "https://keycloak.taildf6cd4.ts.net/auth/realms/homelab/"
+    - name: PENPOT_OIDC_AUTH_URI
+      value: >-
+        https://keycloak.taildf6cd4.ts.net/auth/realms/homelab/protocol/openid-connect/auth
+    - name: PENPOT_OIDC_TOKEN_URI
+      value: >-
+        http://keycloak.keycloak.svc.cluster.local:8080/auth/realms/homelab/protocol/openid-connect/token
+    - name: PENPOT_OIDC_USER_URI
+      value: >-
+        http://keycloak.keycloak.svc.cluster.local:8080/auth/realms/homelab/protocol/openid-connect/userinfo
+    - name: PENPOT_OIDC_JWKS_URI
+      value: >-
+        http://keycloak.keycloak.svc.cluster.local:8080/auth/realms/homelab/protocol/openid-connect/certs
+    # Required because the backend reaches Keycloak at a hostname that
+    # autodiscovery would not otherwise permit.
+    - name: PENPOT_SSRF_ALLOWED_HOSTS
+      value: >-
+        keycloak.keycloak.svc.cluster.local keycloak.taildf6cd4.ts.net
+    - name: PENPOT_OIDC_SCOPES
+      value: "openid profile email"
+    - name: PENPOT_OIDC_NAME_ATTR
+      value: preferred_username
+    - name: PENPOT_OIDC_EMAIL_ATTR
+      value: email
+
+frontend:
+  podSecurityContext: *podSecurityContext
+  containerSecurityContext: *containerSecurityContext
+
+exporter:
+  podSecurityContext: *podSecurityContext
+  containerSecurityContext: *containerSecurityContext
+
+mcp:
+  podSecurityContext: *podSecurityContext
+  containerSecurityContext: *containerSecurityContext
+
+# Uploaded images and SVG clips. The component's only volume, and the
+# reason homelab.io/state is durable.
+persistence:
+  assets:
+    enabled: true
+    storageClass: local-path
+    size: 5Gi

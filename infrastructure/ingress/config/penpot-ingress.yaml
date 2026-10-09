@@ -1,0 +1,35 @@
+# Penpot on the tailnet at https://penpot.taildf6cd4.ts.net
+#
+# The frontend Service only. The backend (6060), exporter (6061) and MCP
+# server (4401/4402) are cluster-local by design and deliberately absent.
+#
+# This one Ingress also carries the MCP endpoint. Clients connect to
+# https://penpot.taildf6cd4.ts.net/mcp/stream?userToken=<MCP_KEY>, which the
+# frontend proxies to the MCP server. The MCP server authenticates nobody on
+# its own, so giving it a tailnet route of its own would publish
+# unauthenticated read/write access to every design file. There is
+# deliberately no second Ingress here, and no penpot-mcp route in this file.
+#
+# Deliberately NOT published in the Homelab Portal yet: publication is a
+# separate commit made once OIDC login has been verified live.
+#
+# The backend Service is `penpot` (the chart's frontend Service), not
+# `penpot-frontend`: that string is the frontend pods' selector label.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: penpot
+  namespace: penpot
+  annotations:
+    tailscale.com/proxy-group: ingress
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: penpot
+      port:
+        name: http
+  tls:
+    # Short name only. Becomes penpot.taildf6cd4.ts.net via MagicDNS.
+    - hosts:
+        - penpot
