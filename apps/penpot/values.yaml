@@ -177,23 +177,46 @@ backend:
       value: "10"
     - name: PENPOT_DATABASE_MIN_POOL_SIZE
       value: "2"
+    # run.sh appends $JVM_OPTS to the java command line.
+    - name: JVM_OPTS
+      value: "-XX:MaxRAMPercentage=60"
 
   # Recreate, not RollingUpdate: a rolling update runs two pools against the
   # 50-connection limit at once, and the assets volume is ReadWriteOnce.
   updateStrategy:
     type: Recreate
 
+  # Measured 2026-10-09, idle after first login: 12m CPU, 1584Mi. With no
+  # limit the JVM sized its heap from the node's 16Gi; JVM_OPTS caps it at
+  # 60% of the limit, leaving the rest for metaspace and native memory.
+  resources:
+    requests: {cpu: 100m, memory: 1536Mi}
+    limits: {cpu: "1", memory: 3Gi}
+
 frontend:
   podSecurityContext: *podSecurityContext
   containerSecurityContext: *containerSecurityContext
+  # nginx; measured idle 1m CPU, 340Mi.
+  resources:
+    requests: {cpu: 10m, memory: 384Mi}
+    limits: {cpu: 250m, memory: 512Mi}
 
 exporter:
   podSecurityContext: *podSecurityContext
   containerSecurityContext: *containerSecurityContext
+  # Measured idle 1m CPU, 136Mi. The limit is sized for headless
+  # Chromium during an export, not for idle.
+  resources:
+    requests: {cpu: 10m, memory: 192Mi}
+    limits: {cpu: "1", memory: 1Gi}
 
 mcp:
   podSecurityContext: *podSecurityContext
   containerSecurityContext: *containerSecurityContext
+  # Measured idle 1m CPU, 70Mi.
+  resources:
+    requests: {cpu: 10m, memory: 96Mi}
+    limits: {cpu: 250m, memory: 256Mi}
 
 # Uploaded images and SVG clips. The component's only volume, and the
 # reason homelab.io/state is durable.

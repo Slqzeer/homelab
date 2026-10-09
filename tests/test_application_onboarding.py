@@ -928,6 +928,17 @@ class PenpotRegistrationTests(unittest.TestCase):
         self.assertIn("keycloak.keycloak.svc.cluster.local", ssrf)
         self.assertIn("keycloak.taildf6cd4.ts.net", ssrf)
 
+    def test_penpot_components_have_measured_resources(self):
+        values, = self.load("apps/penpot/values.yaml")
+        for component in ("backend", "frontend", "exporter", "mcp"):
+            resources = values[component]["resources"]
+            for kind in ("requests", "limits"):
+                self.assertEqual({"cpu", "memory"}, set(resources[kind]),
+                                 f"{component}.{kind}")
+        # Without a cap the JVM sizes its heap from the node, not the limit.
+        env = {entry["name"]: entry for entry in values["backend"]["extraEnvs"]}
+        self.assertIn("MaxRAMPercentage", env["JVM_OPTS"]["value"])
+
     def test_penpot_pods_satisfy_restricted_pod_security(self):
         # Checked on values, not on a render: CI has no helm. Chart 1.11.3
         # copies each component's two blocks verbatim into its Deployment
