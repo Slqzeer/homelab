@@ -34,9 +34,10 @@ and backed up by the agent platform, not by this repository.
 
 Read-only end to end: the dashboard has no write route, and the relay denies
 everything but GET/HEAD. It has **no login**: it is reachable from the tailnet
-only (`https://routeplane.taildf6cd4.ts.net`) and deliberately unlisted in the
-Homelab Portal, because pages show Hermes prompts and failure excerpts. Put a
-Keycloak/oauth2-proxy login in front before ever publishing it.
+only (`https://routeplane.taildf6cd4.ts.net`). It is listed in the Homelab
+Portal for `homelab-admins` only; that hides the link from other portal users
+but does not protect the target, whose pages show Hermes prompts and failure
+excerpts. Put a Keycloak/oauth2-proxy login in front before widening access.
 
 ## Network
 
@@ -58,7 +59,8 @@ Measured use: record idle and peak memory/CPU of the relay after rollout.
 
 ## Retirement
 
-Remove `environments/homelab/apps/routeplane.yaml` and
+Disable publication (`portal.homelab.io/enabled`) first, then remove
+`environments/homelab/apps/routeplane.yaml` and
 `infrastructure/ingress/config/routeplane-ingress.yaml`, then the namespace
 entry. On the node: `systemctl --user disable --now routeplane-dashboard`.
 No data to retain here.

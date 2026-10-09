@@ -584,6 +584,9 @@ class PortalIngressPublicationTests(unittest.TestCase):
         ("argocd", "argocd"): ("Argo CD", "groups", "homelab-admins"),
         ("keycloak", "keycloak"): ("Keycloak", "groups", "homelab-admins"),
         ("penpot", "penpot"): ("Penpot", "authenticated", None),
+        # Owner-approved 2026-10-09. Exception: the target has no login of its
+        # own, the tailnet is the gate (docs/runbooks/routeplane-dashboard.md).
+        ("routeplane", "routeplane"): ("routeplane", "groups", "homelab-admins"),
     }
 
     @staticmethod
