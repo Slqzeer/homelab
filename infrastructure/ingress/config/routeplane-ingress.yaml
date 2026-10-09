@@ -1,0 +1,23 @@
+# routeplane tracking dashboard on the tailnet at https://routeplane.taildf6cd4.ts.net
+#
+# Read-only, but it shows Hermes prompts and failure excerpts and has no login of
+# its own: tailnet-only and deliberately NOT published in the Homelab Portal.
+# Served by the shared "ingress" ProxyGroup like every other Ingress here.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: routeplane
+  namespace: routeplane
+  annotations:
+    tailscale.com/proxy-group: ingress
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: routeplane
+      port:
+        number: 80
+  tls:
+    # Short name only. Becomes routeplane.taildf6cd4.ts.net via MagicDNS.
+    - hosts:
+        - routeplane
