@@ -202,7 +202,7 @@ Penpot's OIDC variables are set through the chart's `config.extraEnvs`, which
 | `PENPOT_FLAGS` | includes `enable-login-with-oidc` | chart `config.flags` |
 | `PENPOT_OIDC_CLIENT_ID` | `penpot` | non-secret, in `values.yaml` |
 | `PENPOT_OIDC_CLIENT_SECRET` | from VSO | `values.yaml` via `extraEnvs` + `secretKeyRef` |
-| `PENPOT_OIDC_BASE_URI` | `https://keycloak.taildf6cd4.ts.net/auth/realms/homelab/` | browser |
+| `PENPOT_OIDC_BASE_URI` | `https://keycloak.taildf6cd4.ts.net/realms/homelab/` | browser |
 | `PENPOT_OIDC_AUTH_URI` | tailnet authorize endpoint | **browser** |
 | `PENPOT_OIDC_TOKEN_URI` | `http://keycloak.keycloak.svc.cluster.local:.../token` | **backend** |
 | `PENPOT_OIDC_USER_URI` | in-cluster userinfo | **backend** |
