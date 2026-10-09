@@ -583,6 +583,7 @@ class PortalIngressPublicationTests(unittest.TestCase):
         ("vault", "vault"): ("Vault", "groups", "homelab-admins"),
         ("argocd", "argocd"): ("Argo CD", "groups", "homelab-admins"),
         ("keycloak", "keycloak"): ("Keycloak", "groups", "homelab-admins"),
+        ("penpot", "penpot"): ("Penpot", "authenticated", None),
     }
 
     @staticmethod
@@ -1264,7 +1265,7 @@ class PenpotRegistrationTests(unittest.TestCase):
             kustomization["resources"],
         )
 
-    def test_penpot_ingress_routes_only_the_frontend_and_is_unpublished(self):
+    def test_penpot_ingress_routes_only_the_frontend(self):
         ingress, = [item for item in self.load(
             "infrastructure/ingress/config/penpot-ingress.yaml")
             if item["kind"] == "Ingress"]
@@ -1273,9 +1274,9 @@ class PenpotRegistrationTests(unittest.TestCase):
         self.assertEqual("tailscale", ingress["spec"]["ingressClassName"])
         self.assertEqual("ingress", annotations["tailscale.com/proxy-group"])
         self.assertEqual([{"hosts": ["penpot"]}], ingress["spec"]["tls"])
-        # Unpublished until OIDC login has been verified live.
-        self.assertFalse(any(key.startswith("portal.homelab.io/")
-                             for key in annotations))
+        # Published only after OIDC login was verified live; the catalogue
+        # entry itself is checked by PortalIngressPublicationTests.
+        self.assertEqual("authenticated", annotations["portal.homelab.io/access"])
 
         # The chart names the frontend Service `penpot`, not `penpot-frontend`
         # (verified by helm template; the selector is penpot-frontend).
