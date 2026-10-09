@@ -272,7 +272,7 @@ class ClientRegistrationTests(unittest.TestCase):
         self.assertTrue(penpot["standardFlowEnabled"])
         self.assertFalse(penpot["implicitFlowEnabled"])
         self.assertEqual(
-            ["https://penpot.taildf6cd4.ts.net/api/oauth/redirect"],
+            ["https://penpot.taildf6cd4.ts.net/api/auth/oidc/callback"],
             penpot["redirectUris"],
         )
         self.assertEqual(
