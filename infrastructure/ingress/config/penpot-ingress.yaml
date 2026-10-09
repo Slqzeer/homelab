@@ -10,8 +10,8 @@
 # unauthenticated read/write access to every design file. There is
 # deliberately no second Ingress here, and no penpot-mcp route in this file.
 #
-# Deliberately NOT published in the Homelab Portal yet: publication is a
-# separate commit made once OIDC login has been verified live.
+# Published in the Homelab Portal only after Keycloak login, and the refusal
+# of password login and self-registration, were verified on the live cluster.
 #
 # The backend Service is `penpot` (the chart's frontend Service), not
 # `penpot-frontend`: that string is the frontend pods' selector label.
@@ -22,6 +22,25 @@ metadata:
   namespace: penpot
   annotations:
     tailscale.com/proxy-group: ingress
+    # `authenticated`, not `public`: Penpot is a design tool holding real
+    # work and Keycloak is its only sign-in path. It sets no
+    # portal.homelab.io/groups, which the validator rejects for non-group
+    # access.
+    #
+    # icon is `generic`, not `penpot`: the portal's known icon set is
+    # {argocd, generic, grafana, keycloak, kubernetes, prometheus, tailscale,
+    # vault} and the portal excludes metadata it does not recognise. A future
+    # Penpot glyph means adding it to that set and to the test.
+    #
+    # order 60 follows Keycloak's 50, placing Penpot after the identity and
+    # infrastructure entries.
+    portal.homelab.io/enabled: "true"
+    portal.homelab.io/name: Penpot
+    portal.homelab.io/description: Open-source design platform with MCP access
+    portal.homelab.io/category: Design
+    portal.homelab.io/icon: generic
+    portal.homelab.io/access: authenticated
+    portal.homelab.io/order: "60"
 spec:
   ingressClassName: tailscale
   defaultBackend:
