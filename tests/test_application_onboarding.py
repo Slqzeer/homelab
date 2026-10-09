@@ -906,6 +906,13 @@ class PenpotRegistrationTests(unittest.TestCase):
             self.assertIn(
                 "keycloak.keycloak.svc.cluster.local", env[name]["value"], name,
             )
+        # This Keycloak serves realms at /realms/<realm>; the legacy /auth
+        # prefix answers 404, so the login redirect would dead-end.
+        for name in ("PENPOT_OIDC_BASE_URI", "PENPOT_OIDC_AUTH_URI",
+                     "PENPOT_OIDC_TOKEN_URI", "PENPOT_OIDC_USER_URI",
+                     "PENPOT_OIDC_JWKS_URI"):
+            self.assertIn("/realms/homelab/", env[name]["value"], name)
+            self.assertNotIn("/auth/realms/", env[name]["value"], name)
         ssrf = env["PENPOT_SSRF_ALLOWED_HOSTS"]["value"].split()
         self.assertIn("keycloak.keycloak.svc.cluster.local", ssrf)
         self.assertIn("keycloak.taildf6cd4.ts.net", ssrf)
