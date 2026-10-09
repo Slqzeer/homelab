@@ -170,6 +170,18 @@ backend:
       value: preferred_username
     - name: PENPOT_OIDC_EMAIL_ATTR
       value: email
+    # The shared PostgreSQL allows 50 connections in all. Penpot's pool
+    # defaults to 60 and opens them eagerly (min defaults to max), which
+    # took 44 slots and left the next backend pod unable to start.
+    - name: PENPOT_DATABASE_MAX_POOL_SIZE
+      value: "10"
+    - name: PENPOT_DATABASE_MIN_POOL_SIZE
+      value: "2"
+
+  # Recreate, not RollingUpdate: a rolling update runs two pools against the
+  # 50-connection limit at once, and the assets volume is ReadWriteOnce.
+  updateStrategy:
+    type: Recreate
 
 frontend:
   podSecurityContext: *podSecurityContext
