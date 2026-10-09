@@ -913,6 +913,16 @@ class PenpotRegistrationTests(unittest.TestCase):
                      "PENPOT_OIDC_JWKS_URI"):
             self.assertIn("/realms/homelab/", env[name]["value"], name)
             self.assertNotIn("/auth/realms/", env[name]["value"], name)
+        # The shared PostgreSQL allows 50 connections in all. Penpot's pool
+        # defaults to 60 and fills eagerly, which starved every other client.
+        self.assertLessEqual(int(env["PENPOT_DATABASE_MAX_POOL_SIZE"]["value"]), 10)
+        self.assertLessEqual(
+            int(env["PENPOT_DATABASE_MIN_POOL_SIZE"]["value"]),
+            int(env["PENPOT_DATABASE_MAX_POOL_SIZE"]["value"]),
+        )
+        # A rolling update would run two pools at once against that limit,
+        # and the assets volume is ReadWriteOnce anyway.
+        self.assertEqual({"type": "Recreate"}, values["backend"]["updateStrategy"])
         ssrf = env["PENPOT_SSRF_ALLOWED_HOSTS"]["value"].split()
         self.assertIn("keycloak.keycloak.svc.cluster.local", ssrf)
         self.assertIn("keycloak.taildf6cd4.ts.net", ssrf)
