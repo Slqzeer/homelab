@@ -1,0 +1,131 @@
+# routeplane dashboard relay: tailnet -> this pod -> the dashboard process on the node.
+#
+# The dashboard (/srv/projects/agent-platform/routeplane/dashboard.py) reads the
+# Hermes gateway's SQLite store in the user's home, which a `restricted` pod cannot
+# mount, so it stays a host process (user service `routeplane-dashboard`, bound to
+# 10.42.0.1:8765 -- reachable from pods, not from the LAN). A selectorless Service
+# with an EndpointSlice would need no pod, but Argo CD excludes EndpointSlices by
+# default, so this unprivileged nginx carries the hop instead.
+#
+# Read-only end to end: the dashboard has no write route (POST is 405). It has no
+# login either: tailnet-only, unlisted in the portal.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: routeplane-relay
+  namespace: routeplane
+data:
+  nginx.conf: |
+    worker_processes 1;
+    pid /tmp/nginx.pid;
+    error_log /dev/stderr warn;
+    events { worker_connections 256; }
+    http {
+      client_body_temp_path /tmp/client_temp;
+      proxy_temp_path /tmp/proxy_temp;
+      fastcgi_temp_path /tmp/fastcgi_temp;
+      uwsgi_temp_path /tmp/uwsgi_temp;
+      scgi_temp_path /tmp/scgi_temp;
+      server_tokens off;
+      # Path only, never the query string or headers.
+      log_format json escape=json '{"time":"$time_iso8601","method":"$request_method",'
+                                  '"path":"$uri","status":$status,"upstream_s":"$upstream_response_time"}';
+      access_log /dev/stdout json;
+      server {
+        listen 8080;
+        location = /healthz { access_log off; return 200 "ok\n"; }
+        # Ready only while the host process answers, so Argo shows a stopped dashboard.
+        location = /readyz {
+          access_log off;
+          proxy_pass http://10.42.0.1:8765/api/workers.json;
+          proxy_connect_timeout 2s;
+          proxy_read_timeout 5s;
+        }
+        location / {
+          limit_except GET HEAD { deny all; }
+          proxy_pass http://10.42.0.1:8765;
+          proxy_set_header Host $host;
+          proxy_connect_timeout 3s;
+          proxy_read_timeout 30s;
+        }
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: routeplane-relay
+  namespace: routeplane
+  labels:
+    app: routeplane-relay
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: routeplane-relay
+  template:
+    metadata:
+      labels:
+        app: routeplane-relay
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101          # `nginx` in the image
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: nginx
+          image: "docker.io/nginxinc/nginx-unprivileged:1.30.5-alpine@sha256:\
+            15c994d10d6d78658721c3bcafff14cb281fba2a4bdf9d5ba92c416a472516e3"
+          # Skip the image's entrypoint scripts: they rewrite /etc/nginx, which is read-only here.
+          command: ["nginx", "-g", "daemon off;"]
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 15
+            timeoutSeconds: 6
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 30
+          resources:
+            requests: {cpu: 5m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 32Mi}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: routeplane-relay
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: routeplane
+  namespace: routeplane
+  labels:
+    app: routeplane-relay
+spec:
+  selector:
+    app: routeplane-relay
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

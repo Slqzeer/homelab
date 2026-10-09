@@ -65,6 +65,7 @@ jobs:
           kustomize build apps/tle-dev/config > rendered/tle-dev-config.yaml
           kustomize build apps/omniroute/config > rendered/omniroute-config.yaml
           kustomize build apps/penpot/config > rendered/penpot-config.yaml
+          kustomize build apps/routeplane/config > rendered/routeplane-config.yaml
 
       - name: Validate manifests
         # -strict rejects unknown fields. Without it a typo like `replicaz:`

@@ -1,0 +1,36 @@
+# routeplane tracking dashboard relay (agent platform, /srv/projects/agent-platform).
+#
+# Wave 23: needs only its namespace (wave 0); the Ingress lives in ingress-config.
+# Same reasoning as the wave-23 group in README.md. Nothing depends on it.
+#
+# Third-party image, no product repo of ours: the site manifests live in
+# apps/routeplane/config and pin the upstream image by tag AND digest. The
+# dashboard itself is a host process (routeplane/install.sh in agent-platform).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: routeplane
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "23"
+    homelab.io/onboarding-contract: v1
+    homelab.io/owner: personal-applications
+    homelab.io/state: stateless
+    homelab.io/image-tag: "1.30.5-alpine"
+    homelab.io/image-digest: >-
+      sha256:15c994d10d6d78658721c3bcafff14cb281fba2a4bdf9d5ba92c416a472516e3
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:Slqzeer/homelab.git
+    targetRevision: main
+    path: apps/routeplane/config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: routeplane
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
