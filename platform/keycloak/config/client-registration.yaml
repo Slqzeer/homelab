@@ -35,7 +35,7 @@ data:
     # Arguments are positional: client_id, secret env var, display name,
     # origin, callback path, logout path. The origin and the OIDC callback
     # path are per entry, never constants inside this function: Penpot's
-    # callback is /api/oauth/redirect, which is NOT the portal's
+    # callback is /api/auth/oidc/callback, which is NOT the portal's
     # /auth/callback, and a shared constant would rewrite the portal's.
     reconcile_client() {
       client_id=$1 secret_var=$2 display_name=$3 origin=$4
@@ -188,7 +188,7 @@ data:
     # application root rather than a logout route.
     if [ -n "${PENPOT_CLIENT_SECRET:-}" ]; then
       reconcile_client penpot PENPOT_CLIENT_SECRET "Penpot" \
-        https://penpot.taildf6cd4.ts.net /api/oauth/redirect /
+        https://penpot.taildf6cd4.ts.net /api/auth/oidc/callback /
     else
       echo "WARNING: penpot client skipped: Secret keycloak-penpot-client is" \
         "not projected yet. Re-sync the keycloak Application after the" \

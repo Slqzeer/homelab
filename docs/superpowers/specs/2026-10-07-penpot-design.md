@@ -210,7 +210,7 @@ Penpot's OIDC variables are set through the chart's `config.extraEnvs`, which
 | `PENPOT_SSRF_ALLOWED_HOSTS` | both hostnames | backend |
 
 Callback URI registered in Keycloak:
-`https://penpot.taildf6cd4.ts.net/api/oauth/redirect`.
+`https://penpot.taildf6cd4.ts.net/api/auth/oidc/callback`.
 
 Keycloak is the only way in. Penpot 2.18.3 enables registration and password
 login by default, so leaving those flags out does not turn them off: the flags
