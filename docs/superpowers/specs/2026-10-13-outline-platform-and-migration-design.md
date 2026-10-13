@@ -1,7 +1,7 @@
 # Outline Platform and Documentation Migration Design
 
 Date: 2026-10-13
-Status: draft for written review
+Status: approved 2026-10-14
 
 ## Purpose
 
