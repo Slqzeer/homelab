@@ -103,6 +103,7 @@ MEMBERS='
 '
 
 lines() {{ printf '%s\\n' "$1" | grep -v '^$'; }}
+same_file() {{ [ "$(cat "$1")" = "$(cat "$2")" ]; }}
 
 "$KCADM" config credentials \\
   --server http://keycloak.keycloak.svc.cluster.local:8080 \\
@@ -158,7 +159,7 @@ reconcile_client() {{
     done
 
   while IFS= read -r bundle; do
-    lines "$MEMBERS" | awk -F'|' -v bundle="$bundle" '$1 == bundle {{print $2}}' |
+    lines "$MEMBERS" | grep -F "${{bundle}}|" | cut -d'|' -f2 |
       sort > "$WORK/want-$bundle"
     composite_names "$client_uuid" "$bundle" > "$WORK/have-$bundle"
     while IFS= read -r member; do
@@ -181,13 +182,13 @@ reconcile_client() {{
   done < "$WORK/stale-roles"
 
   role_names "$client_uuid" > "$WORK/have-roles"
-  cmp -s "$WORK/want-roles" "$WORK/have-roles" || {{
+  same_file "$WORK/want-roles" "$WORK/have-roles" || {{
     echo "$client_id roles differ from manifest" >&2
     exit 1
   }}
   while IFS= read -r bundle; do
     composite_names "$client_uuid" "$bundle" > "$WORK/have-$bundle"
-    cmp -s "$WORK/want-$bundle" "$WORK/have-$bundle" || {{
+    same_file "$WORK/want-$bundle" "$WORK/have-$bundle" || {{
       echo "$client_id composite $bundle differs from manifest" >&2
       exit 1
     }}

@@ -253,6 +253,8 @@ class ClientRegistrationTests(unittest.TestCase):
         self.assertIn("TLE_ADMIN_CLIENT_IDS", script)
         self.assertNotIn("tle-operator", script)
         self.assertNotIn('kc get roles', script)
+        self.assertNotIn("awk ", script)
+        self.assertNotIn("cmp -s", script)
 
     def run_tle_role_reconciler(self, state, *, client_ids="tle-admin-dev tle-admin-prod"):
         manifest = ROOT / "apps/tle-dev/deploy-info/role-manifest.json"
