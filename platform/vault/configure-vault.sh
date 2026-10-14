@@ -397,6 +397,22 @@ else
 fi
 rm -f "$KC_PORTAL_SECRET_FILE" "$PORTAL_SESSION_FILE" "$PORTAL_EXISTING_FILE" "$PORTAL_PATH_FILE" "$PORTAL_READ_ERROR_FILE"
 
+echo "==> seeding TLE admin client secrets"
+# Keycloak alone reads these credentials until the corresponding admin UI is
+# deployed. Keep one secret per environment; neither is shared with the other
+# client or written to the terminal/command line.
+for TLE_CLIENT_PATH in homelab/tle-admin-dev-client homelab/tle-admin-prod-client; do
+  if vault kv get "$TLE_CLIENT_PATH" >/dev/null 2>&1; then
+    echo "    $TLE_CLIENT_PATH already present, leaving it alone"
+    continue
+  fi
+  TLE_CLIENT_SECRET_FILE=$(mktemp)
+  head -c 512 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 48 >"$TLE_CLIENT_SECRET_FILE"
+  vault kv put "$TLE_CLIENT_PATH" clientSecret=@"$TLE_CLIENT_SECRET_FILE" >/dev/null
+  rm -f "$TLE_CLIENT_SECRET_FILE"
+  echo "    generated $TLE_CLIENT_PATH client secret"
+done
+
 echo "==> policy vso-keycloak-read"
 # Grants all four paths the Keycloak pod needs, so its one ServiceAccount needs
 # one role. The data/ segment is REQUIRED and is not a typo -- see the note
@@ -422,6 +438,14 @@ path "homelab/data/keycloak-portal" {
 # well -- neither of which Keycloak has any use for. One credential,
 # one path; the same separation homelab/keycloak-portal makes for the portal.
 path "homelab/data/penpot-client" {
+  capabilities = ["read"]
+}
+
+path "homelab/data/tle-admin-dev-client" {
+  capabilities = ["read"]
+}
+
+path "homelab/data/tle-admin-prod-client" {
   capabilities = ["read"]
 }
 POLICY

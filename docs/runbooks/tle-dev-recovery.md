@@ -44,7 +44,9 @@ Canonical ordered checklist: `docs/runbooks/tle-dev-vault-ceremony.md`
 policies/roles (`vso-tle-dev-auth/data/misc` in `tle-dev`, `vso-tle-dev-db`
 in `databases`), generated db passwords + CSRF/internal/webhook secrets,
 and `disabled` placeholders for product-issued keys. Run it first (inside
-vault-0); it never overwrites.
+vault-0); it never overwrites. It also creates the independent Keycloak
+client secrets for `tle-admin-dev` and `tle-admin-prod`; Keycloak's VSO role
+can read only those two paths for TLE administration.
 
 Product-issued values (JWT private key, MinIO pair, enabled OAuth/push
 providers) are then patched over the placeholders, never typed on a
@@ -56,10 +58,25 @@ workloads can run; sync alone is not enough.
 
 ## Upgrade / rollback
 
-1. Vendor new deploy-info; diff strip set + routes + config keys.
+1. Vendor new deploy-info; diff strip set + routes + config keys. When its
+   `role-manifest.json` changes, regenerate the automatic Keycloak role
+   reconciliation ConfigMap and commit it with the release pin:
+
+   ```bash
+   python3 platform/keycloak/tle-operator/generate.py \
+     apps/tle-dev/deploy-info/role-manifest.json \
+     platform/keycloak/config/tle-admin-role-reconciliation.yaml
+   ```
+
 2. Pin new `tag@digest`s in this table; update workload images.
-3. `kubectl -n argocd get app tle-dev`; validate + live-check below.
-4. Rollback target: previous row of this table (immutable revision).
+3. Sync Keycloak as well as `tle-dev`, then verify the Keycloak PostSync Job
+   completed: `kubectl -n keycloak get job keycloak-client-registration` and
+   `kubectl -n keycloak logs job/keycloak-client-registration`. The Job
+   registers `tle-admin-dev` and `tle-admin-prod` and reconciles their roles
+   from the pinned manifest. Group-to-composite assignment remains a manual
+   Keycloak-console operation.
+4. `kubectl -n argocd get app tle-dev`; validate + live-check below.
+5. Rollback target: previous row of this table (immutable revision).
    Stateful rollback: Postgres restores may be required on schema change;
    Valkey/NATS roll back by recreation (reconstructible).
 
@@ -72,6 +89,8 @@ workloads can run; sync alone is not enough.
 ## Live acceptance evidence (promotion gate)
 
 - [ ] Operator in admin-composite group signs in via Keycloak, sees admin tools
+- [ ] `tle-admin-dev` and `tle-admin-prod` registration Job succeeded; their
+      callbacks use `/auth/callback` and roles match the pinned manifest
 - [ ] Operator without TLE roles refused
 - [ ] Player token refused by rotation endpoint (`AUTH_FORBIDDEN`); no token → 401
 - [ ] `/auth/admin/rotate-key/promote` unreachable via tailnet host

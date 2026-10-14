@@ -48,6 +48,22 @@ elif args[:2] == ["get", "clients"]:
     allowed = os.environ.get("FAKE_ALLOWLIST", "homelab-portal,penpot").split(",")
     print(json.dumps([{"id": c["id"], "clientId": c["clientId"]}
                       for c in state if c["clientId"] in allowed]))
+elif args[0] == "get" and args[1].startswith("clients/") and "/roles" in args[1]:
+    parts = args[1].split("/")
+    uuid = parts[1]
+    client = next(c for c in state if c["id"] == uuid)
+    roles = client.setdefault("_roles", {})
+    if len(parts) == 3:
+        print(json.dumps([{k: v for k, v in role.items() if k != "composites"}
+                          for role in roles.values()]))
+    elif len(parts) == 4:
+        print(json.dumps({k: v for k, v in roles[parts[3]].items()
+                          if k != "composites"}))
+    elif len(parts) == 5 and parts[4] == "composites":
+        print(json.dumps([{k: v for k, v in roles[name].items() if k != "composites"}
+                          for name in roles[parts[3]].get("composites", [])]))
+    else:
+        sys.exit(19)
 elif args[0] == "get" and args[1].endswith("/client-secret"):
     uuid = args[1].split("/")[1]
     print(json.dumps({"value": next(c["secret"] for c in state if c["id"] == uuid)}))
@@ -71,6 +87,34 @@ elif args[:2] == ["create", "clients"]:
     body["id"] = "created-" + body["clientId"]
     body["_default_scopes"] = ["profile", "email"]
     state.append(body)
+elif args[0] == "create" and args[1].startswith("clients/") and "/roles" in args[1]:
+    parts = args[1].split("/")
+    uuid = parts[1]
+    client = next(c for c in state if c["id"] == uuid)
+    roles = client.setdefault("_roles", {})
+    body = json.load(sys.stdin)
+    if len(parts) == 3:
+        roles[body["name"]] = {"id": body["name"] + "-id", "name": body["name"],
+                               "description": body.get("description", ""), "composites": []}
+    elif len(parts) == 5 and parts[4] == "composites":
+        roles[parts[3]].setdefault("composites", []).extend(
+            member["name"] for member in body if member["name"] not in roles[parts[3]].get("composites", []))
+    else:
+        sys.exit(20)
+elif args[0] == "delete" and args[1].startswith("clients/") and "/roles" in args[1]:
+    parts = args[1].split("/")
+    uuid = parts[1]
+    client = next(c for c in state if c["id"] == uuid)
+    roles = client.setdefault("_roles", {})
+    if len(parts) == 4:
+        del roles[parts[3]]
+    elif len(parts) == 5 and parts[4] == "composites":
+        body = json.load(sys.stdin)
+        remove = {member["name"] for member in body}
+        roles[parts[3]]["composites"] = [name for name in roles[parts[3]].get("composites", [])
+                                          if name not in remove]
+    else:
+        sys.exit(21)
 elif args[0] == "update" and args[1].startswith("clients/"):
     uuid = args[1].split("/")[1]
     client = next(c for c in state if c["id"] == uuid)
@@ -167,13 +211,132 @@ REDIS_PATH = {"username": "default", "password": REDIS_PASSWORD}
 
 
 class ClientRegistrationTests(unittest.TestCase):
+    def test_tle_admin_reconciliation_documentation_contract(self):
+        readme = (ROOT / "platform/keycloak/README.md").read_text(encoding="utf-8")
+        runbook = (ROOT / "docs/runbooks/tle-dev-recovery.md").read_text(encoding="utf-8")
+
+        for client_id in ("tle-admin-dev", "tle-admin-prod"):
+            self.assertIn(client_id, readme)
+        self.assertIn("apps/tle-dev/deploy-info/role-manifest.json", readme)
+        self.assertIn("tle-admin-role-reconciliation.yaml", readme)
+        self.assertIn("python3 platform/keycloak/tle-operator/generate.py", readme)
+        self.assertIn("Keycloak console", readme)
+        self.assertIn("group", readme)
+        self.assertIn("reconciles their roles", runbook)
+        self.assertIn("tle-admin-role-reconciliation.yaml", runbook)
+
+    def test_tle_admin_role_reconciler_is_generated_as_a_configmap(self):
+        manifest = ROOT / "apps/tle-dev/deploy-info/role-manifest.json"
+        generator = ROOT / "platform/keycloak/tle-operator/generate.py"
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "tle-admin-role-reconciliation.yaml"
+            result = subprocess.run(
+                ["python3", str(generator), str(manifest), str(output)],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            try:
+                docs = list(yaml.safe_load_all(output.read_text(encoding="utf-8")))
+            except yaml.YAMLError as error:
+                self.fail(f"generator did not emit a YAML ConfigMap: {error}")
+
+        self.assertEqual(1, len(docs))
+        config_map = docs[0]
+        self.assertIsInstance(config_map, dict)
+        self.assertEqual("ConfigMap", config_map["kind"])
+        self.assertEqual("keycloak-tle-admin-role-reconciliation",
+                         config_map["metadata"]["name"])
+        script = config_map["data"]["reconcile-tle-admin-roles.sh"]
+        self.assertIn("manifest_version 1", script)
+        self.assertIn("TLE_ADMIN_CLIENT_IDS", script)
+        self.assertNotIn("tle-operator", script)
+        self.assertNotIn('kc get roles', script)
+
+    def run_tle_role_reconciler(self, state, *, client_ids="tle-admin-dev tle-admin-prod"):
+        manifest = ROOT / "apps/tle-dev/deploy-info/role-manifest.json"
+        generator = ROOT / "platform/keycloak/tle-operator/generate.py"
+        with tempfile.TemporaryDirectory() as directory:
+            temp = Path(directory)
+            output = temp / "tle-admin-role-reconciliation.yaml"
+            subprocess.run(["python3", str(generator), str(manifest), str(output)], check=True)
+            config_map = yaml.safe_load(output.read_text(encoding="utf-8"))
+            script = temp / "reconcile-tle-admin-roles.sh"
+            script.write_text(config_map["data"]["reconcile-tle-admin-roles.sh"], encoding="utf-8")
+            script.chmod(0o700)
+            fake = temp / "kcadm.sh"
+            fake.write_text(FAKE_KCADM, encoding="utf-8")
+            fake.chmod(0o700)
+            state_path = temp / "state.json"
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+            events_path = temp / "events.jsonl"
+            env = dict(os.environ, FAKE_STATE=str(state_path), FAKE_EVENTS=str(events_path),
+                       FAKE_ALLOWLIST="tle-admin-dev,tle-admin-prod,unrelated",
+                       KC_ADMIN_USERNAME="admin", KC_CLI_PASSWORD="admin-canary-secret",
+                       KCADM=str(fake), JQ="/usr/bin/jq", TLE_ADMIN_CLIENT_IDS=client_ids)
+            run = subprocess.run(["/bin/sh", str(script)], env=env, text=True,
+                                 capture_output=True, check=False)
+            events = [json.loads(line) for line in events_path.read_text().splitlines()]
+            return run, json.loads(state_path.read_text()), events
+
+    def test_tle_role_reconciler_makes_only_tle_client_roles_exact(self):
+        manifest = json.loads((ROOT / "apps/tle-dev/deploy-info/role-manifest.json").read_text())
+        wanted = {capability["name"] for capability in manifest["capabilities"]}
+        wanted.update(composite["name"] for composite in manifest["composites"])
+        stale = {"id": "stale-id", "name": "stale", "description": "stale", "composites": []}
+        support = {"id": "support-id", "name": "support", "description": "old",
+                   "composites": ["stale"]}
+        state = [
+            {"id": "dev-id", "clientId": "tle-admin-dev", "secret": "dev",
+             "_roles": {"stale": stale, "support": support}},
+            {"id": "prod-id", "clientId": "tle-admin-prod", "secret": "prod",
+             "_roles": {"stale": dict(stale), "support": dict(support)}},
+            {"id": "other-id", "clientId": "unrelated", "secret": "other",
+             "_roles": {"stale": dict(stale)}},
+        ]
+
+        run, converged, events = self.run_tle_role_reconciler(state)
+
+        self.assertEqual(0, run.returncode, run.stderr)
+        for client_id in ("tle-admin-dev", "tle-admin-prod"):
+            client = next(item for item in converged if item["clientId"] == client_id)
+            self.assertEqual(wanted, set(client["_roles"]))
+            self.assertNotIn("stale", client["_roles"]["support"]["composites"])
+        unrelated = next(item for item in converged if item["clientId"] == "unrelated")
+        self.assertEqual({"stale"}, set(unrelated["_roles"]))
+        paths = [event["args"][1] for event in events if len(event["args"]) > 1]
+        self.assertFalse(any(path.startswith("roles/") or "/users" in path or "/groups" in path
+                             for path in paths), paths)
+
+    def test_tle_role_reconciler_is_mounted_after_client_registration(self):
+        job = resource(CONFIG / "client-registration.yaml", "Job", "keycloak-client-registration")
+        pod = job["spec"]["template"]["spec"]
+        container = pod["containers"][0]
+        volumes = [volume for volume in pod["volumes"]
+                   if volume["name"] == "tle-admin-role-reconciler"]
+        self.assertEqual(1, len(volumes))
+        volume = volumes[0]
+        self.assertEqual("keycloak-tle-admin-role-reconciliation",
+                         volume["configMap"]["name"])
+        mounts = [mount for mount in container["volumeMounts"]
+                  if mount["name"] == "tle-admin-role-reconciler"]
+        self.assertEqual(1, len(mounts))
+        mount = mounts[0]
+        self.assertEqual("/tle-role-reconciler", mount["mountPath"])
+        self.assertTrue(mount["readOnly"])
+        env = {entry["name"]: entry for entry in container["env"]}
+        self.assertEqual("tle-admin-dev tle-admin-prod", env["TLE_ADMIN_CLIENT_IDS"]["value"])
+
     def script(self):
         manifest = CONFIG / "client-registration.yaml"
         config_map = resource(manifest, "ConfigMap", "keycloak-client-registration")
         return config_map["data"]["reconcile.sh"]
 
     def run_hook(self, state, *, fail_list=False, leak_on_create=False, scope_noop=False,
-                 penpot_secret="penpot-canary-secret"):
+                 penpot_secret="penpot-canary-secret",
+                 tle_dev_secret="tle-dev-canary-secret",
+                 tle_prod_secret="tle-prod-canary-secret"):
         with tempfile.TemporaryDirectory() as directory:
             temp = Path(directory)
             fake = temp / "kcadm.sh"
@@ -187,6 +350,10 @@ class ClientRegistrationTests(unittest.TestCase):
             self.assertIn("JQ=/tools/jq", script)
             script = script.replace("KCADM=/opt/keycloak/bin/kcadm.sh", f"KCADM={fake}")
             script = script.replace("JQ=/tools/jq", f"JQ={jq}")
+            # The generated reconciler has its own executable convergence test.
+            # Registration tests replace only its mounted invocation so they
+            # stay focused on client representation and secret handling.
+            script = script.replace("/tle-role-reconciler/reconcile-tle-admin-roles.sh", ":")
             script_path = temp / "reconcile.sh"
             script_path.write_text(script, encoding="utf-8")
             state_path = temp / "state.json"
@@ -197,7 +364,10 @@ class ClientRegistrationTests(unittest.TestCase):
                        FAKE_JQ_ARGS=str(jq_args_path), KC_ADMIN_USERNAME="admin",
                        KC_CLI_PASSWORD="admin-canary-secret",
                        PORTAL_CLIENT_SECRET="portal-canary-secret",
-                       PENPOT_CLIENT_SECRET="penpot-canary-secret")
+                       PENPOT_CLIENT_SECRET="penpot-canary-secret",
+                       TLE_ADMIN_DEV_CLIENT_SECRET=tle_dev_secret,
+                       TLE_ADMIN_PROD_CLIENT_SECRET=tle_prod_secret,
+                       FAKE_ALLOWLIST="homelab-portal,penpot,tle-admin-dev,tle-admin-prod")
             # None models the optional secretKeyRef whose Secret does not
             # exist yet: the kubelet leaves the variable unset entirely.
             if penpot_secret is None:
@@ -220,6 +390,38 @@ class ClientRegistrationTests(unittest.TestCase):
             jq_args = jq_args_path.read_text() if jq_args_path.exists() else ""
             return runs, json.loads(state_path.read_text()), events, jq_args
 
+    def test_tle_admin_clients_have_exact_origins_and_independent_secrets(self):
+        runs, state, events, jq_args = self.run_hook([])
+        self.assertEqual([0, 0], [run.returncode for run in runs], [run.stderr for run in runs])
+        clients = {client["clientId"]: client for client in state}
+        expected = {
+            "tle-admin-dev": (
+                "https://tle-dev-operator.taildf6cd4.ts.net",
+                "tle-dev-canary-secret",
+            ),
+            "tle-admin-prod": (
+                "https://tle-prod-operator.taildf6cd4.ts.net",
+                "tle-prod-canary-secret",
+            ),
+        }
+        self.assertTrue(set(expected).issubset(clients), sorted(clients))
+        for client_id, (origin, secret) in expected.items():
+            with self.subTest(client_id=client_id):
+                client = clients[client_id]
+                self.assertFalse(client["publicClient"])
+                self.assertEqual("client-secret", client["clientAuthenticatorType"])
+                self.assertEqual([origin + "/auth/callback"], client["redirectUris"])
+                self.assertEqual([origin], client["webOrigins"])
+                self.assertEqual(origin + "/", client["attributes"]["post.logout.redirect.uris"])
+                self.assertEqual(secret, client["secret"])
+        output = "".join(run.stdout + run.stderr for run in runs) + jq_args
+        for secret in expected.values():
+            self.assertNotIn(secret[1], output)
+        for event in events:
+            argv = " ".join(event["args"])
+            self.assertNotIn("tle-dev-canary-secret", argv)
+            self.assertNotIn("tle-prod-canary-secret", argv)
+
     def test_client_contract_and_second_run_converges(self):
         unrelated = {"id": "other-id", "clientId": "unrelated", "secret": "untouched"}
         runs, state, events, jq_args = self.run_hook([unrelated])
@@ -239,10 +441,10 @@ class ClientRegistrationTests(unittest.TestCase):
                          portal["attributes"]["post.logout.redirect.uris"])
         self.assertIn("groups", portal["_default_scopes"])
         writes = [event for event in events if event["args"][0] in ("create", "update")]
-        # Portal, then Penpot: one create plus one `groups` scope add each.
-        # The second run must add nothing, so four writes cover both runs.
+        # Portal, Penpot, then the two TLE clients: each needs one create and
+        # one `groups` scope add; the second run adds nothing.
         self.assertEqual(
-            ["create", "update", "create", "update"],
+            ["create", "update", "create", "update", "create", "update", "create", "update"],
             [event["args"][0] for event in writes],
         )
         self.assertEqual(
@@ -253,6 +455,10 @@ class ClientRegistrationTests(unittest.TestCase):
             "clients/created-penpot/default-client-scopes/groups-id",
             writes[3]["args"][1],
         )
+        self.assertEqual("clients/created-tle-admin-dev/default-client-scopes/groups-id",
+                         writes[5]["args"][1])
+        self.assertEqual("clients/created-tle-admin-prod/default-client-scopes/groups-id",
+                         writes[7]["args"][1])
         for event in events:
             self.assertNotIn("portal-canary-secret", " ".join(event["args"]))
             self.assertNotIn("admin-canary-secret", " ".join(event["args"]))
@@ -264,7 +470,7 @@ class ClientRegistrationTests(unittest.TestCase):
         runs, state, events, _ = self.run_hook([])
         self.assertEqual([0, 0], [run.returncode for run in runs], [run.stderr for run in runs])
         ids = sorted(client["clientId"] for client in state)
-        self.assertEqual(["homelab-portal", "penpot"], ids)
+        self.assertEqual(["homelab-portal", "penpot", "tle-admin-dev", "tle-admin-prod"], ids)
         penpot = next(client for client in state if client["clientId"] == "penpot")
         self.assertEqual("openid-connect", penpot["protocol"])
         self.assertFalse(penpot["publicClient"])
@@ -312,7 +518,7 @@ class ClientRegistrationTests(unittest.TestCase):
                 runs, state, events, _ = self.run_hook([], penpot_secret=penpot_secret)
                 self.assertEqual([0, 0], [run.returncode for run in runs],
                                  [run.stderr for run in runs])
-                self.assertEqual(["homelab-portal"],
+                self.assertEqual(["homelab-portal", "tle-admin-dev", "tle-admin-prod"],
                                  [client["clientId"] for client in state])
                 self.assertIn("groups", state[0]["_default_scopes"])
                 self.assertFalse(any("penpot" in " ".join(event["args"])
@@ -335,7 +541,8 @@ class ClientRegistrationTests(unittest.TestCase):
         # Four for the drifted portal: one representation update plus three
         # scope adds, because the fixture has no `_default_scopes` at all.
         # Two more for Penpot, which is created and then gains `groups`.
-        self.assertEqual(["update", "update", "update", "update", "create", "update"],
+        self.assertEqual(["update", "update", "update", "update", "create", "update",
+                          "create", "update", "create", "update"],
                          [event["args"][0] for event in writes])
         self.assertEqual("clients/portal-id", writes[0]["args"][1])
         self.assertIn("--merge", writes[0]["args"])
@@ -349,7 +556,7 @@ class ClientRegistrationTests(unittest.TestCase):
         self.assertEqual([0, 0], [run.returncode for run in runs], [run.stderr for run in runs])
         self.assertEqual(["profile", "email", "custom", "groups"], state[0]["_default_scopes"])
         writes = [event for event in events if event["args"][0] == "update"]
-        self.assertEqual(3, len(writes), writes)
+        self.assertEqual(5, len(writes), writes)
         self.assertEqual("clients/portal-id/default-client-scopes/groups-id", writes[1]["args"][1])
 
     def test_scope_link_must_be_verified(self):
@@ -405,6 +612,10 @@ class ClientRegistrationTests(unittest.TestCase):
         self.assertEqual("keycloak-admin", env["KC_CLI_PASSWORD"]["valueFrom"]["secretKeyRef"]["name"])
         self.assertEqual("keycloak-portal-client", env["PORTAL_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"]["name"])
         self.assertEqual("keycloak-penpot-client", env["PENPOT_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"]["name"])
+        self.assertEqual("keycloak-tle-admin-dev-client",
+                         env["TLE_ADMIN_DEV_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"]["name"])
+        self.assertEqual("keycloak-tle-admin-prod-client",
+                         env["TLE_ADMIN_PROD_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"]["name"])
         # Optional: the Secret belongs to the later penpot Application, and a
         # required reference would hold the pod in CreateContainerConfigError.
         self.assertIs(True, env["PENPOT_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"]["optional"])
@@ -439,6 +650,11 @@ class ClientRegistrationTests(unittest.TestCase):
         projection = resource(CONFIG / "vault-secrets.yaml", "VaultStaticSecret", "keycloak-portal-client")
         self.assertEqual("keycloak-portal", projection["spec"]["path"])
         self.assertEqual("keycloak-portal-client", projection["spec"]["destination"]["name"])
+        for name, path in (("keycloak-tle-admin-dev-client", "tle-admin-dev-client"),
+                           ("keycloak-tle-admin-prod-client", "tle-admin-prod-client")):
+            projection = resource(CONFIG / "vault-secrets.yaml", "VaultStaticSecret", name)
+            self.assertEqual(path, projection["spec"]["path"])
+            self.assertEqual(name, projection["spec"]["destination"]["name"])
 
     def test_vault_policy_is_narrow_and_portal_role_is_bound(self):
         script = (ROOT / "platform/vault/configure-vault.sh").read_text(encoding="utf-8")
@@ -528,6 +744,8 @@ class ClientRegistrationTests(unittest.TestCase):
         keycloak_read = script.split("vault policy write vso-keycloak-read - <<'POLICY'\n", 1)[1]
         keycloak_read = keycloak_read.split("\nPOLICY", 1)[0]
         self.assertIn('path "homelab/data/penpot-client"', keycloak_read)
+        for path in ("tle-admin-dev-client", "tle-admin-prod-client"):
+            self.assertIn(f'path "homelab/data/{path}"', keycloak_read)
         self.assertNotIn('path "homelab/data/penpot"', keycloak_read)
         self.assertNotIn("*", keycloak_read)
 
@@ -999,6 +1217,7 @@ class ClientRegistrationTests(unittest.TestCase):
                 vault.write_text(FAKE_VAULT, encoding="utf-8")
                 vault.chmod(0o700)
                 script = temp / "seed.sh"
+                seed = seed.split('echo "==> seeding TLE admin client secrets"', 1)[0]
                 script.write_text('set -eu\necho "==> seeding homelab/keycloak-portal and homelab/portal"' + seed,
                                   encoding="utf-8")
                 state_path = temp / "vault.json"
@@ -1032,7 +1251,7 @@ class ClientRegistrationTests(unittest.TestCase):
     def test_vault_transient_reads_abort_without_writes(self):
         source = (ROOT / "platform/vault/configure-vault.sh").read_text(encoding="utf-8")
         seed = source.split('echo "==> seeding homelab/keycloak-portal and homelab/portal"', 1)[1]
-        seed = seed.split('echo "==> policy vso-keycloak-read"', 1)[0]
+        seed = seed.split('echo "==> seeding TLE admin client secrets"', 1)[0]
         initial = {
             "homelab/keycloak-portal": {"clientSecret": "keycloak-canary"},
             "homelab/portal": {"oidc-client-secret": "portal-canary",

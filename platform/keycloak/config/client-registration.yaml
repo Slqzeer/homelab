@@ -18,6 +18,8 @@ data:
     : "${KC_ADMIN_USERNAME:?missing admin username}"
     : "${KC_CLI_PASSWORD:?missing admin password}"
     : "${PORTAL_CLIENT_SECRET:?missing portal client secret}"
+    : "${TLE_ADMIN_DEV_CLIENT_SECRET:?missing TLE admin dev client secret}"
+    : "${TLE_ADMIN_PROD_CLIENT_SECRET:?missing TLE admin prod client secret}"
     # PENPOT_CLIENT_SECRET is optional on purpose. Its Secret is projected by
     # the penpot Application (sync wave 25), which syncs after this hook can
     # first run; requiring it would wedge the hook, and the portal with it.
@@ -194,6 +196,11 @@ data:
         "not projected yet. Re-sync the keycloak Application after the" \
         "penpot Application's first sync." >&2
     fi
+    reconcile_client tle-admin-dev TLE_ADMIN_DEV_CLIENT_SECRET "The Last Exam Admin (dev)" \
+      https://tle-dev-operator.taildf6cd4.ts.net /auth/callback /
+    reconcile_client tle-admin-prod TLE_ADMIN_PROD_CLIENT_SECRET "The Last Exam Admin (prod)" \
+      https://tle-prod-operator.taildf6cd4.ts.net /auth/callback /
+    /tle-role-reconciler/reconcile-tle-admin-roles.sh
 ---
 apiVersion: batch/v1
 kind: Job
@@ -281,9 +288,27 @@ spec:
                   name: keycloak-penpot-client
                   key: clientSecret
                   optional: true
+            - name: TLE_ADMIN_DEV_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-tle-admin-dev-client
+                  key: clientSecret
+            - name: TLE_ADMIN_PROD_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-tle-admin-prod-client
+                  key: clientSecret
+            # The generated role reconciler accepts exactly this ordered
+            # allowlist. The client registrations themselves are added in the
+            # same Job below before the reconciler runs.
+            - name: TLE_ADMIN_CLIENT_IDS
+              value: tle-admin-dev tle-admin-prod
           volumeMounts:
             - name: script
               mountPath: /scripts
+              readOnly: true
+            - name: tle-admin-role-reconciler
+              mountPath: /tle-role-reconciler
               readOnly: true
             - name: tools
               mountPath: /tools
@@ -305,6 +330,9 @@ spec:
         - name: script
           configMap:
             name: keycloak-client-registration
+        - name: tle-admin-role-reconciler
+          configMap:
+            name: keycloak-tle-admin-role-reconciliation
         - name: jq-image
           image:
             # Official 1.8.2 multi-platform manifest digest. The amd64
