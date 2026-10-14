@@ -593,7 +593,7 @@ class ClientRegistrationTests(unittest.TestCase):
         manifest = CONFIG / "client-registration.yaml"
         job = resource(manifest, "Job", "keycloak-client-registration")
         self.assertEqual("PostSync", job["metadata"]["annotations"]["argocd.argoproj.io/hook"])
-        self.assertGreater(job["spec"]["activeDeadlineSeconds"], 0)
+        self.assertGreaterEqual(job["spec"]["activeDeadlineSeconds"], 900)
         pod = job["spec"]["template"]["spec"]
         self.assertEqual("Never", pod["restartPolicy"])
         container = pod["containers"][0]
