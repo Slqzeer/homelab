@@ -325,6 +325,8 @@ class ClientRegistrationTests(unittest.TestCase):
         mount = mounts[0]
         self.assertEqual("/tle-role-reconciler", mount["mountPath"])
         self.assertTrue(mount["readOnly"])
+        self.assertIn("/bin/sh /tle-role-reconciler/reconcile-tle-admin-roles.sh",
+                      self.script())
         env = {entry["name"]: entry for entry in container["env"]}
         self.assertEqual("tle-admin-dev tle-admin-prod", env["TLE_ADMIN_CLIENT_IDS"]["value"])
 
@@ -353,7 +355,8 @@ class ClientRegistrationTests(unittest.TestCase):
             # The generated reconciler has its own executable convergence test.
             # Registration tests replace only its mounted invocation so they
             # stay focused on client representation and secret handling.
-            script = script.replace("/tle-role-reconciler/reconcile-tle-admin-roles.sh", ":")
+            script = script.replace(
+                "/bin/sh /tle-role-reconciler/reconcile-tle-admin-roles.sh", ":")
             script_path = temp / "reconcile.sh"
             script_path.write_text(script, encoding="utf-8")
             state_path = temp / "state.json"

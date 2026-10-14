@@ -200,7 +200,7 @@ data:
       https://tle-dev-operator.taildf6cd4.ts.net /auth/callback /
     reconcile_client tle-admin-prod TLE_ADMIN_PROD_CLIENT_SECRET "The Last Exam Admin (prod)" \
       https://tle-prod-operator.taildf6cd4.ts.net /auth/callback /
-    /tle-role-reconciler/reconcile-tle-admin-roles.sh
+    /bin/sh /tle-role-reconciler/reconcile-tle-admin-roles.sh
 ---
 apiVersion: batch/v1
 kind: Job
