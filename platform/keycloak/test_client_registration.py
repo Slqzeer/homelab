@@ -48,6 +48,22 @@ elif args[:2] == ["get", "clients"]:
     allowed = os.environ.get("FAKE_ALLOWLIST", "homelab-portal,penpot").split(",")
     print(json.dumps([{"id": c["id"], "clientId": c["clientId"]}
                       for c in state if c["clientId"] in allowed]))
+elif args[0] == "get" and args[1].startswith("clients/") and "/roles" in args[1]:
+    parts = args[1].split("/")
+    uuid = parts[1]
+    client = next(c for c in state if c["id"] == uuid)
+    roles = client.setdefault("_roles", {})
+    if len(parts) == 3:
+        print(json.dumps([{k: v for k, v in role.items() if k != "composites"}
+                          for role in roles.values()]))
+    elif len(parts) == 4:
+        print(json.dumps({k: v for k, v in roles[parts[3]].items()
+                          if k != "composites"}))
+    elif len(parts) == 5 and parts[4] == "composites":
+        print(json.dumps([{k: v for k, v in roles[name].items() if k != "composites"}
+                          for name in roles[parts[3]].get("composites", [])]))
+    else:
+        sys.exit(19)
 elif args[0] == "get" and args[1].endswith("/client-secret"):
     uuid = args[1].split("/")[1]
     print(json.dumps({"value": next(c["secret"] for c in state if c["id"] == uuid)}))
@@ -71,6 +87,34 @@ elif args[:2] == ["create", "clients"]:
     body["id"] = "created-" + body["clientId"]
     body["_default_scopes"] = ["profile", "email"]
     state.append(body)
+elif args[0] == "create" and args[1].startswith("clients/") and "/roles" in args[1]:
+    parts = args[1].split("/")
+    uuid = parts[1]
+    client = next(c for c in state if c["id"] == uuid)
+    roles = client.setdefault("_roles", {})
+    body = json.load(sys.stdin)
+    if len(parts) == 3:
+        roles[body["name"]] = {"id": body["name"] + "-id", "name": body["name"],
+                               "description": body.get("description", ""), "composites": []}
+    elif len(parts) == 5 and parts[4] == "composites":
+        roles[parts[3]].setdefault("composites", []).extend(
+            member["name"] for member in body if member["name"] not in roles[parts[3]].get("composites", []))
+    else:
+        sys.exit(20)
+elif args[0] == "delete" and args[1].startswith("clients/") and "/roles" in args[1]:
+    parts = args[1].split("/")
+    uuid = parts[1]
+    client = next(c for c in state if c["id"] == uuid)
+    roles = client.setdefault("_roles", {})
+    if len(parts) == 4:
+        del roles[parts[3]]
+    elif len(parts) == 5 and parts[4] == "composites":
+        body = json.load(sys.stdin)
+        remove = {member["name"] for member in body}
+        roles[parts[3]]["composites"] = [name for name in roles[parts[3]].get("composites", [])
+                                          if name not in remove]
+    else:
+        sys.exit(21)
 elif args[0] == "update" and args[1].startswith("clients/"):
     uuid = args[1].split("/")[1]
     client = next(c for c in state if c["id"] == uuid)
@@ -167,6 +211,109 @@ REDIS_PATH = {"username": "default", "password": REDIS_PASSWORD}
 
 
 class ClientRegistrationTests(unittest.TestCase):
+    def test_tle_admin_role_reconciler_is_generated_as_a_configmap(self):
+        manifest = ROOT / "apps/tle-dev/deploy-info/role-manifest.json"
+        generator = ROOT / "platform/keycloak/tle-operator/generate.py"
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "tle-admin-role-reconciliation.yaml"
+            result = subprocess.run(
+                ["python3", str(generator), str(manifest), str(output)],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            try:
+                docs = list(yaml.safe_load_all(output.read_text(encoding="utf-8")))
+            except yaml.YAMLError as error:
+                self.fail(f"generator did not emit a YAML ConfigMap: {error}")
+
+        self.assertEqual(1, len(docs))
+        config_map = docs[0]
+        self.assertIsInstance(config_map, dict)
+        self.assertEqual("ConfigMap", config_map["kind"])
+        self.assertEqual("keycloak-tle-admin-role-reconciliation",
+                         config_map["metadata"]["name"])
+        script = config_map["data"]["reconcile-tle-admin-roles.sh"]
+        self.assertIn("manifest_version 1", script)
+        self.assertIn("TLE_ADMIN_CLIENT_IDS", script)
+        self.assertNotIn("tle-operator", script)
+        self.assertNotIn('kc get roles', script)
+
+    def run_tle_role_reconciler(self, state, *, client_ids="tle-admin-dev tle-admin-prod"):
+        manifest = ROOT / "apps/tle-dev/deploy-info/role-manifest.json"
+        generator = ROOT / "platform/keycloak/tle-operator/generate.py"
+        with tempfile.TemporaryDirectory() as directory:
+            temp = Path(directory)
+            output = temp / "tle-admin-role-reconciliation.yaml"
+            subprocess.run(["python3", str(generator), str(manifest), str(output)], check=True)
+            config_map = yaml.safe_load(output.read_text(encoding="utf-8"))
+            script = temp / "reconcile-tle-admin-roles.sh"
+            script.write_text(config_map["data"]["reconcile-tle-admin-roles.sh"], encoding="utf-8")
+            script.chmod(0o700)
+            fake = temp / "kcadm.sh"
+            fake.write_text(FAKE_KCADM, encoding="utf-8")
+            fake.chmod(0o700)
+            state_path = temp / "state.json"
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+            events_path = temp / "events.jsonl"
+            env = dict(os.environ, FAKE_STATE=str(state_path), FAKE_EVENTS=str(events_path),
+                       FAKE_ALLOWLIST="tle-admin-dev,tle-admin-prod,unrelated",
+                       KC_ADMIN_USERNAME="admin", KC_CLI_PASSWORD="admin-canary-secret",
+                       KCADM=str(fake), JQ="/usr/bin/jq", TLE_ADMIN_CLIENT_IDS=client_ids)
+            run = subprocess.run(["/bin/sh", str(script)], env=env, text=True,
+                                 capture_output=True, check=False)
+            events = [json.loads(line) for line in events_path.read_text().splitlines()]
+            return run, json.loads(state_path.read_text()), events
+
+    def test_tle_role_reconciler_makes_only_tle_client_roles_exact(self):
+        manifest = json.loads((ROOT / "apps/tle-dev/deploy-info/role-manifest.json").read_text())
+        wanted = {capability["name"] for capability in manifest["capabilities"]}
+        wanted.update(composite["name"] for composite in manifest["composites"])
+        stale = {"id": "stale-id", "name": "stale", "description": "stale", "composites": []}
+        support = {"id": "support-id", "name": "support", "description": "old",
+                   "composites": ["stale"]}
+        state = [
+            {"id": "dev-id", "clientId": "tle-admin-dev", "secret": "dev",
+             "_roles": {"stale": stale, "support": support}},
+            {"id": "prod-id", "clientId": "tle-admin-prod", "secret": "prod",
+             "_roles": {"stale": dict(stale), "support": dict(support)}},
+            {"id": "other-id", "clientId": "unrelated", "secret": "other",
+             "_roles": {"stale": dict(stale)}},
+        ]
+
+        run, converged, events = self.run_tle_role_reconciler(state)
+
+        self.assertEqual(0, run.returncode, run.stderr)
+        for client_id in ("tle-admin-dev", "tle-admin-prod"):
+            client = next(item for item in converged if item["clientId"] == client_id)
+            self.assertEqual(wanted, set(client["_roles"]))
+            self.assertNotIn("stale", client["_roles"]["support"]["composites"])
+        unrelated = next(item for item in converged if item["clientId"] == "unrelated")
+        self.assertEqual({"stale"}, set(unrelated["_roles"]))
+        paths = [event["args"][1] for event in events if len(event["args"]) > 1]
+        self.assertFalse(any(path.startswith("roles/") or "/users" in path or "/groups" in path
+                             for path in paths), paths)
+
+    def test_tle_role_reconciler_is_mounted_after_client_registration(self):
+        job = resource(CONFIG / "client-registration.yaml", "Job", "keycloak-client-registration")
+        pod = job["spec"]["template"]["spec"]
+        container = pod["containers"][0]
+        volumes = [volume for volume in pod["volumes"]
+                   if volume["name"] == "tle-admin-role-reconciler"]
+        self.assertEqual(1, len(volumes))
+        volume = volumes[0]
+        self.assertEqual("keycloak-tle-admin-role-reconciliation",
+                         volume["configMap"]["name"])
+        mounts = [mount for mount in container["volumeMounts"]
+                  if mount["name"] == "tle-admin-role-reconciler"]
+        self.assertEqual(1, len(mounts))
+        mount = mounts[0]
+        self.assertEqual("/tle-role-reconciler", mount["mountPath"])
+        self.assertTrue(mount["readOnly"])
+        env = {entry["name"]: entry for entry in container["env"]}
+        self.assertEqual("tle-admin-dev tle-admin-prod", env["TLE_ADMIN_CLIENT_IDS"]["value"])
+
     def script(self):
         manifest = CONFIG / "client-registration.yaml"
         config_map = resource(manifest, "ConfigMap", "keycloak-client-registration")

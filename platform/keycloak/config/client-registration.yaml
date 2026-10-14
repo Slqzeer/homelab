@@ -281,9 +281,17 @@ spec:
                   name: keycloak-penpot-client
                   key: clientSecret
                   optional: true
+            # The generated role reconciler accepts exactly this ordered
+            # allowlist. The client registrations themselves are added in the
+            # same Job below before the reconciler runs.
+            - name: TLE_ADMIN_CLIENT_IDS
+              value: tle-admin-dev tle-admin-prod
           volumeMounts:
             - name: script
               mountPath: /scripts
+              readOnly: true
+            - name: tle-admin-role-reconciler
+              mountPath: /tle-role-reconciler
               readOnly: true
             - name: tools
               mountPath: /tools
@@ -305,6 +313,9 @@ spec:
         - name: script
           configMap:
             name: keycloak-client-registration
+        - name: tle-admin-role-reconciler
+          configMap:
+            name: keycloak-tle-admin-role-reconciliation
         - name: jq-image
           image:
             # Official 1.8.2 multi-platform manifest digest. The amd64
