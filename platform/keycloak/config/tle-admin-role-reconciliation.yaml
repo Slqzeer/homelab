@@ -98,11 +98,16 @@ data:
     admin.valkey.evict|TLE capability (write): valkey-administration
     admin.valkey.read|TLE capability (read): valkey-administration
     '
-    BUNDLES='
-    support|Player support and moderation: reads player-facing state, revokes player sessions, moderates lobby and social.
-    operator|Day-to-day live operations: support plus infrastructure reads, player corrections, queue and match interventions, content drafting and replays.
-    admin|Platform owner: every operator capability, including key rotation, kill switch, publishing and activation, destructive infrastructure actions and policy changes.
-    '
+    BUNDLES=$(printf '%s\n' \
+    'support|Player support and moderation: reads player-facing state, revo'\
+    'kes player sessions, moderates lobby and social.' \
+    'operator|Day-to-day live operations: support plus infrastructure reads'\
+    ', player corrections, queue and match interventions, content drafting '\
+    'and replays.' \
+    'admin|Platform owner: every operator capability, including key rotatio'\
+    'n, kill switch, publishing and activation, destructive infrastructure '\
+    'actions and policy changes.'
+    )
     MEMBERS='
     support|admin.auth.read
     support|admin.auth.sessions.read

@@ -38,6 +38,28 @@ members = "\n".join(
 for value in (capabilities, bundles, members):
     assert "'" not in value, "single quote would break the shell literal"
 
+
+def shell_printf_arguments(lines: str) -> str:
+    """Emit wrapped, shell-concatenated quoted strings for a printf call."""
+    rendered = []
+    source_lines = lines.splitlines()
+    for line_index, line in enumerate(source_lines):
+        chunks = [line[index:index + 70] for index in range(0, len(line), 70)]
+        for chunk_index, chunk in enumerate(chunks):
+            is_final_chunk = chunk_index == len(chunks) - 1
+            is_final_line = line_index == len(source_lines) - 1
+            if is_final_chunk and is_final_line:
+                suffix = ""
+            elif is_final_chunk:
+                suffix = " \\"
+            else:
+                suffix = "\\"
+            rendered.append(f"'{chunk}'{suffix}")
+    return "\n".join(rendered)
+
+
+bundle_printf_arguments = shell_printf_arguments(bundles)
+
 summary = ", ".join(
     f"{composite['name']}={len(composite['capabilities'])}"
     for composite in manifest["composites"]
@@ -73,9 +95,9 @@ fi
 CAPABILITIES='
 {capabilities}
 '
-BUNDLES='
-{bundles}
-'
+BUNDLES=$(printf '%s\\n' \\
+{bundle_printf_arguments}
+)
 MEMBERS='
 {members}
 '
