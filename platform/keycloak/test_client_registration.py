@@ -211,6 +211,20 @@ REDIS_PATH = {"username": "default", "password": REDIS_PASSWORD}
 
 
 class ClientRegistrationTests(unittest.TestCase):
+    def test_tle_admin_reconciliation_documentation_contract(self):
+        readme = (ROOT / "platform/keycloak/README.md").read_text(encoding="utf-8")
+        runbook = (ROOT / "docs/runbooks/tle-dev-recovery.md").read_text(encoding="utf-8")
+
+        for client_id in ("tle-admin-dev", "tle-admin-prod"):
+            self.assertIn(client_id, readme)
+        self.assertIn("apps/tle-dev/deploy-info/role-manifest.json", readme)
+        self.assertIn("tle-admin-role-reconciliation.yaml", readme)
+        self.assertIn("python3 platform/keycloak/tle-operator/generate.py", readme)
+        self.assertIn("Keycloak console", readme)
+        self.assertIn("group", readme)
+        self.assertIn("reconciles their roles", runbook)
+        self.assertIn("tle-admin-role-reconciliation.yaml", runbook)
+
     def test_tle_admin_role_reconciler_is_generated_as_a_configmap(self):
         manifest = ROOT / "apps/tle-dev/deploy-info/role-manifest.json"
         generator = ROOT / "platform/keycloak/tle-operator/generate.py"
