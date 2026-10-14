@@ -97,6 +97,7 @@ elif args[0] == "create" and args[1].startswith("clients/") and "/roles" in args
         roles[body["name"]] = {"id": body["name"] + "-id", "name": body["name"],
                                "description": body.get("description", ""), "composites": []}
     elif len(parts) == 5 and parts[4] == "composites":
+        event["members"] = len(body)
         roles[parts[3]].setdefault("composites", []).extend(
             member["name"] for member in body if member["name"] not in roles[parts[3]].get("composites", []))
     else:
@@ -110,6 +111,7 @@ elif args[0] == "delete" and args[1].startswith("clients/") and "/roles" in args
         del roles[parts[3]]
     elif len(parts) == 5 and parts[4] == "composites":
         body = json.load(sys.stdin)
+        event["members"] = len(body)
         remove = {member["name"] for member in body}
         roles[parts[3]]["composites"] = [name for name in roles[parts[3]].get("composites", [])
                                           if name not in remove]
@@ -255,6 +257,13 @@ class ClientRegistrationTests(unittest.TestCase):
         self.assertNotIn('kc get roles', script)
         self.assertNotIn("awk ", script)
         self.assertNotIn("cmp -s", script)
+        # One kcadm JVM costs ~8s wall: composite membership must move in
+        # bulk posts built from a single roles dump, never one GET+POST
+        # per member, or a fresh reconcile cannot fit the Job deadline.
+        self.assertIn("roles_dump", script)
+        self.assertIn("members_json", script)
+        self.assertNotIn("role_json", script)
+        self.assertNotIn("ensure_composite_member", script)
 
     def run_tle_role_reconciler(self, state, *, client_ids="tle-admin-dev tle-admin-prod"):
         manifest = ROOT / "apps/tle-dev/deploy-info/role-manifest.json"
@@ -310,6 +319,35 @@ class ClientRegistrationTests(unittest.TestCase):
         paths = [event["args"][1] for event in events if len(event["args"]) > 1]
         self.assertFalse(any(path.startswith("roles/") or "/users" in path or "/groups" in path
                              for path in paths), paths)
+
+    def test_tle_role_reconciler_moves_composites_in_bulk(self):
+        manifest = json.loads((ROOT / "apps/tle-dev/deploy-info/role-manifest.json").read_text())
+        wanted = {capability["name"] for capability in manifest["capabilities"]}
+        wanted.update(composite["name"] for composite in manifest["composites"])
+        state = [
+            {"id": "dev-id", "clientId": "tle-admin-dev", "secret": "dev"},
+            {"id": "prod-id", "clientId": "tle-admin-prod", "secret": "prod"},
+        ]
+
+        run, converged, events = self.run_tle_role_reconciler(state)
+
+        self.assertEqual(0, run.returncode, run.stderr)
+        for client_id in ("tle-admin-dev", "tle-admin-prod"):
+            client = next(item for item in converged if item["clientId"] == client_id)
+            self.assertEqual(wanted, set(client["_roles"]))
+            for composite in manifest["composites"]:
+                self.assertEqual(sorted(composite["capabilities"]),
+                                 sorted(client["_roles"][composite["name"]]["composites"]))
+        # One POST must carry a whole bundle's membership: per-member
+        # GET+POST pairs at ~8s per kcadm JVM cannot fit the Job deadline.
+        creates = [event for event in events
+                   if event["args"][0] == "create" and event["args"][1].endswith("/composites")]
+        self.assertTrue(creates)
+        self.assertGreater(max(event["members"] for event in creates), 1)
+        # A fresh reconcile of both clients must stay well under the ~450
+        # kcadm calls the per-member design needed (which exceeded the
+        # 900s deadline live); the steady-state second run is smaller still.
+        self.assertLess(len(events), 260, len(events))
 
     def test_tle_role_reconciler_is_mounted_after_client_registration(self):
         job = resource(CONFIG / "client-registration.yaml", "Job", "keycloak-client-registration")
@@ -595,7 +633,7 @@ class ClientRegistrationTests(unittest.TestCase):
         manifest = CONFIG / "client-registration.yaml"
         job = resource(manifest, "Job", "keycloak-client-registration")
         self.assertEqual("PostSync", job["metadata"]["annotations"]["argocd.argoproj.io/hook"])
-        self.assertGreaterEqual(job["spec"]["activeDeadlineSeconds"], 900)
+        self.assertGreaterEqual(job["spec"]["activeDeadlineSeconds"], 3600)
         pod = job["spec"]["template"]["spec"]
         self.assertEqual("Never", pod["restartPolicy"])
         container = pod["containers"][0]

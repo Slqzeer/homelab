@@ -251,10 +251,23 @@ data:
         elif length == 0 then error("missing client ID: " + $client_id)
         else error("duplicate client ID: " + $client_id) end'
     }
-    role_names() { kc get "clients/$1/roles" | "$JQ" -r '.[].name' | sort; }
-    role_json() { kc get "clients/$1/roles/$2"; }
+    role_names() { "$JQ" -r '.[].name' "$WORK/all-roles.json" | sort; }
+    roles_dump() { kc get "clients/$1/roles" > "$WORK/all-roles.json"; }
     composite_names() {
       kc get "clients/$1/roles/$2/composites" | "$JQ" -r '.[].name' | sort
+    }
+    members_json() {
+      # $1 is a file with one role name per line. Print a JSON array of the
+      # matching {id, name} bodies from the last roles dump, so one POST or
+      # DELETE carries a whole bundle's membership delta. A single kcadm JVM
+      # costs ~8s wall, so per-member calls cannot finish inside the Job
+      # deadline; Keycloak accepts an array here. Fail closed when a name is
+      # missing: a short array would silently converge the wrong membership.
+      "$JQ" -R -s --slurpfile all "$WORK/all-roles.json" '
+        split("\n") | map(select(length > 0)) as $want |
+        [$all[0][] | select(.name as $n | $want | index($n)) | {id, name}] |
+        if length == ($want | length) then .
+        else error("role lookup incomplete") end' "$1"
     }
     ensure_role() {
       client_uuid=$1 role_name=$2 description=$3
@@ -263,56 +276,52 @@ data:
         '{name: $name, description: $description}' |
         kc create "clients/$client_uuid/roles" -f - >/dev/null
     }
-    ensure_composite_member() {
-      client_uuid=$1 bundle=$2 member=$3
-      if grep -Fxq "$member" "$WORK/have-$bundle"; then return; fi
-      role_json "$client_uuid" "$member" > "$WORK/member.json"
-      "$JQ" -s '.' "$WORK/member.json" |
-        kc create "clients/$client_uuid/roles/$bundle/composites" -f - >/dev/null
-    }
-    delete_composite_member() {
-      client_uuid=$1 bundle=$2 member=$3
-      role_json "$client_uuid" "$member" > "$WORK/member.json"
-      "$JQ" -s '.' "$WORK/member.json" |
-        kc delete "clients/$client_uuid/roles/$bundle/composites" -f - >/dev/null
-    }
     reconcile_client() {
       client_id=$1
       client_uuid=$(client_uuid "$client_id")
       lines "$CAPABILITIES" | cut -d'|' -f1 | sort > "$WORK/want-capabilities"
       lines "$BUNDLES" | cut -d'|' -f1 | sort > "$WORK/want-bundles"
       sort "$WORK/want-capabilities" "$WORK/want-bundles" > "$WORK/want-roles"
-      role_names "$client_uuid" > "$WORK/have-roles"
+      roles_dump "$client_uuid"
+      role_names > "$WORK/have-roles"
 
       { lines "$CAPABILITIES"; lines "$BUNDLES"; } |
         while IFS='|' read -r name description; do
           ensure_role "$client_uuid" "$name" "$description"
         done
 
+      # The dump above predates the creates: refresh it so member bodies and
+      # the have-roles baseline reflect server truth.
+      roles_dump "$client_uuid"
+      role_names > "$WORK/have-roles"
+
       while IFS= read -r bundle; do
         lines "$MEMBERS" | grep -F "${bundle}|" | cut -d'|' -f2 |
           sort > "$WORK/want-$bundle"
         composite_names "$client_uuid" "$bundle" > "$WORK/have-$bundle"
-        while IFS= read -r member; do
-          [ -n "$member" ] || continue
-          ensure_composite_member "$client_uuid" "$bundle" "$member"
-        done < "$WORK/want-$bundle"
+        grep -Fxv -f "$WORK/have-$bundle" "$WORK/want-$bundle" > "$WORK/missing-$bundle" || true
+        if [ -s "$WORK/missing-$bundle" ]; then
+          members_json "$WORK/missing-$bundle" |
+            kc create "clients/$client_uuid/roles/$bundle/composites" -f - >/dev/null
+        fi
         composite_names "$client_uuid" "$bundle" > "$WORK/have-$bundle"
         grep -Fxv -f "$WORK/want-$bundle" "$WORK/have-$bundle" > "$WORK/stale-$bundle" || true
-        while IFS= read -r member; do
-          [ -n "$member" ] || continue
-          delete_composite_member "$client_uuid" "$bundle" "$member"
-        done < "$WORK/stale-$bundle"
+        if [ -s "$WORK/stale-$bundle" ]; then
+          members_json "$WORK/stale-$bundle" |
+            kc delete "clients/$client_uuid/roles/$bundle/composites" -f - >/dev/null
+        fi
       done < "$WORK/want-bundles"
 
-      role_names "$client_uuid" > "$WORK/have-roles"
+      roles_dump "$client_uuid"
+      role_names > "$WORK/have-roles"
       grep -Fxv -f "$WORK/want-roles" "$WORK/have-roles" > "$WORK/stale-roles" || true
       while IFS= read -r name; do
         [ -n "$name" ] || continue
         kc delete "clients/$client_uuid/roles/$name" >/dev/null
       done < "$WORK/stale-roles"
 
-      role_names "$client_uuid" > "$WORK/have-roles"
+      roles_dump "$client_uuid"
+      role_names > "$WORK/have-roles"
       same_file "$WORK/want-roles" "$WORK/have-roles" || {
         echo "$client_id roles differ from manifest" >&2
         exit 1

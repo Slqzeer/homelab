@@ -212,7 +212,10 @@ metadata:
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 spec:
   backoffLimit: 2
-  activeDeadlineSeconds: 900
+  # A fresh reconcile is ~200 sequential kcadm JVM invocations at ~8s each
+  # (~26 minutes): 4 clients plus 67 roles and 3 bulk composite updates on
+  # each of the two TLE clients. Steady-state runs need ~45 calls (~6 min).
+  activeDeadlineSeconds: 3600
   template:
     metadata:
       labels:
