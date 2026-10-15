@@ -5,10 +5,10 @@
 The homelab's OIDC identity provider, workstation-plan phase 25. Keycloak
 26.7.4 runs as one Deployment with no PVC; all durable state lives in the
 `keycloak` database on PostgreSQL's existing PVC. Its Application joins
-wave 24 because PostgreSQL is at 23. The portal is the OIDC client in
-daily use; its confidential client is reconciled by a PostSync hook with
-only `homelab-portal` on its allowlist. The hook does not change users,
-groups, or realm settings. Grafana was the first client until it moved to
+wave 24 because PostgreSQL is at 23. Confidential OIDC clients for the portal,
+Penpot, and The Last Exam are reconciled by an explicit-allowlist PostSync
+hook. The hook does not change users, groups, or realm settings. Grafana was
+the first client until it moved to
 Grafana Cloud (2026-10-05), whose login is a grafana.com account.
 Argo CD deliberately is not a client
 yet, so recovering the deployment system does not depend on this service.
@@ -141,9 +141,10 @@ does not rotate the live account: rotate in Keycloak first, then update
 **The realm is reproducible, not reconciled.** `--import-realm` uses
 `IGNORE_EXISTING`: the seed is applied once, then ignored on every later
 boot while that realm exists. Editing `config/realm.yaml` does not change
-a running Keycloak, and console edits do not come back to git. The portal
-client is the sole exception: `config/client-registration.yaml` reconciles
-its allowlisted fields after each Argo sync. The realm
+a running Keycloak, and console edits do not come back to git. The explicitly
+allowlisted portal, Penpot, and TLE clients are the exceptions:
+`config/client-registration.yaml` reconciles their owned fields after each
+Argo sync. The realm
 export below is the only portable realm-configuration record of those
 edits. `keycloak-config-cli` was rejected because its newest build targeted
 26.5.5 against this server's 26.7.4; adding that version dependency to the
@@ -178,20 +179,21 @@ generates one shared OIDC client secret under `homelab/keycloak-portal`
 `session-current-key` for the portal. It leaves existing values in place;
 if the two OIDC copies differ, the Keycloak copy wins. An existing
 `session-previous-key` survives because the script patches individual
-fields. The `vso-keycloak` role reads only Keycloak's three paths, and
+fields. The `vso-keycloak` role reads only the six paths needed for Keycloak's
+own credentials and its four managed application clients, and
 `vso-portal` is bound only to `homelab-portal` in namespace `portal`.
 
-The `keycloak-client-registration` PostSync Job reads
-`keycloak-admin` and `keycloak-portal-client` from VSO. It creates or
-updates only `homelab-portal`, with callback
+The `keycloak-client-registration` PostSync Job reads its managed client
+credentials from VSO. It creates or updates only the explicit portal, Penpot,
+and TLE allowlist. The portal uses callback
 `https://portal.taildf6cd4.ts.net/auth/callback`, logout
 `https://portal.taildf6cd4.ts.net/auth/logout`, exact portal origin,
 authorization-code flow, and the `groups` scope. It fails if duplicate
 client IDs exist. Repeated syncs with the same Vault value make no write.
 Inspect Job success and the VaultStaticSecret status; do not print
-Kubernetes Secret contents. A Keycloak ingress policy permits only its
-selected proxy, the Prometheus agent, registration Job, portal, and future
-Nextcloud pods on the ports they use.
+Kubernetes Secret contents. Keycloak ingress policies permit only its selected
+proxy, the Prometheus agent, registration Job, portal, Nextcloud, Penpot
+backend, and TLE auth-service/edge pods on the ports they use.
 
 For other clients, create a confidential OpenID Connect client in the `homelab` console with
 standard authorization-code flow. Add the `groups` default scope, plus

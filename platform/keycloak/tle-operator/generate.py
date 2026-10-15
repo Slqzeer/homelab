@@ -122,21 +122,40 @@ client_uuid() {{
 }}
 role_names() {{ "$JQ" -r '.[].name' "$WORK/all-roles.json" | sort; }}
 roles_dump() {{ kc get "clients/$1/roles" > "$WORK/all-roles.json"; }}
+composites_dump() {{
+  kc get "clients/$1/roles/$2/composites" > "$WORK/have-$2.json"
+}}
 composite_names() {{
-  kc get "clients/$1/roles/$2/composites" | "$JQ" -r '.[].name' | sort
+  "$JQ" -r --arg client_uuid "$1" '
+    .[] | select(.clientRole == true and .containerId == $client_uuid) | .name
+  ' "$2" | sort
 }}
 members_json() {{
-  # $1 is a file with one role name per line. Print a JSON array of the
-  # matching {{id, name}} bodies from the last roles dump, so one POST or
+  # $1 is a file with one role name per line; $2 is a RoleRepresentation
+  # array. Print the matching bodies, so one POST or
   # DELETE carries a whole bundle's membership delta. A single kcadm JVM
   # costs ~8s wall, so per-member calls cannot finish inside the Job
   # deadline; Keycloak accepts an array here. Fail closed when a name is
   # missing: a short array would silently converge the wrong membership.
-  "$JQ" -R -s --slurpfile all "$WORK/all-roles.json" '
+  "$JQ" -R -s --slurpfile all "$2" '
     split("\\n") | map(select(length > 0)) as $want |
-    [$all[0][] | select(.name as $n | $want | index($n)) | {{id, name}}] |
+    [$all[0][] | select(.name as $n | $want | index($n))] |
     if length == ($want | length) then .
     else error("role lookup incomplete") end' "$1"
+}}
+stale_members_json() {{
+  # A composite may contain realm roles or roles from another client,
+  # including one with the same name as a wanted local role. Preserve only
+  # wanted roles whose identity belongs to this TLE client; return every
+  # other full representation so Keycloak can delete it exactly.
+  "$JQ" --arg client_uuid "$1" --rawfile wanted "$2" '
+    ($wanted | split("\\n") | map(select(length > 0))) as $want |
+    [.[] | select(
+      .clientRole != true or
+      .containerId != $client_uuid or
+      ((.name as $name | $want | index($name)) == null)
+    )]
+  ' "$3"
 }}
 ensure_role() {{
   client_uuid=$1 role_name=$2 description=$3
@@ -167,16 +186,18 @@ reconcile_client() {{
   while IFS= read -r bundle; do
     lines "$MEMBERS" | grep -F "${{bundle}}|" | cut -d'|' -f2 |
       sort > "$WORK/want-$bundle"
-    composite_names "$client_uuid" "$bundle" > "$WORK/have-$bundle"
+    composites_dump "$client_uuid" "$bundle"
+    composite_names "$client_uuid" "$WORK/have-$bundle.json" > "$WORK/have-$bundle"
     grep -Fxv -f "$WORK/have-$bundle" "$WORK/want-$bundle" > "$WORK/missing-$bundle" || true
     if [ -s "$WORK/missing-$bundle" ]; then
-      members_json "$WORK/missing-$bundle" |
+      members_json "$WORK/missing-$bundle" "$WORK/all-roles.json" |
         kc create "clients/$client_uuid/roles/$bundle/composites" -f - >/dev/null
     fi
-    composite_names "$client_uuid" "$bundle" > "$WORK/have-$bundle"
-    grep -Fxv -f "$WORK/want-$bundle" "$WORK/have-$bundle" > "$WORK/stale-$bundle" || true
-    if [ -s "$WORK/stale-$bundle" ]; then
-      members_json "$WORK/stale-$bundle" |
+    composites_dump "$client_uuid" "$bundle"
+    stale_members_json "$client_uuid" "$WORK/want-$bundle" \\
+      "$WORK/have-$bundle.json" > "$WORK/stale-$bundle.json"
+    if [ "$("$JQ" 'length' "$WORK/stale-$bundle.json")" -gt 0 ]; then
+      cat "$WORK/stale-$bundle.json" |
         kc delete "clients/$client_uuid/roles/$bundle/composites" -f - >/dev/null
     fi
   done < "$WORK/want-bundles"
@@ -196,11 +217,15 @@ reconcile_client() {{
     exit 1
   }}
   while IFS= read -r bundle; do
-    composite_names "$client_uuid" "$bundle" > "$WORK/have-$bundle"
-    same_file "$WORK/want-$bundle" "$WORK/have-$bundle" || {{
+    composites_dump "$client_uuid" "$bundle"
+    composite_names "$client_uuid" "$WORK/have-$bundle.json" > "$WORK/have-$bundle"
+    stale_members_json "$client_uuid" "$WORK/want-$bundle" \\
+      "$WORK/have-$bundle.json" > "$WORK/final-stale-$bundle.json"
+    if ! same_file "$WORK/want-$bundle" "$WORK/have-$bundle" ||
+       [ "$("$JQ" 'length' "$WORK/final-stale-$bundle.json")" -ne 0 ]; then
       echo "$client_id composite $bundle differs from manifest" >&2
       exit 1
-    }}
+    fi
   done < "$WORK/want-bundles"
 }}
 

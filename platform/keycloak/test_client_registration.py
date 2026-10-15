@@ -40,6 +40,25 @@ events_path = Path(os.environ["FAKE_EVENTS"])
 state = json.loads(state_path.read_text())
 args = sys.argv[1:]
 event = {"args": args}
+
+
+def role_representation(role, container_id):
+    representation = {k: v for k, v in role.items() if k != "composites"}
+    representation.setdefault("clientRole", True)
+    representation.setdefault("containerId", container_id)
+    return representation
+
+
+def composite_representation(member, roles, container_id):
+    if isinstance(member, dict):
+        return member
+    return role_representation(roles[member], container_id)
+
+
+def composite_member_id(member, roles, container_id):
+    return composite_representation(member, roles, container_id)["id"]
+
+
 if args[:2] == ["config", "credentials"]:
     pass
 elif args[:2] == ["get", "clients"]:
@@ -54,14 +73,12 @@ elif args[0] == "get" and args[1].startswith("clients/") and "/roles" in args[1]
     client = next(c for c in state if c["id"] == uuid)
     roles = client.setdefault("_roles", {})
     if len(parts) == 3:
-        print(json.dumps([{k: v for k, v in role.items() if k != "composites"}
-                          for role in roles.values()]))
+        print(json.dumps([role_representation(role, uuid) for role in roles.values()]))
     elif len(parts) == 4:
-        print(json.dumps({k: v for k, v in roles[parts[3]].items()
-                          if k != "composites"}))
+        print(json.dumps(role_representation(roles[parts[3]], uuid)))
     elif len(parts) == 5 and parts[4] == "composites":
-        print(json.dumps([{k: v for k, v in roles[name].items() if k != "composites"}
-                          for name in roles[parts[3]].get("composites", [])]))
+        print(json.dumps([composite_representation(member, roles, uuid)
+                          for member in roles[parts[3]].get("composites", [])]))
     else:
         sys.exit(19)
 elif args[0] == "get" and args[1].endswith("/client-secret"):
@@ -98,8 +115,9 @@ elif args[0] == "create" and args[1].startswith("clients/") and "/roles" in args
                                "description": body.get("description", ""), "composites": []}
     elif len(parts) == 5 and parts[4] == "composites":
         event["members"] = len(body)
-        roles[parts[3]].setdefault("composites", []).extend(
-            member["name"] for member in body if member["name"] not in roles[parts[3]].get("composites", []))
+        composites = roles[parts[3]].setdefault("composites", [])
+        existing_ids = {composite_member_id(member, roles, uuid) for member in composites}
+        composites.extend(member["name"] for member in body if member["id"] not in existing_ids)
     else:
         sys.exit(20)
 elif args[0] == "delete" and args[1].startswith("clients/") and "/roles" in args[1]:
@@ -112,9 +130,12 @@ elif args[0] == "delete" and args[1].startswith("clients/") and "/roles" in args
     elif len(parts) == 5 and parts[4] == "composites":
         body = json.load(sys.stdin)
         event["members"] = len(body)
-        remove = {member["name"] for member in body}
-        roles[parts[3]]["composites"] = [name for name in roles[parts[3]].get("composites", [])
-                                          if name not in remove]
+        remove = {member["id"] for member in body}
+        if not os.environ.get("FAKE_COMPOSITE_DELETE_NOOP"):
+            roles[parts[3]]["composites"] = [
+                member for member in roles[parts[3]].get("composites", [])
+                if composite_member_id(member, roles, uuid) not in remove
+            ]
     else:
         sys.exit(21)
 elif args[0] == "update" and args[1].startswith("clients/"):
@@ -179,6 +200,9 @@ if args[:2] == ["kv", "get"]:
         print("present")
 elif args[:2] in (["kv", "put"], ["kv", "patch"]):
     path = args[2]
+    if os.environ.get("FAKE_VAULT_FAIL_PUT_MATCH") == path:
+        print("transient Vault write failure", file=sys.stderr)
+        sys.exit(17)
     body = {}
     for item in args[3:]:
         key, value = item.split("=", 1)
@@ -265,7 +289,8 @@ class ClientRegistrationTests(unittest.TestCase):
         self.assertNotIn("role_json", script)
         self.assertNotIn("ensure_composite_member", script)
 
-    def run_tle_role_reconciler(self, state, *, client_ids="tle-admin-dev tle-admin-prod"):
+    def run_tle_role_reconciler(self, state, *, client_ids="tle-admin-dev tle-admin-prod",
+                                composite_delete_noop=False):
         manifest = ROOT / "apps/tle-dev/deploy-info/role-manifest.json"
         generator = ROOT / "platform/keycloak/tle-operator/generate.py"
         with tempfile.TemporaryDirectory() as directory:
@@ -286,6 +311,8 @@ class ClientRegistrationTests(unittest.TestCase):
                        FAKE_ALLOWLIST="tle-admin-dev,tle-admin-prod,unrelated",
                        KC_ADMIN_USERNAME="admin", KC_CLI_PASSWORD="admin-canary-secret",
                        KCADM=str(fake), JQ="/usr/bin/jq", TLE_ADMIN_CLIENT_IDS=client_ids)
+            if composite_delete_noop:
+                env["FAKE_COMPOSITE_DELETE_NOOP"] = "1"
             run = subprocess.run(["/bin/sh", str(script)], env=env, text=True,
                                  capture_output=True, check=False)
             events = [json.loads(line) for line in events_path.read_text().splitlines()]
@@ -319,6 +346,66 @@ class ClientRegistrationTests(unittest.TestCase):
         paths = [event["args"][1] for event in events if len(event["args"]) > 1]
         self.assertFalse(any(path.startswith("roles/") or "/users" in path or "/groups" in path
                              for path in paths), paths)
+
+    def test_tle_role_reconciler_removes_realm_and_foreign_composite_members(self):
+        stale = {"id": "stale-id", "name": "stale", "description": "stale",
+                 "composites": []}
+        support = {
+            "id": "support-id",
+            "name": "support",
+            "description": "old",
+            "composites": [
+                "stale",
+                {"id": "realm-stale-id", "name": "realm-stale",
+                 "clientRole": False, "containerId": "homelab"},
+                {"id": "foreign-stale-id", "name": "foreign-stale",
+                 "clientRole": True, "containerId": "other-id"},
+                # A foreign role with a wanted name must not hide the missing
+                # role from the TLE client itself.
+                {"id": "foreign-shadow-id", "name": "admin.auth.read",
+                 "clientRole": True, "containerId": "other-id"},
+            ],
+        }
+        state = [
+            {"id": "dev-id", "clientId": "tle-admin-dev", "secret": "dev",
+             "_roles": {"stale": stale, "support": support}},
+            {"id": "prod-id", "clientId": "tle-admin-prod", "secret": "prod",
+             "_roles": json.loads(json.dumps({"stale": stale, "support": support}))},
+            {"id": "other-id", "clientId": "unrelated", "secret": "other",
+             "_roles": {"foreign-stale": {"id": "foreign-stale-id",
+                                             "name": "foreign-stale",
+                                             "composites": []}}},
+        ]
+
+        run, converged, _ = self.run_tle_role_reconciler(state)
+
+        self.assertEqual(0, run.returncode, run.stderr)
+        manifest = json.loads(
+            (ROOT / "apps/tle-dev/deploy-info/role-manifest.json").read_text())
+        support_members = next(composite["capabilities"] for composite in manifest["composites"]
+                               if composite["name"] == "support")
+        for client_id in ("tle-admin-dev", "tle-admin-prod"):
+            client = next(item for item in converged if item["clientId"] == client_id)
+            self.assertEqual(sorted(support_members),
+                             sorted(client["_roles"]["support"]["composites"]))
+        unrelated = next(item for item in converged if item["clientId"] == "unrelated")
+        self.assertIn("foreign-stale", unrelated["_roles"])
+
+    def test_tle_role_reconciler_rejects_unremoved_foreign_composite_member(self):
+        foreign_member = {"id": "realm-stale-id", "name": "realm-stale",
+                          "clientRole": False, "containerId": "homelab"}
+        state = [
+            {"id": "dev-id", "clientId": "tle-admin-dev", "secret": "dev",
+             "_roles": {"support": {"id": "support-id", "name": "support",
+                                      "description": "old",
+                                      "composites": [foreign_member]}}},
+            {"id": "prod-id", "clientId": "tle-admin-prod", "secret": "prod"},
+        ]
+
+        run, _, _ = self.run_tle_role_reconciler(state, composite_delete_noop=True)
+
+        self.assertNotEqual(0, run.returncode)
+        self.assertIn("composite support differs from manifest", run.stderr)
 
     def test_tle_role_reconciler_moves_composites_in_bulk(self):
         manifest = json.loads((ROOT / "apps/tle-dev/deploy-info/role-manifest.json").read_text())
@@ -1327,6 +1414,39 @@ class ClientRegistrationTests(unittest.TestCase):
                 for canary in ("keycloak-canary", "portal-canary", "current-canary", "previous-canary"):
                     self.assertNotIn(canary, run.stdout + run.stderr)
 
+    def test_tle_vault_seed_removes_secret_file_when_write_fails(self):
+        source = (ROOT / "platform/vault/configure-vault.sh").read_text(encoding="utf-8")
+        seed = source.split("umask 077", 1)[1]
+        seed = seed.split('echo "==> policy vso-keycloak-read"', 1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            temp = Path(directory)
+            secret_directory = temp / "secrets"
+            secret_directory.mkdir()
+            vault = temp / "vault"
+            vault.write_text(FAKE_VAULT, encoding="utf-8")
+            vault.chmod(0o700)
+            script = temp / "seed.sh"
+            script.write_text("set -eu\numask 077" + seed, encoding="utf-8")
+            state_path = temp / "vault.json"
+            state_path.write_text(json.dumps({
+                "homelab/keycloak-portal": {"clientSecret": "shared-canary"},
+                "homelab/portal": {"oidc-client-secret": "shared-canary",
+                                   "session-current-key": "session-canary"},
+            }), encoding="utf-8")
+            events_path = temp / "vault-events.jsonl"
+            env = dict(os.environ, PATH=f"{temp}:{os.environ['PATH']}",
+                       TMPDIR=str(secret_directory), FAKE_VAULT_STATE=str(state_path),
+                       FAKE_VAULT_EVENTS=str(events_path),
+                       FAKE_VAULT_FAIL_PUT_MATCH="homelab/tle-admin-dev-client")
+
+            run = subprocess.run(["/bin/sh", str(script)], env=env, text=True,
+                                 capture_output=True, check=False)
+
+            self.assertNotEqual(0, run.returncode)
+            self.assertEqual([], list(secret_directory.iterdir()))
+            self.assertNotIn("shared-canary", run.stdout + run.stderr)
+            self.assertNotIn("session-canary", run.stdout + run.stderr)
+
     def test_network_policies_grant_only_selected_peers_and_ports(self):
         path = CONFIG / "networkpolicy.yaml"
         deny = resource(path, "NetworkPolicy", "default-deny-ingress")
@@ -1364,6 +1484,43 @@ class ClientRegistrationTests(unittest.TestCase):
         # grants above cannot see that because they key on namespace only.
         self.assertEqual({"app.kubernetes.io/name": "penpot-backend"},
                          penpot_peer["podSelector"]["matchLabels"])
+
+    def test_tle_network_policies_allow_only_expected_keycloak_flow(self):
+        path = ROOT / "apps/tle-dev/config/networkpolicy.yaml"
+        egress = resource(path, "NetworkPolicy", "tle-dev-auth-to-keycloak")
+        self.assertEqual("tle-dev", egress["metadata"]["namespace"])
+        self.assertEqual({"matchLabels": {"app": "tle-dev-auth-service"}},
+                         egress["spec"]["podSelector"])
+        self.assertEqual(["Egress"], egress["spec"]["policyTypes"])
+        self.assertEqual([{
+            "to": [{
+                "namespaceSelector": {"matchLabels": {
+                    "kubernetes.io/metadata.name": "keycloak"}},
+                "podSelector": {"matchLabels": {"app": "keycloak"}},
+            }],
+            "ports": [{"protocol": "TCP", "port": 8080}],
+        }], egress["spec"]["egress"])
+
+        ingress = resource(path, "NetworkPolicy", "tle-dev-keycloak-from-auth")
+        self.assertEqual("keycloak", ingress["metadata"]["namespace"])
+        self.assertEqual({"matchLabels": {"app": "keycloak"}},
+                         ingress["spec"]["podSelector"])
+        self.assertEqual(["Ingress"], ingress["spec"]["policyTypes"])
+        self.assertEqual([{
+            "from": [
+                {
+                    "namespaceSelector": {"matchLabels": {
+                        "kubernetes.io/metadata.name": "tle-dev"}},
+                    "podSelector": {"matchLabels": {"app": "tle-dev-auth-service"}},
+                },
+                {
+                    "namespaceSelector": {"matchLabels": {
+                        "kubernetes.io/metadata.name": "tle-dev"}},
+                    "podSelector": {"matchLabels": {"app": "tle-dev-edge"}},
+                },
+            ],
+            "ports": [{"protocol": "TCP", "port": 8080}],
+        }], ingress["spec"]["ingress"])
 
 
 if __name__ == "__main__":

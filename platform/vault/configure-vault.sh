@@ -314,7 +314,8 @@ PORTAL_SESSION_FILE=$(mktemp)
 PORTAL_EXISTING_FILE=$(mktemp)
 PORTAL_PATH_FILE=$(mktemp)
 PORTAL_READ_ERROR_FILE=$(mktemp)
-trap 'rm -f "$KC_PORTAL_SECRET_FILE" "$PORTAL_SESSION_FILE" "$PORTAL_EXISTING_FILE" "$PORTAL_PATH_FILE" "$PORTAL_READ_ERROR_FILE"' EXIT
+TLE_CLIENT_SECRET_FILE=
+trap 'rm -f "$KC_PORTAL_SECRET_FILE" "$PORTAL_SESSION_FILE" "$PORTAL_EXISTING_FILE" "$PORTAL_PATH_FILE" "$PORTAL_READ_ERROR_FILE" "$TLE_CLIENT_SECRET_FILE"' EXIT
 
 # A failed Vault CLI read is not proof that a path or field is absent. Only
 # Vault's explicit not-found diagnostics permit seeding; all other errors
@@ -414,7 +415,7 @@ for TLE_CLIENT_PATH in homelab/tle-admin-dev-client homelab/tle-admin-prod-clien
 done
 
 echo "==> policy vso-keycloak-read"
-# Grants all four paths the Keycloak pod needs, so its one ServiceAccount needs
+# Grants all six paths the Keycloak pod needs, so its one ServiceAccount needs
 # one role. The data/ segment is REQUIRED and is not a typo -- see the note
 # on vso-canary-read above.
 vault policy write vso-keycloak-read - <<'POLICY'
