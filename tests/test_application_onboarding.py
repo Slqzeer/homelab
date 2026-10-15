@@ -1354,6 +1354,8 @@ class HermesDashboardDeploymentTests(unittest.TestCase):
         self.assertIn("proxy_pass http://10.42.0.1:9119", config)
         self.assertIn("proxy_set_header Upgrade $http_upgrade", config)
         self.assertIn("proxy_set_header Connection $connection_upgrade", config)
+        self.assertIn("proxy_set_header Host hermes.taildf6cd4.ts.net", config)
+        self.assertNotIn("proxy_set_header Host $host", config)
         self.assertIn("proxy_set_header X-Forwarded-Proto https", config)
         self.assertNotIn("$request_uri", config)
 
