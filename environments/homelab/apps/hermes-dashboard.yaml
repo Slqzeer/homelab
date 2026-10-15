@@ -1,15 +1,7 @@
-# routeplane tracking dashboard relay (agent platform, /srv/projects/agent-platform).
-#
-# Wave 23: needs only its namespace (wave 0); the Ingress lives in ingress-config.
-# Same reasoning as the wave-23 group in README.md. Nothing depends on it.
-#
-# Third-party image, no product repo of ours: the site manifests live in
-# apps/routeplane/config and pin the upstream image by tag AND digest. The
-# dashboard itself is a host process (routeplane/install.sh in agent-platform).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: routeplane
+  name: hermes-dashboard
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "23"
@@ -24,10 +16,10 @@ spec:
   source:
     repoURL: git@github.com:Slqzeer/homelab.git
     targetRevision: main
-    path: apps/routeplane/config
+    path: apps/hermes-dashboard/config
   destination:
     server: https://kubernetes.default.svc
-    namespace: routeplane
+    namespace: hermes-dashboard
   syncPolicy:
     automated:
       prune: true

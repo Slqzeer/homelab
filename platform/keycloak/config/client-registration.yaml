@@ -34,25 +34,30 @@ data:
 
     # This is the entire mutation allowlist. Query errors and duplicate IDs
     # abort the hook; neither may be interpreted as an absent client.
-    # Arguments are positional: client_id, secret env var, display name,
-    # origin, callback path, logout path. The origin and the OIDC callback
+    # Arguments are positional: client_id, optional secret env var, display
+    # name, origin, callback path, logout path. An empty secret env var creates
+    # a public PKCE client; a non-empty one creates a confidential client.
+    # The origin and the OIDC callback
     # path are per entry, never constants inside this function: Penpot's
     # callback is /api/auth/oidc/callback, which is NOT the portal's
     # /auth/callback, and a shared constant would rewrite the portal's.
     reconcile_client() {
       client_id=$1 secret_var=$2 display_name=$3 origin=$4
       callback=$5 logout_path=$6
-      # jq reads the secret, not the shell: $secret_var (the NAME) goes into
-      # argv and the value comes back out of jq's own environment. The value
-      # never becomes a process argument of anything: --arg is handed the
-      # name only, and handing it the value instead would put the secret in
-      # every argument list. A coreutils environment reader would do the same
-      # job, but it is used nowhere else in this repository and cannot be
-      # assumed present in the Keycloak image, where its absence would abort
-      # the hook under set -e. jq is already a hard dependency below; if it
-      # were missing this hook could not work at all, so this adds no new way
-      # to fail.
-      secret_value=$("$JQ" -nr --arg env_name "$secret_var" 'env[$env_name]')
+      secret_value=
+      if [ -n "$secret_var" ]; then
+        # jq reads the secret, not the shell: $secret_var (the NAME) goes into
+        # argv and the value comes back out of jq's own environment. The value
+        # never becomes a process argument of anything: --arg is handed the
+        # name only, and handing it the value instead would put the secret in
+        # every argument list. A coreutils environment reader would do the same
+        # job, but it is used nowhere else in this repository and cannot be
+        # assumed present in the Keycloak image, where its absence would abort
+        # the hook under set -e. jq is already a hard dependency below; if it
+        # were missing this hook could not work at all, so this adds no new way
+        # to fail.
+        secret_value=$("$JQ" -nr --arg env_name "$secret_var" 'env[$env_name]')
+      fi
       clients_json=$("$KCADM" get clients -r homelab \
         -q clientId="$client_id" --fields id,clientId \
         --config /tmp/kcadm.config)
@@ -63,27 +68,52 @@ data:
          elif length == 1 then .[0].id
          else error("duplicate client ID: " + $client_id) end')
 
-      desired_json=$("$JQ" -n \
-        --arg client_id "$client_id" \
-        --arg name "$display_name" \
-        --arg redirect "${origin}${callback}" \
-        --arg origin "$origin" \
-        --arg logout "${origin}${logout_path}" \
-        --arg env_name "$secret_var" \
-        '{clientId: $client_id,
-          name: $name,
-          protocol: "openid-connect",
-          enabled: true,
-          publicClient: false,
-          clientAuthenticatorType: "client-secret",
-          standardFlowEnabled: true,
-          implicitFlowEnabled: false,
-          directAccessGrantsEnabled: false,
-          serviceAccountsEnabled: false,
-          redirectUris: [$redirect],
-          webOrigins: [$origin],
-          attributes: {"post.logout.redirect.uris": $logout},
-          secret: env[$env_name]}')
+      if [ -n "$secret_var" ]; then
+        desired_json=$("$JQ" -n \
+          --arg client_id "$client_id" \
+          --arg name "$display_name" \
+          --arg redirect "${origin}${callback}" \
+          --arg origin "$origin" \
+          --arg logout "${origin}${logout_path}" \
+          --arg env_name "$secret_var" \
+          '{clientId: $client_id,
+            name: $name,
+            protocol: "openid-connect",
+            enabled: true,
+            publicClient: false,
+            clientAuthenticatorType: "client-secret",
+            standardFlowEnabled: true,
+            implicitFlowEnabled: false,
+            directAccessGrantsEnabled: false,
+            serviceAccountsEnabled: false,
+            redirectUris: [$redirect],
+            webOrigins: [$origin],
+            attributes: {"post.logout.redirect.uris": $logout},
+            secret: env[$env_name]}')
+      else
+        desired_json=$("$JQ" -n \
+          --arg client_id "$client_id" \
+          --arg name "$display_name" \
+          --arg redirect "${origin}${callback}" \
+          --arg origin "$origin" \
+          --arg logout "${origin}${logout_path}" \
+          '{clientId: $client_id,
+            name: $name,
+            protocol: "openid-connect",
+            enabled: true,
+            publicClient: true,
+            clientAuthenticatorType: "none",
+            standardFlowEnabled: true,
+            implicitFlowEnabled: false,
+            directAccessGrantsEnabled: false,
+            serviceAccountsEnabled: false,
+            redirectUris: [$redirect],
+            webOrigins: [$origin],
+            attributes: {
+              "post.logout.redirect.uris": $logout,
+              "pkce.code.challenge.method": "S256"
+            }}')
+      fi
 
       # Project only fields this hook owns. Keycloak adds server-side fields
       # and other operators may set unrelated client fields. Never print the
@@ -96,7 +126,9 @@ data:
            implicitFlowEnabled, directAccessGrantsEnabled,
            serviceAccountsEnabled, redirectUris, webOrigins,
            attributes: {"post.logout.redirect.uris":
-                        .attributes["post.logout.redirect.uris"]}}
+                        .attributes["post.logout.redirect.uris"],
+                       "pkce.code.challenge.method":
+                        .attributes["pkce.code.challenge.method"]}}
         '
       }
       desired_public=$(printf '%s' "$desired_json" | canonical)
@@ -120,9 +152,12 @@ data:
         current_json=$("$KCADM" get "clients/$client_uuid" -r homelab \
           --config /tmp/kcadm.config)
         current_public=$(printf '%s' "$current_json" | canonical)
-        current_secret_json=$("$KCADM" get "clients/$client_uuid/client-secret" \
-          -r homelab --config /tmp/kcadm.config)
-        current_secret=$(printf '%s' "$current_secret_json" | "$JQ" -r '.value // ""')
+        current_secret=
+        if [ -n "$secret_var" ]; then
+          current_secret_json=$("$KCADM" get "clients/$client_uuid/client-secret" \
+            -r homelab --config /tmp/kcadm.config)
+          current_secret=$(printf '%s' "$current_secret_json" | "$JQ" -r '.value // ""')
+        fi
         if [ "$current_public" = "$desired_public" ] && \
            [ "$current_secret" = "$secret_value" ]; then
           echo "$client_id client already current"
@@ -182,6 +217,11 @@ data:
       done
     }
 
+    reconcile_public_client() {
+      client_id=$1 display_name=$2 origin=$3 callback=$4 logout_path=$5
+      reconcile_client "$client_id" "" "$display_name" "$origin" "$callback" "$logout_path"
+    }
+
     reconcile_client homelab-portal PORTAL_CLIENT_SECRET "Homelab Portal" \
       https://portal.taildf6cd4.ts.net /auth/callback /auth/logout
     # Penpot does expose POST /api/logout, but nothing a browser can be
@@ -200,6 +240,8 @@ data:
       https://tle-dev-operator.taildf6cd4.ts.net /auth/callback /
     reconcile_client tle-admin-prod TLE_ADMIN_PROD_CLIENT_SECRET "The Last Exam Admin (prod)" \
       https://tle-prod-operator.taildf6cd4.ts.net /auth/callback /
+    reconcile_public_client hermes-dashboard "Hermes Agent" \
+      https://hermes.taildf6cd4.ts.net /auth/callback /
     /bin/sh /tle-role-reconciler/reconcile-tle-admin-roles.sh
 ---
 apiVersion: batch/v1

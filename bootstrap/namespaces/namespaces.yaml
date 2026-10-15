@@ -157,19 +157,6 @@ metadata:
     pod-security.kubernetes.io/warn-version: v1.36
 ---
 # Hermes agent platform: the read-only infra identity today, worker Jobs in
-# Stage 4 (/srv/projects/agent-platform/docs/architecture.md).
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: agents
-  labels:
-    pod-security.kubernetes.io/enforce: restricted
-    pod-security.kubernetes.io/enforce-version: v1.36
-    pod-security.kubernetes.io/audit: restricted
-    pod-security.kubernetes.io/audit-version: v1.36
-    pod-security.kubernetes.io/warn: restricted
-    pod-security.kubernetes.io/warn-version: v1.36
----
 # Penpot, the design platform, and its MCP server. A dedicated namespace
 # because the onboarding contract requires one, and because this component
 # owns an assets PVC that must not share a lifecycle with anything else.
@@ -189,12 +176,12 @@ metadata:
     pod-security.kubernetes.io/warn: restricted
     pod-security.kubernetes.io/warn-version: v1.36
 ---
-# routeplane tracking dashboard (agent platform): a relay pod only. The dashboard
-# process runs on the node, next to the Hermes gateway whose SQLite store it reads.
+# Native Hermes dashboard relay. The stateful dashboard remains on the node
+# beside the gateway; this namespace contains only the stateless network hop.
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: routeplane
+  name: hermes-dashboard
   labels:
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/enforce-version: v1.36

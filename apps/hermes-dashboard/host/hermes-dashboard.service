@@ -1,0 +1,17 @@
+[Unit]
+Description=Hermes Agent native dashboard
+After=network-online.target k3s.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/slqzeer/.hermes/hermes-agent/venv/bin/python /home/slqzeer/.hermes/hermes-agent/hermes dashboard --host 10.42.0.1 --port 9119 --skip-build --no-open
+WorkingDirectory=/home/slqzeer/.hermes
+Environment=HERMES_HOME=/home/slqzeer/.hermes
+Restart=always
+RestartSec=15
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

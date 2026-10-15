@@ -179,13 +179,13 @@ generates one shared OIDC client secret under `homelab/keycloak-portal`
 `session-current-key` for the portal. It leaves existing values in place;
 if the two OIDC copies differ, the Keycloak copy wins. An existing
 `session-previous-key` survives because the script patches individual
-fields. The `vso-keycloak` role reads only the six paths needed for Keycloak's
-own credentials and its four managed application clients, and
+fields. The `vso-keycloak` role reads only the paths needed for Keycloak's
+own credentials and its confidential managed application clients, and
 `vso-portal` is bound only to `homelab-portal` in namespace `portal`.
 
-The `keycloak-client-registration` PostSync Job reads its managed client
+The `keycloak-client-registration` PostSync Job reads confidential-client
 credentials from VSO. It creates or updates only the explicit portal, Penpot,
-and TLE allowlist. The portal uses callback
+TLE and Hermes allowlist. The portal uses callback
 `https://portal.taildf6cd4.ts.net/auth/callback`, logout
 `https://portal.taildf6cd4.ts.net/auth/logout`, exact portal origin,
 authorization-code flow, and the `groups` scope. It fails if duplicate
@@ -194,6 +194,11 @@ Inspect Job success and the VaultStaticSecret status; do not print
 Kubernetes Secret contents. Keycloak ingress policies permit only its selected
 proxy, the Prometheus agent, registration Job, portal, Nextcloud, Penpot
 backend, and TLE auth-service/edge pods on the ports they use.
+
+Hermes uses a public authorization-code client with PKCE, exact callback
+`https://hermes.taildf6cd4.ts.net/auth/callback`, and no client secret. This
+avoids copying a Kubernetes/Vault credential onto the host while retaining
+code-verifier protection for the authorization exchange.
 
 For other clients, create a confidential OpenID Connect client in the `homelab` console with
 standard authorization-code flow. Add the `groups` default scope, plus

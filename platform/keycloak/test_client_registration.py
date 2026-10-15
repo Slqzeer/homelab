@@ -497,7 +497,7 @@ class ClientRegistrationTests(unittest.TestCase):
                        PENPOT_CLIENT_SECRET="penpot-canary-secret",
                        TLE_ADMIN_DEV_CLIENT_SECRET=tle_dev_secret,
                        TLE_ADMIN_PROD_CLIENT_SECRET=tle_prod_secret,
-                       FAKE_ALLOWLIST="homelab-portal,penpot,tle-admin-dev,tle-admin-prod")
+                       FAKE_ALLOWLIST="homelab-portal,penpot,tle-admin-dev,tle-admin-prod,hermes-dashboard")
             # None models the optional secretKeyRef whose Secret does not
             # exist yet: the kubelet leaves the variable unset entirely.
             if penpot_secret is None:
@@ -570,11 +570,20 @@ class ClientRegistrationTests(unittest.TestCase):
         self.assertEqual("https://portal.taildf6cd4.ts.net/auth/logout",
                          portal["attributes"]["post.logout.redirect.uris"])
         self.assertIn("groups", portal["_default_scopes"])
+        hermes = next(client for client in state if client["clientId"] == "hermes-dashboard")
+        self.assertTrue(hermes["publicClient"])
+        self.assertEqual("none", hermes["clientAuthenticatorType"])
+        self.assertNotIn("secret", hermes)
+        self.assertEqual(
+            "S256",
+            hermes["attributes"]["pkce.code.challenge.method"],
+        )
         writes = [event for event in events if event["args"][0] in ("create", "update")]
-        # Portal, Penpot, then the two TLE clients: each needs one create and
+        # Portal, Penpot, the two TLE clients, then Hermes: each needs one create and
         # one `groups` scope add; the second run adds nothing.
         self.assertEqual(
-            ["create", "update", "create", "update", "create", "update", "create", "update"],
+            ["create", "update", "create", "update", "create", "update", "create", "update",
+             "create", "update"],
             [event["args"][0] for event in writes],
         )
         self.assertEqual(
@@ -589,6 +598,8 @@ class ClientRegistrationTests(unittest.TestCase):
                          writes[5]["args"][1])
         self.assertEqual("clients/created-tle-admin-prod/default-client-scopes/groups-id",
                          writes[7]["args"][1])
+        self.assertEqual("clients/created-hermes-dashboard/default-client-scopes/groups-id",
+                         writes[9]["args"][1])
         for event in events:
             self.assertNotIn("portal-canary-secret", " ".join(event["args"]))
             self.assertNotIn("admin-canary-secret", " ".join(event["args"]))
@@ -600,7 +611,10 @@ class ClientRegistrationTests(unittest.TestCase):
         runs, state, events, _ = self.run_hook([])
         self.assertEqual([0, 0], [run.returncode for run in runs], [run.stderr for run in runs])
         ids = sorted(client["clientId"] for client in state)
-        self.assertEqual(["homelab-portal", "penpot", "tle-admin-dev", "tle-admin-prod"], ids)
+        self.assertEqual(
+            ["hermes-dashboard", "homelab-portal", "penpot", "tle-admin-dev", "tle-admin-prod"],
+            ids,
+        )
         penpot = next(client for client in state if client["clientId"] == "penpot")
         self.assertEqual("openid-connect", penpot["protocol"])
         self.assertFalse(penpot["publicClient"])
@@ -648,7 +662,7 @@ class ClientRegistrationTests(unittest.TestCase):
                 runs, state, events, _ = self.run_hook([], penpot_secret=penpot_secret)
                 self.assertEqual([0, 0], [run.returncode for run in runs],
                                  [run.stderr for run in runs])
-                self.assertEqual(["homelab-portal", "tle-admin-dev", "tle-admin-prod"],
+                self.assertEqual(["homelab-portal", "tle-admin-dev", "tle-admin-prod", "hermes-dashboard"],
                                  [client["clientId"] for client in state])
                 self.assertIn("groups", state[0]["_default_scopes"])
                 self.assertFalse(any("penpot" in " ".join(event["args"])
@@ -672,7 +686,7 @@ class ClientRegistrationTests(unittest.TestCase):
         # scope adds, because the fixture has no `_default_scopes` at all.
         # Two more for Penpot, which is created and then gains `groups`.
         self.assertEqual(["update", "update", "update", "update", "create", "update",
-                          "create", "update", "create", "update"],
+                          "create", "update", "create", "update", "create", "update"],
                          [event["args"][0] for event in writes])
         self.assertEqual("clients/portal-id", writes[0]["args"][1])
         self.assertIn("--merge", writes[0]["args"])
@@ -686,7 +700,7 @@ class ClientRegistrationTests(unittest.TestCase):
         self.assertEqual([0, 0], [run.returncode for run in runs], [run.stderr for run in runs])
         self.assertEqual(["profile", "email", "custom", "groups"], state[0]["_default_scopes"])
         writes = [event for event in events if event["args"][0] == "update"]
-        self.assertEqual(5, len(writes), writes)
+        self.assertEqual(6, len(writes), writes)
         self.assertEqual("clients/portal-id/default-client-scopes/groups-id", writes[1]["args"][1])
 
     def test_scope_link_must_be_verified(self):
@@ -773,6 +787,7 @@ class ClientRegistrationTests(unittest.TestCase):
         # Both allowlist entries, each naming its own secret env var.
         self.assertIn("reconcile_client homelab-portal PORTAL_CLIENT_SECRET", script)
         self.assertIn("reconcile_client penpot PENPOT_CLIENT_SECRET", script)
+        self.assertIn("reconcile_public_client hermes-dashboard", script)
         self.assertIn("del(.secret)", script)
         for doc in resources(CONFIG / "vault-secrets.yaml"):
             if doc and doc["kind"] == "VaultStaticSecret":

@@ -584,9 +584,7 @@ class PortalIngressPublicationTests(unittest.TestCase):
         ("argocd", "argocd"): ("Argo CD", "groups", "homelab-admins"),
         ("keycloak", "keycloak"): ("Keycloak", "groups", "homelab-admins"),
         ("penpot", "penpot"): ("Penpot", "authenticated", None),
-        # Owner-approved 2026-10-09. Exception: the target has no login of its
-        # own, the tailnet is the gate (docs/runbooks/routeplane-dashboard.md).
-        ("routeplane", "routeplane"): ("routeplane", "groups", "homelab-admins"),
+        ("hermes-dashboard", "hermes-dashboard"): ("Hermes Agent", "groups", "homelab-admins"),
     }
 
     @staticmethod
@@ -694,7 +692,7 @@ class PenpotRegistrationTests(unittest.TestCase):
     expected_namespaces = [
         "cert-manager", "vault", "tailscale", "vault-secrets-operator-system",
         "databases", "apps", "monitoring", "logging", "keycloak", "portal",
-        "tle-dev", "omniroute", "egress", "agents", "penpot", "routeplane",
+        "tle-dev", "omniroute", "egress", "penpot", "hermes-dashboard",
     ]
 
     # Each digest bound to the image it belongs to. Bare 64-hex substrings
@@ -1302,6 +1300,124 @@ class PenpotRegistrationTests(unittest.TestCase):
         text = yaml.safe_dump(ingress)
         for forbidden in ("6060", "6061", "4401", "4402", "admin-console"):
             self.assertNotIn(forbidden, text)
+
+
+class HermesDashboardDeploymentTests(unittest.TestCase):
+    @staticmethod
+    def load(path):
+        with (REPOSITORY_ROOT / path).open(encoding="utf-8") as stream:
+            return [document for document in yaml.safe_load_all(stream) if document]
+
+    def test_routeplane_is_replaced_by_hermes_dashboard_everywhere(self):
+        tracked = subprocess.run(
+            ["git", "-C", str(REPOSITORY_ROOT), "ls-files"],
+            check=True, capture_output=True, text=True,
+        ).stdout.splitlines()
+        existing = [path for path in tracked if (REPOSITORY_ROOT / path).exists()]
+        self.assertFalse(any("routeplane" in path.lower() for path in existing), existing)
+
+        namespaces = self.load("bootstrap/namespaces/namespaces.yaml")
+        names = [item["metadata"]["name"] for item in namespaces]
+        self.assertIn("hermes-dashboard", names)
+        self.assertNotIn("routeplane", names)
+        namespace = next(
+            item for item in namespaces
+            if item["metadata"]["name"] == "hermes-dashboard"
+        )
+        for mode in ("enforce", "audit", "warn"):
+            self.assertEqual(
+                "restricted",
+                namespace["metadata"]["labels"][f"pod-security.kubernetes.io/{mode}"],
+            )
+            self.assertEqual(
+                "v1.36",
+                namespace["metadata"]["labels"][f"pod-security.kubernetes.io/{mode}-version"],
+            )
+
+    def test_application_deploys_the_stateless_relay(self):
+        application, = self.load("environments/homelab/apps/hermes-dashboard.yaml")
+        self.assertEqual("hermes-dashboard", application["metadata"]["name"])
+        self.assertEqual("23", application["metadata"]["annotations"]["argocd.argoproj.io/sync-wave"])
+        self.assertEqual("v1", application["metadata"]["annotations"]["homelab.io/onboarding-contract"])
+        self.assertEqual("stateless", application["metadata"]["annotations"]["homelab.io/state"])
+        self.assertEqual("apps/hermes-dashboard/config", application["spec"]["source"]["path"])
+        self.assertEqual("hermes-dashboard", application["spec"]["destination"]["namespace"])
+        self.assertEqual(
+            {"prune": True, "selfHeal": True},
+            application["spec"]["syncPolicy"]["automated"],
+        )
+
+    def test_relay_is_restricted_and_proxies_http_and_websockets(self):
+        resources = self.load("apps/hermes-dashboard/config/relay.yaml")
+        by_kind = {item["kind"]: item for item in resources}
+        config = by_kind["ConfigMap"]["data"]["nginx.conf"]
+        self.assertIn("proxy_pass http://10.42.0.1:9119", config)
+        self.assertIn("proxy_set_header Upgrade $http_upgrade", config)
+        self.assertIn("proxy_set_header Connection $connection_upgrade", config)
+        self.assertIn("proxy_set_header X-Forwarded-Proto https", config)
+        self.assertNotIn("$request_uri", config)
+
+        deployment = by_kind["Deployment"]
+        pod = deployment["spec"]["template"]["spec"]
+        self.assertIs(False, pod["automountServiceAccountToken"])
+        self.assertIs(True, pod["securityContext"]["runAsNonRoot"])
+        container, = pod["containers"]
+        self.assertIs(False, container["securityContext"]["allowPrivilegeEscalation"])
+        self.assertIs(True, container["securityContext"]["readOnlyRootFilesystem"])
+        self.assertEqual(["ALL"], container["securityContext"]["capabilities"]["drop"])
+        self.assertEqual("/api/health", container["readinessProbe"]["httpGet"]["path"])
+        self.assertEqual({"cpu", "memory"}, set(container["resources"]["requests"]))
+        self.assertEqual({"cpu", "memory"}, set(container["resources"]["limits"]))
+
+        service = by_kind["Service"]
+        self.assertEqual("ClusterIP", service["spec"].get("type", "ClusterIP"))
+        self.assertEqual([{"name": "http", "port": 80, "targetPort": "http"}], service["spec"]["ports"])
+
+    def test_network_policy_allows_only_tailnet_and_dashboard_host(self):
+        resources = self.load("apps/hermes-dashboard/config/networkpolicy.yaml")
+        policies = {item["metadata"]["name"]: item for item in resources}
+        self.assertEqual(
+            {"default-deny-ingress", "default-deny-egress", "hermes-dashboard-tailnet", "hermes-dashboard-host"},
+            set(policies),
+        )
+        ingress = policies["hermes-dashboard-tailnet"]["spec"]["ingress"]
+        self.assertEqual(8080, ingress[0]["ports"][0]["port"])
+        labels = ingress[0]["from"][0]["podSelector"]["matchLabels"]
+        self.assertEqual("true", labels["tailscale.com/managed"])
+        egress = policies["hermes-dashboard-host"]["spec"]["egress"]
+        self.assertEqual("10.42.0.1/32", egress[0]["to"][0]["ipBlock"]["cidr"])
+        self.assertEqual(9119, egress[0]["ports"][0]["port"])
+
+    def test_ingress_publishes_only_the_dashboard_service(self):
+        ingress, = self.load("infrastructure/ingress/config/hermes-dashboard-ingress.yaml")
+        self.assertEqual("hermes-dashboard", ingress["metadata"]["namespace"])
+        self.assertEqual("ingress", ingress["metadata"]["annotations"]["tailscale.com/proxy-group"])
+        self.assertEqual("groups", ingress["metadata"]["annotations"]["portal.homelab.io/access"])
+        self.assertEqual("homelab-admins", ingress["metadata"]["annotations"]["portal.homelab.io/groups"])
+        self.assertEqual("tailscale", ingress["spec"]["ingressClassName"])
+        self.assertEqual([{"hosts": ["hermes"]}], ingress["spec"]["tls"])
+        self.assertEqual(
+            {"name": "hermes-dashboard", "port": {"number": 80}},
+            ingress["spec"]["defaultBackend"]["service"],
+        )
+
+    def test_keycloak_reconciles_a_public_pkce_client(self):
+        resources = self.load("platform/keycloak/config/client-registration.yaml")
+        config = next(item for item in resources if item["kind"] == "ConfigMap")
+        script = config["data"]["reconcile.sh"]
+        self.assertIn("reconcile_public_client hermes-dashboard", script)
+        self.assertIn("https://hermes.taildf6cd4.ts.net /auth/callback /", script)
+        self.assertIn('publicClient: true', script)
+        self.assertIn('clientAuthenticatorType: "none"', script)
+        self.assertNotIn("HERMES_DASHBOARD_CLIENT_SECRET", script)
+
+    def test_host_unit_runs_the_native_dashboard_on_the_pod_network(self):
+        unit = (REPOSITORY_ROOT / "apps/hermes-dashboard/host/hermes-dashboard.service").read_text(encoding="utf-8")
+        self.assertIn("--host 10.42.0.1 --port 9119", unit)
+        self.assertIn("--skip-build", unit)
+        self.assertIn("--no-open", unit)
+        self.assertIn("Restart=always", unit)
+        self.assertIn("NoNewPrivileges=yes", unit)
 
 
 if __name__ == "__main__":

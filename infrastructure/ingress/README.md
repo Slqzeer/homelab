@@ -135,6 +135,7 @@ The initial catalogue is intentionally narrow:
 | Vault | `groups: homelab-admins` | root-token administrative UI |
 | Argo CD | `groups: homelab-admins` | local administrator only; Dex is disabled |
 | Keycloak | `groups: homelab-admins` | identity administration console |
+| Hermes Agent | `groups: homelab-admins` | agent configuration, credentials and sessions |
 
 Credential-free checks on 2026-09-24 confirmed that the Vault and
 Keycloak administrative APIs reject anonymous requests. Argo CD's

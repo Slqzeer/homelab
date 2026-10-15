@@ -1,41 +1,31 @@
-# Fence around the relay. Default-deny both directions; every flow below
-# names a party and a port.
-#
-# Parties: tailnet proxy -> relay 8080; relay -> the dashboard process on the
-# node, at the node's pod-network address 10.42.0.1:8765 (cni0, where the
-# routeplane-dashboard user service binds). No DNS: the upstream is an IP.
----
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: default-deny-ingress
-  namespace: routeplane
+  namespace: hermes-dashboard
 spec:
   podSelector: {}
-  policyTypes:
-    - Ingress
+  policyTypes: [Ingress]
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: default-deny-egress
-  namespace: routeplane
+  namespace: hermes-dashboard
 spec:
   podSelector: {}
-  policyTypes:
-    - Egress
+  policyTypes: [Egress]
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: routeplane-tailnet
-  namespace: routeplane
+  name: hermes-dashboard-tailnet
+  namespace: hermes-dashboard
 spec:
   podSelector:
     matchLabels:
-      app: routeplane-relay
-  policyTypes:
-    - Ingress
+      app: hermes-dashboard-relay
+  policyTypes: [Ingress]
   ingress:
     - from:
         - namespaceSelector:
@@ -51,18 +41,17 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: routeplane-dashboard-host
-  namespace: routeplane
+  name: hermes-dashboard-host
+  namespace: hermes-dashboard
 spec:
   podSelector:
     matchLabels:
-      app: routeplane-relay
-  policyTypes:
-    - Egress
+      app: hermes-dashboard-relay
+  policyTypes: [Egress]
   egress:
     - to:
         - ipBlock:
             cidr: 10.42.0.1/32
       ports:
         - protocol: TCP
-          port: 8765
+          port: 9119
