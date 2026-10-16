@@ -63,7 +63,6 @@ jobs:
           # below schema-check it; cross-namespace objects (databases,
           # keycloak) are expected and kept as-is (see its kustomization).
           kustomize build apps/tle-dev/config > rendered/tle-dev-config.yaml
-          kustomize build apps/omniroute/config > rendered/omniroute-config.yaml
           kustomize build apps/penpot/config > rendered/penpot-config.yaml
           kustomize build apps/hermes-dashboard/config > rendered/hermes-dashboard-config.yaml
 
