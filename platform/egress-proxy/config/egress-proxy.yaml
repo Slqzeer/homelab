@@ -1,6 +1,6 @@
 # Allowlisting egress proxy (Squid). The ONE place in the cluster with broad
 # internet egress (TCP 443), compensated by an L7 domain allowlist. Clients
-# (OmniRoute today) may reach only this proxy, never the internet directly,
+# (none today) may reach only this proxy, never the internet directly,
 # which is what lets them keep the onboarding contract's no-0.0.0.0/0 rule.
 #
 # Image: Canonical ubuntu/squid 6.6 on Ubuntu 24.04 LTS, tag + digest pinned.
@@ -31,7 +31,7 @@ spec:
       annotations:
         # Bump with every configmap.yaml change: plain manifests have no
         # content hash, so this is what rolls the pod onto the new config.
-        egress-proxy.homelab.io/config-revision: "4"
+        egress-proxy.homelab.io/config-revision: "5"
     spec:
       serviceAccountName: egress-proxy
       automountServiceAccountToken: false

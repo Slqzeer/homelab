@@ -575,9 +575,9 @@ last thought about it.
   are recorded in `docs/runbooks/penpot-recovery.md` so an upgrade can be
   checked against them.
 - **Penpot's egress-proxy grant is inert.** `apps/penpot/config/networkpolicy.yaml`
-  lets the backend reach the egress proxy on 3128, but the `egress` namespace's
-  `egress-proxy-clients` policy admits only `omniroute`, and Penpot's values
-  configure no proxy. Outbound mail and external providers are therefore
+  lets the backend reach the egress proxy on 3128, but the `egress` namespace
+  admits no client (it has no `egress-proxy-clients` policy), and Penpot's
+  values configure no proxy. Outbound mail and external providers are therefore
   unavailable until both sides are wired.
 - **Penpot shares the cache's password and its eviction policy.** It reads the
   shared Redis password through VSO from `homelab/redis`, so rotating that

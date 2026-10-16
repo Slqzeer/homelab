@@ -1122,7 +1122,6 @@ Une fois la plateforme stable, ajouter :
 Nextcloud
 Vaultwarden
 Immich
-OmniRoute
 applications perso
 autres services
 ```
@@ -1131,12 +1130,6 @@ Chaque application doit être gérée via GitOps autant que possible.
 
 Lorsqu’elle le permet, elle doit utiliser Keycloak comme fournisseur OIDC afin
 que les utilisateurs se connectent avec leur compte homelab unique.
-
-Prévoir notamment une instance OmniRoute (passerelle IA locale, point
-d’entrée OpenAI-compatible unique devant les fournisseurs configurés) déployée
-comme les autres applications personnelles : via GitOps, exposée en tailnet
-uniquement, adossée à Keycloak lorsque l’application le permet, avec secrets
-via Vault et sauvegardes de son état local.
 
 ---
 
