@@ -692,7 +692,7 @@ class PenpotRegistrationTests(unittest.TestCase):
     expected_namespaces = [
         "cert-manager", "vault", "tailscale", "vault-secrets-operator-system",
         "databases", "apps", "monitoring", "logging", "keycloak", "portal",
-        "tle-dev", "egress", "penpot", "hermes-dashboard",
+        "tle-dev", "egress", "agents", "penpot", "hermes-dashboard",
     ]
 
     # Each digest bound to the image it belongs to. Bare 64-hex substrings
