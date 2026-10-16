@@ -85,6 +85,23 @@ TOTP on its first login, stricter than the roadmap's admins-only request.
 passwords; it is non-default, so existing permanent passwords are not
 changed on every login. Users and their credentials never belong in git.
 
+### Session lifetimes (1h idle / 24h max)
+
+The `homelab` seed sets SSO idle 1h (`ssoSessionIdleTimeout: 3600`,
+`clientSessionIdleTimeout: 3600`), SSO/client max 24h (`86400`), access
+tokens 1h (`accessTokenLifespan: 3600`), and both RememberMe timeouts to
+24h. `IGNORE_EXISTING` means the running realm keeps its old 30-minute
+defaults until a human applies the same values: **homelab → Realm
+Settings → Sessions** (SSO idle 1h, SSO max 24h, client idle 1h, client
+max 24h, RememberMe idle/max 24h) and **Tokens** (access token lifespan
+1h). Take a database backup with the recipe below before changing them.
+
+Stock-Keycloak limit: these timeouts govern the whole SSO session, so an
+expired session re-asks password **and** OTP together. OTP is therefore at
+most hourly (idle) and at least daily — a strict "password hourly, OTP
+only daily" split would need a custom OTP-remember authenticator or
+per-client step-up auth, neither adopted here.
+
 ### Repair the existing realm and complete browser acceptance
 
 This is an operator procedure. The corrected seed applies to fresh

@@ -30,6 +30,15 @@
 # resetPasswordAllowed is false because there is NO SMTP anywhere in this
 # homelab. Left true, "Forgot password" renders a form that silently never
 # sends mail. Recovery is the break-glass admin of the `master` realm.
+#
+# Session lifetimes: SSO idle 1h, SSO max 24h. Stock Keycloak timeouts
+# govern the whole SSO session, so an expired idle session re-runs the full
+# browser flow (password + OTP). There is no separate OTP-only timeout; OTP
+# is therefore at most hourly when idle and at least daily, not strictly
+# "password hourly, OTP daily". A strict split needs a custom OTP-remember
+# authenticator or per-client step-up auth, deliberately not adopted here.
+# Fresh imports only (IGNORE_EXISTING): the live realm needs the same values
+# applied by hand, see platform/keycloak/README.md.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -45,6 +54,13 @@ data:
       "registrationAllowed": false,
       "resetPasswordAllowed": false,
       "rememberMe": true,
+      "ssoSessionIdleTimeout": 3600,
+      "ssoSessionMaxLifespan": 86400,
+      "ssoSessionIdleTimeoutRememberMe": 86400,
+      "ssoSessionMaxLifespanRememberMe": 86400,
+      "clientSessionIdleTimeout": 3600,
+      "clientSessionMaxLifespan": 86400,
+      "accessTokenLifespan": 3600,
       "loginWithEmailAllowed": true,
       "duplicateEmailsAllowed": false,
       "bruteForceProtected": true,
