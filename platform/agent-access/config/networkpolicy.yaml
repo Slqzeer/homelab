@@ -1,0 +1,21 @@
+# The agents namespace holds no workloads. Default-deny both directions so a
+# future workload has to declare its flows.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: agents
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: agents
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
