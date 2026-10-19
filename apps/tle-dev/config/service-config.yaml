@@ -1,0 +1,142 @@
+# TLE service datastore addresses (issue #50, rollout step 1).
+#
+# One ConfigMap per service keeps address ownership aligned with each future
+# Deployment's envFrom/configMapKeyRef. These values contain no userinfo;
+# database, Valkey, and NATS credentials are delivered separately by VSO.
+# Keep the legacy URL templates in vault-secrets.yaml until a server release
+# containing The-Last-Exam/server#114 is pinned and verified (rollout step 2).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tle-dev-admin-audit-writer-config
+  namespace: tle-dev
+data:
+  DATABASE_URL: "postgres://postgres.databases:5432/tle_dev"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tle-dev-auth-service-config
+  namespace: tle-dev
+data:
+  DATABASE_URL: "postgres://postgres.databases:5432/tle_dev"
+  NATS_URL: "nats://tle-dev-nats.tle-dev.svc.cluster.local:4222"
+  VALKEY_URL: "redis://tle-dev-valkey.tle-dev.svc.cluster.local:6379"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tle-dev-game-master-config
+  namespace: tle-dev
+data:
+  NATS_URL: "nats://tle-dev-nats.tle-dev.svc.cluster.local:4222"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tle-dev-game-service-config
+  namespace: tle-dev
+data:
+  NATS_URL: "nats://tle-dev-nats.tle-dev.svc.cluster.local:4222"
+  VALKEY_URL: "redis://tle-dev-valkey.tle-dev.svc.cluster.local:6379"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tle-dev-internal-admin-gateway-config
+  namespace: tle-dev
+data:
+  VALKEY_URL: "redis://tle-dev-valkey.tle-dev.svc.cluster.local:6379"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tle-dev-internal-ops-gateway-config
+  namespace: tle-dev
+data:
+  VALKEY_URL: "redis://tle-dev-valkey.tle-dev.svc.cluster.local:6379"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tle-dev-lobby-service-config
+  namespace: tle-dev
+data:
+  NATS_URL: "nats://tle-dev-nats.tle-dev.svc.cluster.local:4222"
+  VALKEY_ADDR: "tle-dev-valkey.tle-dev.svc.cluster.local:6379"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tle-dev-matchmaking-service-config
+  namespace: tle-dev
+data:
+  NATS_URL: "nats://tle-dev-nats.tle-dev.svc.cluster.local:4222"
+  VALKEY_ADDR: "tle-dev-valkey.tle-dev.svc.cluster.local:6379"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tle-dev-metadata-service-config
+  namespace: tle-dev
+data:
+  DATABASE_URL: "postgres://postgres.databases:5432/tle_dev_metadata"
+  NATS_URL: "nats://tle-dev-nats.tle-dev.svc.cluster.local:4222"
+  VALKEY_ADDR: "tle-dev-valkey.tle-dev.svc.cluster.local:6379"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tle-dev-notification-service-config
+  namespace: tle-dev
+data:
+  DATABASE_URL: "postgres://postgres.databases:5432/tle_dev"
+  NATS_URL: "nats://tle-dev-nats.tle-dev.svc.cluster.local:4222"
+  VALKEY_ADDR: "tle-dev-valkey.tle-dev.svc.cluster.local:6379"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tle-dev-player-service-config
+  namespace: tle-dev
+data:
+  DATABASE_URL: "postgres://postgres.databases:5432/tle_dev"
+  NATS_URL: "nats://tle-dev-nats.tle-dev.svc.cluster.local:4222"
+  VALKEY_ADDR: "tle-dev-valkey.tle-dev.svc.cluster.local:6379"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tle-dev-projection-writer-config
+  namespace: tle-dev
+data:
+  DATABASE_URL: "postgres://postgres.databases:5432/tle_dev"
+  NATS_URL: "nats://tle-dev-nats.tle-dev.svc.cluster.local:4222"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tle-dev-quest-service-config
+  namespace: tle-dev
+data:
+  QUEST_DATABASE_URL: "postgres://postgres.databases:5432/tle_dev_quest"
+  QUEST_NATS_URL: "nats://tle-dev-nats.tle-dev.svc.cluster.local:4222"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tle-dev-social-service-config
+  namespace: tle-dev
+data:
+  DATABASE_URL: "postgres://postgres.databases:5432/tle_dev"
+  NATS_URL: "nats://tle-dev-nats.tle-dev.svc.cluster.local:4222"
+  VALKEY_ADDR: "tle-dev-valkey.tle-dev.svc.cluster.local:6379"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tle-dev-wsterminator-config
+  namespace: tle-dev
+data:
+  NATS_URL: "nats://tle-dev-nats.tle-dev.svc.cluster.local:4222"
+  VALKEY_ADDR: "tle-dev-valkey.tle-dev.svc.cluster.local:6379"

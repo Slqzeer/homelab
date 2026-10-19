@@ -17,10 +17,28 @@ re-vendor on each TLE release with `gh api repos/The-Last-Exam/server/...`).
 | Identity headers | 26 headers + 5 prefixes (see `edge-config.yaml`) |
 | Public routes | 62 routes across 9 services (see `public-routes.json`) |
 | Object storage (S3 endpoint) | _open_: deploy MinIO in-cluster (`tle-dev` + PVC + Service + bucket job) or point `MINIO_ENDPOINT` at an external MinIO; then create the access pair in its console and seed `MINIO_*`. Blocks metadata-service only — nothing deployed today consumes it. |
-| Non-secret service config | Convention (do not put these in Vault): every `config-keys.json` entry with `"secret": false` (OAuth client IDs, `MINIO_BUCKET/ENDPOINT/USE_SSL`, ports, URLs) becomes a plain env var from a per-service ConfigMap (same `configMapKeyRef` shape as `edge-config.yaml`) when the service Deployments are authored. `"secret": true` entries go to Vault via VSO + `secretKeyRef`. |
+| Non-secret service config | Per-service ConfigMaps in `service-config.yaml`; datastore URLs contain no userinfo. Other `config-keys.json` entries with `"secret": false` follow the same pattern when Deployments are authored. |
+| Datastore credential split | Step 1 staged: ConfigMap addresses and split VSO keys coexist with legacy URL secrets. Steps 2–3 wait for a release containing `The-Last-Exam/server#114`. |
 
 Every Deployment uses `tag@digest`, never `latest`. `images.json` is not in
 git (a digest exists only after a push); record the values here at promotion.
+
+### Datastore credential split rollout
+
+The order below is a compatibility boundary; do not combine or reorder it.
+
+1. Apply `service-config.yaml` and the split database user/password keys in
+   `tle-dev-data-secrets` while retaining the legacy URL keys.
+2. Pin a server release containing `The-Last-Exam/server#114`, re-vendor its
+   `deploy-info/config-keys.json`, and wire every Deployment to its per-service
+   ConfigMap plus the applicable credential keys. Verify all services connect
+   before proceeding.
+3. Remove `DATABASE_URL`, `METADATA_DATABASE_URL`, and `QUEST_DATABASE_URL`
+   templates from `tle-dev-data` only after step 2 passes the live check.
+
+Rollback before step 3 by pinning the prior server release; the legacy URL
+keys remain available. After step 3, restore the prior Git revision first so
+VSO recreates those keys, then roll back the server release.
 
 ## Ownership and state
 
@@ -100,6 +118,10 @@ workloads can run; sync alone is not enough.
       resources recorded: _fill in_
 - [ ] OIDC + tailnet-only reachability verified; secret rotation restarts
       consumers
+- [ ] After the #114 release pin, every service reports ready while taking
+      datastore addresses from its `tle-dev-*-config` ConfigMap and database
+      credentials from `tle-dev-data-secrets`; record release, date, and result:
+      _fill in_. Only then remove the legacy URL templates (rollout step 3).
 
 ## Retirement
 
