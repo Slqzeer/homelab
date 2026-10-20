@@ -33,6 +33,9 @@ jobs:
       - name: Validate application onboarding contract
         run: python3 -m unittest -v tests.test_application_onboarding
 
+      - name: Validate database tailnet services
+        run: python3 -m unittest -v tests.test_database_tailnet_services
+
       - name: Validate metric allowlist on every scrape
         run: python3 -m unittest -v tests.test_metric_allowlist
 

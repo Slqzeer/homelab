@@ -153,6 +153,35 @@ vault write auth/kubernetes/role/vso-redis \
     token_policies=vso-redis-read \
     ttl=1h
 
+echo "==> seeding homelab/qdrant"
+if vault kv get homelab/qdrant >/dev/null 2>&1; then
+  echo "    already present, leaving the credential alone"
+else
+  # 48 alphanumeric characters provide more than 256 bits of entropy. The
+  # value is written through a file so it never appears in process arguments.
+  QDRANT_KEYFILE=$(mktemp)
+  trap 'rm -f "$QDRANT_KEYFILE"' EXIT
+  head -c 384 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 48 > "$QDRANT_KEYFILE"
+  vault kv put homelab/qdrant api-key=@"$QDRANT_KEYFILE" >/dev/null
+  rm -f "$QDRANT_KEYFILE"
+  echo "    generated"
+fi
+
+echo "==> policy vso-qdrant-read"
+vault policy write vso-qdrant-read - <<'POLICY'
+path "homelab/data/qdrant" {
+  capabilities = ["read"]
+}
+POLICY
+
+echo "==> role vso-qdrant"
+vault write auth/kubernetes/role/vso-qdrant \
+    bound_service_account_names=qdrant \
+    bound_service_account_namespaces=databases \
+    audience=vault \
+    token_policies=vso-qdrant-read \
+    ttl=1h
+
 echo "==> policy vso-ghcr-read"
 # The data/ segment is REQUIRED and is not a typo -- see the note on
 # vso-canary-read above.

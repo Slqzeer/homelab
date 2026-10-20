@@ -20,6 +20,7 @@ manifest ever applied by hand.
 | `platform/vault-secrets-operator/` | Vault Secrets Operator: Helm values, `VaultConnection`/`VaultAuth`/`VaultStaticSecret` manifests |
 | `platform/databases/postgres/` | PostgreSQL: StatefulSet, PVC, its own Vault-Secrets-Operator wiring, README |
 | `platform/databases/redis/` | Redis: ephemeral cache, its own Vault-Secrets-Operator wiring, README |
+| `platform/databases/qdrant/` | Qdrant: persistent vector database, VSO API key, and tailnet-native REST/gRPC Services |
 | `platform/registry/` | GHCR pull credential: Vault Secrets Operator wiring, README covering issuing, seeding and rotating the token |
 | `platform/keycloak/` | OIDC identity provider, first-import realm seed, database Job, VSO wiring and recovery/backup ceremonies |
 | `observability/monitoring/` | Prometheus agent remote-writing to Grafana Cloud: Helm values with the series allowlist, VSO wiring for the Grafana Cloud credential, every ServiceMonitor and its exporter. See `observability/monitoring/README.md` |
@@ -35,21 +36,21 @@ Application picks it up; nothing is applied by hand. Order components with the
 `argocd.argoproj.io/sync-wave` annotation: infrastructure 0-2, platform 10
 (`vault`), apps 20, `ingress-config` and `vso-operator` sharing wave 21
 deliberately (see below for why `vso-operator` is not right after `vault`),
-`vso-config` at 22, and wave 23 shared by `postgres`, `redis`, `registry`
-and `monitoring` — **not** because `vso-config` creates a Secret any
+`vso-config` at 22, and wave 23 shared by `postgres`, `redis`, `qdrant`,
+`registry` and `monitoring` — **not** because `vso-config` creates a Secret any
 of them consumes (it does not: `postgres-credentials`, `redis-credentials`,
-`ghcr-pull` and `grafana-cloud` are each created by that
+`qdrant-credentials`, `ghcr-pull` and `grafana-cloud` are each created by that
 component's own `VaultStaticSecret`, shipped in its own Application at wave
-23), but because all four need the
+23), but because all five need the
 VSO **operator** (`vso-operator`, wave 21) already running and Vault's
 configure ceremony already run — the same two preconditions `vso-config`
 itself depends on, which is why they naturally land after it rather than
 because of it. Sharing the wave rather than stacking one behind another
-lets them reconcile in parallel since none of the four depends on
+lets them reconcile in parallel since none of the five depends on
 another.
 
 Phase 24 added `logging-agent` (Alloy) to that same wave. Since logs moved
-to Grafana Cloud it needs the same two preconditions as the four above —
+to Grafana Cloud it needs the same two preconditions as the five above —
 it reads the `grafana-cloud` credential through its own `VaultStaticSecret`
 — and nothing at wave 23 gates it.
 
@@ -255,6 +256,12 @@ and OIDC setup are documented in `platform/keycloak/README.md`. Dashboards,
 metrics and logs are in **Grafana Cloud** (login with the grafana.com
 account; see `observability/monitoring/README.md`). Argo CD deliberately is
 not an OIDC client yet.
+
+Qdrant is available on the tailnet at
+`http://qdrant.taildf6cd4.ts.net:6333` (REST) and
+`qdrant.taildf6cd4.ts.net:6334` (gRPC). Redis is available at
+`redis.taildf6cd4.ts.net:6379`. Both require their Vault-managed credentials;
+neither is exposed on the LAN or public internet.
 
 Penpot is at **<https://penpot.taildf6cd4.ts.net>**, signing in through
 Keycloak. Its MCP endpoint is reached through that same hostname at

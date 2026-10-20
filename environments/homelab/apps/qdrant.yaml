@@ -1,0 +1,27 @@
+# Qdrant vector database.
+#
+# Wave 23: Qdrant needs the VSO operator and the Vault configure ceremony,
+# but it does not depend on PostgreSQL or Redis. Keeping it beside those
+# components lets all three reconcile in parallel.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: qdrant
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "23"
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:Slqzeer/homelab.git
+    targetRevision: main
+    path: platform/databases/qdrant/config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: databases
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
