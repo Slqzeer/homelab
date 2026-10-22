@@ -34,7 +34,7 @@ domains means it is on.
 `config/` must contain only valid Kubernetes manifests. The Application
 applies every YAML in it, and a Helm values file has no `kind`.
 
-## Exposing a new service
+## Exposing a new HTTP service
 
 Every Ingress joins the shared `ingress` ProxyGroup (`config/proxygroup.yaml`,
 two replicas). Each hostname is published as a **Tailscale Service**
@@ -80,6 +80,45 @@ old dedicated-proxy labels (`parent-resource: <service>`,
 
 Only HTTPS (443) is served. Dedicated proxies also answered on port 80; pool
 Services do not.
+
+## Exposing a native TCP service
+
+Non-HTTP protocols use a Tailscale layer-3 `LoadBalancer` Service rather than
+a Kubernetes Ingress. Redis and Qdrant are the worked examples. The Service
+lives beside the workload because it shares that workload's selector and
+ports; the centralized wave-21 rule above applies to HTTP Ingress objects,
+not to these Services.
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: <service>-tailnet
+  namespace: <namespace>
+  annotations:
+    tailscale.com/proxy-group: ingress
+    tailscale.com/hostname: <service>
+spec:
+  type: LoadBalancer
+  loadBalancerClass: tailscale
+  selector:
+    app: <service>
+  ports:
+    - name: protocol
+      port: 1234
+      targetPort: 1234
+```
+
+`tailscale.com/hostname` is a short MagicDNS name. The example becomes
+`<service>.taildf6cd4.ts.net`. The existing `autoApprovers.services` entry in
+`infrastructure/networking/policy.hujson` approves the resulting Tailscale
+Service because both it and the `ingress` ProxyGroup use `tag:k8s`.
+
+The workload's NetworkPolicy must admit the shared pool using the same
+`tailscale.com/parent-resource: ingress` and
+`tailscale.com/parent-resource-type: proxygroup` labels as HTTP backends. List
+only the client ports: internal cluster or administration ports must not be
+carried into the tailnet Service merely because the container exposes them.
 
 ### History: the pool was abandoned once
 

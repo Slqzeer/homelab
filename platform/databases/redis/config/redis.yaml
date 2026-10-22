@@ -53,9 +53,27 @@ metadata:
   namespace: databases
 spec:
   # A normal ClusterIP, unlike PostgreSQL's headless Service -- this is a
-  # Deployment with no stable network identity to preserve. No Ingress: the
-  # Redis wire protocol is not HTTP and does not belong behind the tailnet
-  # proxy.
+  # Deployment with no stable network identity to preserve.
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+---
+# Redis is a native TCP protocol, so use Tailscale layer-3 ingress instead of
+# an HTTP Ingress. This creates svc:redis on the existing shared ProxyGroup.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-tailnet
+  namespace: databases
+  annotations:
+    tailscale.com/proxy-group: ingress
+    tailscale.com/hostname: redis
+spec:
+  type: LoadBalancer
+  loadBalancerClass: tailscale
   selector:
     app: redis
   ports:

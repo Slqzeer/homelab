@@ -5,7 +5,13 @@ Homelab environment.
 
 ## Reading Order
 
-1. Read the [global knowledge conventions](https://github.com/Slqzeer/global-knowlegde/blob/main/docs/foundations/knowledge-conventions.md) before changing documentation.
+1. Before changing documentation, read the global knowledge conventions. Prefer
+   `/srv/projects/global-knowlegde/docs/foundations/knowledge-conventions.md`
+   only after `git -C /srv/projects/global-knowlegde fetch origin main`
+   succeeds, `git -C /srv/projects/global-knowlegde branch --show-current`
+   returns `main`, and its `HEAD` equals `origin/main`. If the checkout is
+   missing or any check fails, read the private repository through authenticated
+   GitHub CLI access with `gh api -H 'Accept: application/vnd.github.raw+json' 'repos/Slqzeer/global-knowlegde/contents/docs/foundations/knowledge-conventions.md?ref=main'`.
 2. Read [CONTEXT.md](CONTEXT.md) before naming GitOps and environment concepts.
 3. Use the [documentation index](docs/README.md) to select the applicable
    architecture, onboarding, troubleshooting, or runbook document.

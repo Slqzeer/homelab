@@ -1,8 +1,8 @@
 # Redis
 
 Redis 8.2 (`redis:8.2-alpine`, Redis 8.2.9), one Deployment, no PVC, no
-persistence, no backups — a cache, not a database. No Ingress: the wire
-protocol is not HTTP and does not belong behind the tailnet proxy.
+persistence, no backups — a cache, not a database. Its native TCP service is
+available through Tailscale layer-3 ingress; it does not use an HTTP Ingress.
 
 ## What this is, and what it deliberately is not
 
@@ -54,6 +54,13 @@ identity worth preserving. The ACL user is `default`; `requirepass` sets
 the password for exactly that user, so a client URL looks like
 `redis://:PASSWORD@redis.databases.svc:6379` with the username left out
 (or `default` if the client insists on one).
+
+Tailnet clients use `redis.taildf6cd4.ts.net:6379`. The separate
+`redis-tailnet` LoadBalancer Service routes that hostname through the shared
+Tailscale `ingress` ProxyGroup, and `redis-clients` admits only those proxy
+pods in addition to the explicit in-cluster consumers. Tailscale encrypts the
+client-to-proxy path; the final proxy-to-Redis hop stays inside this
+single-node cluster.
 
 From a separate pod, never use `-a` — it puts the password on the command
 line, visible to anything that can read `ps` on the node for as long as the

@@ -1,0 +1,147 @@
+# Qdrant 1.19.2, single-node and persistent. The tailnet Service exposes the
+# client APIs only; port 6335 is Qdrant's internal cluster protocol and is not
+# published because this deployment has one replica.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant
+  namespace: databases
+spec:
+  clusterIP: None
+  selector:
+    app: qdrant
+  ports:
+    - name: http
+      port: 6333
+      targetPort: http
+    - name: grpc
+      port: 6334
+      targetPort: grpc
+---
+# Layer-3 Tailscale ingress preserves Qdrant's native REST and gRPC protocols.
+# The existing autoApprovers.services rule approves the resulting svc:qdrant
+# Tailscale Service because both it and the ProxyGroup use tag:k8s.
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant-tailnet
+  namespace: databases
+  annotations:
+    tailscale.com/proxy-group: ingress
+    tailscale.com/hostname: qdrant
+spec:
+  type: LoadBalancer
+  loadBalancerClass: tailscale
+  selector:
+    app: qdrant
+  ports:
+    - name: http
+      port: 6333
+      targetPort: http
+    - name: grpc
+      port: 6334
+      targetPort: grpc
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: qdrant
+  namespace: databases
+spec:
+  serviceName: qdrant
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qdrant
+  template:
+    metadata:
+      labels:
+        app: qdrant
+    spec:
+      serviceAccountName: qdrant
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 2000
+        fsGroup: 2000
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: qdrant
+          image: qdrant/qdrant:v1.19.2-unprivileged
+          imagePullPolicy: IfNotPresent
+          env:
+            # Environment configuration has the highest precedence in Qdrant.
+            # VSO restarts this StatefulSet when the Secret changes.
+            - name: QDRANT__SERVICE__API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: qdrant-credentials
+                  key: api-key
+            - name: QDRANT__TELEMETRY_DISABLED
+              value: "true"
+          ports:
+            - name: http
+              containerPort: 6333
+            - name: grpc
+              containerPort: 6334
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          volumeMounts:
+            - name: data
+              mountPath: /qdrant/storage
+            # Snapshots are deliberately kept on the same retained volume.
+            # A snapshot is not a backup until copied off the node.
+            - name: data
+              mountPath: /qdrant/snapshots
+              subPath: snapshots
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: local-path
+        resources:
+          requests:
+            # local-path capacity is nominal rather than enforced.
+            storage: 20Gi

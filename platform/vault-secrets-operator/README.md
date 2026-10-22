@@ -102,16 +102,17 @@ Vault's role binds `system:serviceaccount:vault:vault-canary` directly — the
 so it could not be the operator's own ServiceAccount (which lives in
 `vault-secrets-operator-system`) even if that seemed simpler.
 
-## Three consumers, not one
+## Four consumers, not one
 
 `vault-canary` was the only thing exercising this path when this file was
-first written. Phase 18 added a second, real one, and phase 19 a third:
+first written. The `databases` namespace now has three real consumers:
 
 | Consumer | Namespace | Secret | Vault path |
 | --- | --- | --- | --- |
 | `vault-canary` | `vault` | `vault-canary` | `homelab/canary` |
 | PostgreSQL | `databases` | `postgres-credentials` | `homelab/postgres` |
 | Redis | `databases` | `redis-credentials` | `homelab/redis` |
+| Qdrant | `databases` | `qdrant-credentials` | `homelab/qdrant` |
 
 Every namespace needs its **own** `ServiceAccount` and `VaultAuth` — never
 a shared one — because the `VaultAuth` CRD requires that ServiceAccount to
@@ -123,9 +124,9 @@ under the names `postgres` (`ServiceAccount`, `VaultAuth`) and `vault`
 (`VaultConnection`), rather than referencing anything that lives in
 namespace `vault` itself.
 
-Redis is the case that refines this further: it needs its own
-`ServiceAccount` and `VaultAuth` (`redis` in both cases, authenticating as
-a different Vault role), but it does **not** get its own
+Redis and Qdrant refine this further: each needs its own `ServiceAccount` and
+`VaultAuth` (`redis` and `qdrant`, authenticating as different Vault roles),
+but neither gets its own
 `VaultConnection` — it reuses the `vault` `VaultConnection` PostgreSQL
 already created in `databases`. That is not a shortcut; it follows from
 what the CRD actually requires. A `VaultConnection` describes where Vault
@@ -136,9 +137,9 @@ ServiceAccount specifically — never about the `VaultConnection` — so a
 second `VaultConnection` object in the same namespace, pointing at the
 same Vault, would be a duplicate resource with no requirement forcing it
 to exist. See `platform/databases/postgres/README.md` and
-`platform/databases/redis/README.md` for each namespace's own three
-strings that must agree — role `vso-postgres` / `vso-redis`, ServiceAccount
-`postgres` / `redis`, audience `vault` in both cases — the same
+the database component READMEs for each consumer's own three strings that
+must agree — roles `vso-postgres` / `vso-redis` / `vso-qdrant`, matching
+ServiceAccounts, and audience `vault` — the same
 requirement as above, just two independent instances of it sharing one
 `VaultConnection`.
 

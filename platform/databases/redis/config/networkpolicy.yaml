@@ -25,6 +25,14 @@ spec:
         - podSelector:
             matchLabels:
               app: redis-exporter
+        # Shared Tailscale ingress ProxyGroup for redis.taildf6cd4.ts.net.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tailscale
+          podSelector:
+            matchLabels:
+              tailscale.com/parent-resource: ingress
+              tailscale.com/parent-resource-type: proxygroup
         # Penpot: the backend and its exporter (both PENPOT_REDIS_URI) and
         # the MCP server (PENPOT_MCP_REDIS_URI).
         # One peer each, not the whole namespace -- the frontend has no
