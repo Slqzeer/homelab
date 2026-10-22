@@ -1,5 +1,6 @@
 """Contract tests for TLE datastore address and credential delivery."""
 
+import json
 from pathlib import Path
 import unittest
 from urllib.parse import urlsplit
@@ -23,7 +24,7 @@ EXPECTED_SERVICE_CONFIG = {
         "NATS_URL": NATS_URL,
         "VALKEY_URL": VALKEY_URL,
     },
-    "game-master": {"NATS_URL": NATS_URL},
+    "game-master": {"NATS_URL": NATS_URL, "VALKEY_URL": VALKEY_URL},
     "game-service": {"NATS_URL": NATS_URL, "VALKEY_URL": VALKEY_URL},
     "internal-admin-gateway": {"VALKEY_URL": VALKEY_URL},
     "internal-ops-gateway": {"VALKEY_URL": VALKEY_URL},
@@ -70,6 +71,27 @@ class TleDatastoreConfigTests(unittest.TestCase):
         }
         self.assertEqual(EXPECTED_SERVICE_CONFIG, config_maps)
 
+        with (REPOSITORY_ROOT / "apps/tle-dev/deploy-info/config-keys.json").open(
+            encoding="utf-8"
+        ) as stream:
+            deploy_info = json.load(stream)
+        release_address_keys = {
+            service["service"]: {
+                key["name"]
+                for key in service["keys"]
+                if any(datastore in key["name"] for datastore in ("DATABASE", "VALKEY", "NATS"))
+                and key["name"].endswith(("_URL", "_ADDR"))
+            }
+            for service in deploy_info["services"]
+        }
+        release_address_keys = {
+            service: keys for service, keys in release_address_keys.items() if keys
+        }
+        self.assertEqual(
+            release_address_keys,
+            {service: set(data) for service, data in config_maps.items()},
+        )
+
         for service, data in config_maps.items():
             for key, value in data.items():
                 self.assertNotIn("@", value, f"{service} {key} contains userinfo")
@@ -78,7 +100,7 @@ class TleDatastoreConfigTests(unittest.TestCase):
                     self.assertIsNone(parsed.username, f"{service} {key} contains a username")
                     self.assertIsNone(parsed.password, f"{service} {key} contains a password")
 
-    def test_data_secret_adds_split_credentials_alongside_legacy_urls(self):
+    def test_data_secret_contains_only_split_database_credentials(self):
         resources = self.load_documents("apps/tle-dev/config/vault-secrets.yaml")
         data_secret = next(
             resource for resource in resources
@@ -89,9 +111,6 @@ class TleDatastoreConfigTests(unittest.TestCase):
 
         self.assertEqual(
             {
-                "DATABASE_URL",
-                "METADATA_DATABASE_URL",
-                "QUEST_DATABASE_URL",
                 "DATABASE_USER",
                 "DATABASE_PASSWORD",
                 "METADATA_DATABASE_USER",
@@ -113,6 +132,39 @@ class TleDatastoreConfigTests(unittest.TestCase):
             '{{ get .Secrets "quest_password" }}',
             templates["QUEST_DATABASE_PASSWORD"]["text"],
         )
+
+        serialized_templates = yaml.safe_dump(templates)
+        self.assertNotIn("postgres.databases", serialized_templates)
+        self.assertNotIn(":5432", serialized_templates)
+
+    def test_no_vault_template_contains_a_datastore_address(self):
+        resources = self.load_documents("apps/tle-dev/config/vault-secrets.yaml")
+        for resource in resources:
+            if resource["kind"] != "VaultStaticSecret":
+                continue
+            templates = resource["spec"]["destination"]["transformation"]["templates"]
+            for key, template in templates.items():
+                self.assertFalse(key.endswith(("_URL", "_ADDR")), key)
+                text = template["text"]
+                self.assertNotIn("postgres.databases", text, key)
+                self.assertNotIn("tle-dev-valkey", text, key)
+                self.assertNotIn("tle-dev-nats", text, key)
+
+    def test_pinned_release_marks_addresses_non_secret_and_credentials_secret(self):
+        with (REPOSITORY_ROOT / "apps/tle-dev/deploy-info/config-keys.json").open(
+            encoding="utf-8"
+        ) as stream:
+            deploy_info = json.load(stream)
+
+        for service in deploy_info["services"]:
+            for key in service["keys"]:
+                name = key["name"]
+                if not any(datastore in name for datastore in ("DATABASE", "VALKEY", "NATS")):
+                    continue
+                if name.endswith(("_URL", "_ADDR")):
+                    self.assertFalse(key["secret"], f"{service['service']} {name} is secret")
+                if name.endswith(("_USER", "_USERNAME", "_PASSWORD")):
+                    self.assertTrue(key["secret"], f"{service['service']} {name} is not secret")
 
     def test_service_config_is_rendered_by_the_tle_kustomization(self):
         kustomization = self.load_documents("apps/tle-dev/config/kustomization.yaml")[0]

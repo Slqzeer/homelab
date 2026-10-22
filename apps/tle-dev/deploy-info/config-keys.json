@@ -32,7 +32,23 @@
           "description": null
         },
         {
+          "name": "DATABASE_PASSWORD",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "DATABASE_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "DATABASE_USER",
           "required": true,
           "required_when": null,
           "secret": true,
@@ -133,6 +149,14 @@
           "description": null
         },
         {
+          "name": "AUTH_DEV_MODE",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Set to true only in local development to expose the passkey test console; default false."
+        },
+        {
           "name": "AUTH_JWT_ED25519_PRIVATE_KEY_PEM",
           "required": true,
           "required_when": null,
@@ -205,6 +229,30 @@
           "description": null
         },
         {
+          "name": "AUTH_SERVICE_SHUTDOWN_TIMEOUT_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Seconds in-flight requests get to finish after SIGTERM/SIGINT; default 20. Keep the pod's terminationGracePeriodSeconds above it."
+        },
+        {
+          "name": "AUTH_SIGNING_STORE_KEY",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": "Base64-encoded 32-byte XChaCha20-Poly1305 key delivered only through Vault/VSO; encrypts the private signing PEM persisted in Valkey."
+        },
+        {
+          "name": "AUTH_SIGNING_SYNC_INTERVAL_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Seconds between signing-key convergence polls against shared state; default 5, clamped to 1-60. Lowered automatically by NATS rotation hints."
+        },
+        {
           "name": "AUTH_TRUSTED_PROXIES",
           "required": false,
           "required_when": null,
@@ -213,8 +261,32 @@
           "description": null
         },
         {
+          "name": "CORS_ALLOWED_ORIGINS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Comma-separated absolute HTTP(S) browser origins allowed by CORS; unset or empty denies cross-origin access."
+        },
+        {
+          "name": "DATABASE_PASSWORD",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "DATABASE_URL",
           "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Postgres endpoint and database only; userinfo is forbidden."
+        },
+        {
+          "name": "DATABASE_USER",
+          "required": true,
           "required_when": null,
           "secret": true,
           "points_to": null,
@@ -321,10 +393,34 @@
           "description": "Operator sign-in is disabled unless this and KEYCLOAK_ISSUER are set."
         },
         {
+          "name": "NATS_PASSWORD",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "NATS_URL",
           "required": false,
           "required_when": null,
           "secret": false,
+          "points_to": null,
+          "description": "NATS endpoint only; userinfo is forbidden."
+        },
+        {
+          "name": "NATS_USER",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_PASSWORD",
+          "required": false,
+          "required_when": null,
+          "secret": true,
           "points_to": null,
           "description": null
         },
@@ -333,6 +429,14 @@
           "required": false,
           "required_when": null,
           "secret": false,
+          "points_to": null,
+          "description": "Valkey endpoint only; userinfo is forbidden."
+        },
+        {
+          "name": "VALKEY_USERNAME",
+          "required": false,
+          "required_when": null,
+          "secret": true,
           "points_to": null,
           "description": null
         },
@@ -450,7 +554,31 @@
           "description": null
         },
         {
+          "name": "GAME_POD_ENV_CONFIGMAP",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GAME_POD_ENV_SECRET",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "GAME_POD_IMAGE",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GAME_POD_PUBLIC_WS_URL",
           "required": true,
           "required_when": null,
           "secret": false,
@@ -466,10 +594,26 @@
           "description": null
         },
         {
+          "name": "NATS_PASSWORD",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "NATS_URL",
           "required": true,
           "required_when": null,
           "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NATS_USER",
+          "required": false,
+          "required_when": null,
+          "secret": true,
           "points_to": null,
           "description": null
         },
@@ -482,6 +626,30 @@
             "service": "player-service",
             "key": "PLAYER_GRPC_PORT"
           },
+          "description": null
+        },
+        {
+          "name": "VALKEY_PASSWORD",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_USERNAME",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
           "description": null
         }
       ]
@@ -520,6 +688,14 @@
           "secret": false,
           "points_to": null,
           "description": null
+        },
+        {
+          "name": "GAME_POD_DEV_MODE",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Dev only. Allows the unverified player_id WebSocket query fallback; defaults to false."
         },
         {
           "name": "GAME_POD_HTTP_HOST",
@@ -626,6 +802,14 @@
           "description": "Set per pod by game-master."
         },
         {
+          "name": "NATS_PASSWORD",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "NATS_URL",
           "required": true,
           "required_when": null,
@@ -634,10 +818,34 @@
           "description": null
         },
         {
+          "name": "NATS_USER",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_PASSWORD",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "VALKEY_URL",
           "required": false,
           "required_when": null,
           "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_USERNAME",
+          "required": false,
+          "required_when": null,
+          "secret": true,
           "points_to": null,
           "description": null
         }
@@ -676,17 +884,6 @@
           "description": null
         },
         {
-          "name": "AUTH_SERVICE_GRPC_ADDR",
-          "required": true,
-          "required_when": null,
-          "secret": false,
-          "points_to": {
-            "service": "auth-service",
-            "key": "AUTH_SERVICE_GRPC_PORT"
-          },
-          "description": null
-        },
-        {
           "name": "CSRF_SECRET",
           "required": true,
           "required_when": null,
@@ -695,7 +892,55 @@
           "description": null
         },
         {
+          "name": "KEYCLOAK_CLIENT_ID",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "KEYCLOAK_CLIENT_SECRET",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "KEYCLOAK_INTERNAL_BASE_URL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "KEYCLOAK_ISSUER_URL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "KEYCLOAK_REDIRECT_URL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "LOG_LEVEL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "OPERATOR_SESSION_ADAPTER",
           "required": false,
           "required_when": null,
           "secret": false,
@@ -730,10 +975,26 @@
           "description": null
         },
         {
+          "name": "VALKEY_PASSWORD",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "VALKEY_URL",
           "required": true,
           "required_when": null,
           "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_USERNAME",
+          "required": false,
+          "required_when": null,
+          "secret": true,
           "points_to": null,
           "description": null
         }
@@ -832,10 +1093,26 @@
           "description": null
         },
         {
+          "name": "VALKEY_PASSWORD",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "VALKEY_URL",
           "required": true,
           "required_when": null,
           "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_USERNAME",
+          "required": false,
+          "required_when": null,
+          "secret": true,
           "points_to": null,
           "description": null
         }
@@ -864,6 +1141,14 @@
         },
         {
           "name": "LOBBY_DEFAULT_ROOM_ID",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "LOBBY_DEV_MODE",
           "required": false,
           "required_when": null,
           "secret": false,
@@ -943,10 +1228,26 @@
           "description": null
         },
         {
+          "name": "NATS_PASSWORD",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "NATS_URL",
           "required": true,
           "required_when": null,
           "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NATS_USER",
+          "required": false,
+          "required_when": null,
+          "secret": true,
           "points_to": null,
           "description": null
         },
@@ -971,6 +1272,22 @@
           "required": true,
           "required_when": null,
           "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_PASSWORD",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_USERNAME",
+          "required": false,
+          "required_when": null,
+          "secret": true,
           "points_to": null,
           "description": null
         }
@@ -1089,6 +1406,14 @@
           "description": null
         },
         {
+          "name": "NATS_PASSWORD",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "NATS_URL",
           "required": true,
           "required_when": null,
@@ -1097,12 +1422,12 @@
           "description": null
         },
         {
-          "name": "NOTIFICATION_GRPC_ADDR",
-          "required": true,
+          "name": "NATS_USER",
+          "required": false,
           "required_when": null,
-          "secret": false,
+          "secret": true,
           "points_to": null,
-          "description": "Checked at startup but never dialled: notification-service serves no gRPC."
+          "description": null
         },
         {
           "name": "PARTY_RESOLVE_SUBJECT",
@@ -1146,6 +1471,22 @@
           "secret": false,
           "points_to": null,
           "description": null
+        },
+        {
+          "name": "VALKEY_PASSWORD",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_USERNAME",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
         }
       ]
     },
@@ -1155,7 +1496,23 @@
       "example": "services/metadata-service/.env.example",
       "keys": [
         {
+          "name": "DATABASE_PASSWORD",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "DATABASE_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "DATABASE_USER",
           "required": true,
           "required_when": null,
           "secret": true,
@@ -1331,6 +1688,14 @@
           "description": null
         },
         {
+          "name": "NATS_PASSWORD",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "NATS_URL",
           "required": true,
           "required_when": null,
@@ -1339,10 +1704,34 @@
           "description": null
         },
         {
+          "name": "NATS_USER",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "VALKEY_ADDR",
           "required": true,
           "required_when": null,
           "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_PASSWORD",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_USERNAME",
+          "required": false,
+          "required_when": null,
+          "secret": true,
           "points_to": null,
           "description": null
         }
@@ -1354,7 +1743,23 @@
       "example": "services/notification-service/.env.example",
       "keys": [
         {
+          "name": "DATABASE_PASSWORD",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "DATABASE_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "DATABASE_USER",
           "required": true,
           "required_when": null,
           "secret": true,
@@ -1370,10 +1775,26 @@
           "description": null
         },
         {
+          "name": "NATS_PASSWORD",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "NATS_URL",
           "required": true,
           "required_when": null,
           "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NATS_USER",
+          "required": false,
+          "required_when": null,
+          "secret": true,
           "points_to": null,
           "description": null
         },
@@ -1568,6 +1989,22 @@
           "secret": false,
           "points_to": null,
           "description": null
+        },
+        {
+          "name": "VALKEY_PASSWORD",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_USERNAME",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
         }
       ]
     },
@@ -1577,7 +2014,23 @@
       "example": "services/player-service/.env.example",
       "keys": [
         {
+          "name": "DATABASE_PASSWORD",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "DATABASE_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "DATABASE_USER",
           "required": true,
           "required_when": null,
           "secret": true,
@@ -1593,10 +2046,26 @@
           "description": null
         },
         {
+          "name": "NATS_PASSWORD",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "NATS_URL",
           "required": true,
           "required_when": null,
           "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NATS_USER",
+          "required": false,
+          "required_when": null,
+          "secret": true,
           "points_to": null,
           "description": null
         },
@@ -1650,6 +2119,22 @@
           "secret": false,
           "points_to": null,
           "description": null
+        },
+        {
+          "name": "VALKEY_PASSWORD",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_USERNAME",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
         }
       ]
     },
@@ -1659,7 +2144,23 @@
       "example": "services/projection-writer/.env.example",
       "keys": [
         {
+          "name": "DATABASE_PASSWORD",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "DATABASE_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "DATABASE_USER",
           "required": true,
           "required_when": null,
           "secret": true,
@@ -1679,6 +2180,14 @@
           "required": false,
           "required_when": null,
           "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NATS_PASSWORD",
+          "required": false,
+          "required_when": null,
+          "secret": true,
           "points_to": null,
           "description": null
         },
@@ -1703,6 +2212,14 @@
           "required": true,
           "required_when": null,
           "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NATS_USER",
+          "required": false,
+          "required_when": null,
+          "secret": true,
           "points_to": null,
           "description": null
         },
@@ -1810,7 +2327,23 @@
           "description": null
         },
         {
+          "name": "QUEST_DATABASE_PASSWORD",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "QUEST_DATABASE_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_DATABASE_USER",
           "required": true,
           "required_when": null,
           "secret": true,
@@ -1982,10 +2515,26 @@
           "description": null
         },
         {
+          "name": "QUEST_NATS_PASSWORD",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "QUEST_NATS_URL",
           "required": true,
           "required_when": null,
           "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_NATS_USER",
+          "required": false,
+          "required_when": null,
+          "secret": true,
           "points_to": null,
           "description": null
         },
@@ -2035,6 +2584,17 @@
           },
           "secret": false,
           "points_to": null,
+          "description": null
+        },
+        {
+          "name": "QUEST_PLAYER_SERVICE_GRPC_TARGET",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": {
+            "service": "player-service",
+            "key": "PLAYER_GRPC_PORT"
+          },
           "description": null
         },
         {
@@ -2101,8 +2661,32 @@
       "example": "services/social-service/.env.example",
       "keys": [
         {
+          "name": "DATABASE_PASSWORD",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "DATABASE_URL",
           "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "DATABASE_USER",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NATS_PASSWORD",
+          "required": false,
           "required_when": null,
           "secret": true,
           "points_to": null,
@@ -2113,6 +2697,14 @@
           "required": true,
           "required_when": null,
           "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "NATS_USER",
+          "required": false,
+          "required_when": null,
+          "secret": true,
           "points_to": null,
           "description": null
         },
@@ -2299,6 +2891,22 @@
           "secret": false,
           "points_to": null,
           "description": null
+        },
+        {
+          "name": "VALKEY_PASSWORD",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "VALKEY_USERNAME",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
         }
       ]
     },
@@ -2307,6 +2915,17 @@
       "source": "edge/WebSocket-terminator/config-keys.json",
       "example": "edge/WebSocket-terminator/.env.example",
       "keys": [
+        {
+          "name": "GAME_MASTER_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": {
+            "service": "game-master",
+            "key": "GAME_MASTER_HTTP_PORT"
+          },
+          "description": null
+        },
         {
           "name": "INFLIGHT_SEM_SIZE",
           "required": false,

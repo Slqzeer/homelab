@@ -9,8 +9,8 @@ re-vendor on each TLE release with `gh api repos/The-Last-Exam/server/...`).
 
 | Item | Value |
 | --- | --- |
-| TLE release | _fill in_ (e.g. `v1.4.0`) |
-| deploy-info vendored | _fill in date + release_ |
+| TLE release | `v0.0.1` (`704c53a`, includes The-Last-Exam/server#114 via PR #117) |
+| deploy-info vendored | `config-keys.json`: 2026-10-23 from `v0.0.1`; other artifacts unchanged |
 | Edge image `tag@digest` | _fill in_ |
 | Service images `tag@digest` | _fill in per service_ |
 | Role manifest version | `1` (registry schema `1.3`) |
@@ -18,7 +18,7 @@ re-vendor on each TLE release with `gh api repos/The-Last-Exam/server/...`).
 | Public routes | 62 routes across 9 services (see `public-routes.json`) |
 | Object storage (S3 endpoint) | _open_: deploy MinIO in-cluster (`tle-dev` + PVC + Service + bucket job) or point `MINIO_ENDPOINT` at an external MinIO; then create the access pair in its console and seed `MINIO_*`. Blocks metadata-service only — nothing deployed today consumes it. |
 | Non-secret service config | Per-service ConfigMaps in `service-config.yaml`; datastore URLs contain no userinfo. Other `config-keys.json` entries with `"secret": false` follow the same pattern when Deployments are authored. |
-| Datastore credential split | Step 1 staged: ConfigMap addresses and split VSO keys coexist with legacy URL secrets. Steps 2–3 wait for a release containing `The-Last-Exam/server#114`. |
+| Datastore credential split | Complete in desired state: per-service ConfigMap addresses, credential-only VSO templates, and the `v0.0.1` configuration contract. |
 
 Every Deployment uses `tag@digest`, never `latest`. `images.json` is not in
 git (a digest exists only after a push); record the values here at promotion.
@@ -27,18 +27,21 @@ git (a digest exists only after a push); record the values here at promotion.
 
 The order below is a compatibility boundary; do not combine or reorder it.
 
-1. Apply `service-config.yaml` and the split database user/password keys in
-   `tle-dev-data-secrets` while retaining the legacy URL keys.
-2. Pin a server release containing `The-Last-Exam/server#114`, re-vendor its
-   `deploy-info/config-keys.json`, and wire every Deployment to its per-service
-   ConfigMap plus the applicable credential keys. Verify all services connect
-   before proceeding.
-3. Remove `DATABASE_URL`, `METADATA_DATABASE_URL`, and `QUEST_DATABASE_URL`
-   templates from `tle-dev-data` only after step 2 passes the live check.
+1. `service-config.yaml` provides every datastore address without userinfo, and
+   `tle-dev-data-secrets` projects the database user/password pairs.
+2. The pinned `v0.0.1` release contains The-Last-Exam/server#114: its tag commit
+   `704c53a` is the merge commit of PR #117. The release's
+   `deploy-info/config-keys.json` is vendored here and marks address keys
+   non-secret and credential keys secret.
+3. The legacy `DATABASE_URL`, `METADATA_DATABASE_URL`, and
+   `QUEST_DATABASE_URL` Vault templates are removed. A read-only cluster check
+   on 2026-10-23 found no TLE service Deployments consuming either contract;
+   only the zero-replica edge placeholder and the ready Valkey/NATS
+   StatefulSets exist. The first service-workload promotion must perform the
+   connection check below.
 
-Rollback before step 3 by pinning the prior server release; the legacy URL
-keys remain available. After step 3, restore the prior Git revision first so
-VSO recreates those keys, then roll back the server release.
+Rollback the credential split by restoring the prior Git revision so VSO
+recreates the legacy URL keys before pinning any pre-`v0.0.1` server release.
 
 ## Ownership and state
 
@@ -49,8 +52,9 @@ VSO recreates those keys, then roll back the server release.
 - Durable state: `tle_dev`, `tle_dev_metadata`, `tle_dev_quest` databases
   in shared Postgres (`databases`); Valkey PVC `tle-dev-valkey-data` (AOF,
   reconstructible cache); NATS JetStream PVC (reconstructible bus).
-- Secret-derived: all `DATABASE_URL`s, signing keys, MinIO/push/CSRF
-  credentials via Vault (`tle-dev/{auth,data,misc}`) + VSO.
+- Secret-derived: database users/passwords, signing keys, MinIO/push/CSRF
+  credentials via Vault (`tle-dev/{auth,data,misc}`) + VSO. Datastore
+  addresses come from per-service ConfigMaps.
 - Reconstructible: NATS streams, Valkey cache contents.
 
 ## Vault ceremony extension
@@ -118,10 +122,12 @@ workloads can run; sync alone is not enough.
       resources recorded: _fill in_
 - [ ] OIDC + tailnet-only reachability verified; secret rotation restarts
       consumers
-- [ ] After the #114 release pin, every service reports ready while taking
-      datastore addresses from its `tle-dev-*-config` ConfigMap and database
-      credentials from `tle-dev-data-secrets`; record release, date, and result:
-      _fill in_. Only then remove the legacy URL templates (rollout step 3).
+- [ ] On the first service-workload promotion, every service reports ready
+      while taking datastore addresses from its `tle-dev-*-config` ConfigMap
+      and database credentials from `tle-dev-data-secrets`; record release,
+      date, and result here. As of 2026-10-23 there are no service Deployments
+      to exercise; the read-only check found Argo CD `tle-dev` Synced/Healthy at
+      `ef51252`, edge at 0 replicas, and Valkey/NATS ready.
 
 ## Retirement
 
