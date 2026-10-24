@@ -13,5 +13,6 @@ resources:
   - vault-secrets.yaml
   - networkpolicy.yaml
   - edge-config.yaml
+  - service-config.yaml
   - datastores.yaml
   - postgres-job.yaml
