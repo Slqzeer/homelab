@@ -9,16 +9,17 @@ re-vendor on each TLE release with `gh api repos/The-Last-Exam/server/...`).
 
 | Item | Value |
 | --- | --- |
-| TLE release | `v0.0.1` (`704c53a`, includes The-Last-Exam/server#114 via PR #117) |
+| TLE release | `v0.0.2` (images); deploy-info still vendored from `v0.0.1` (`704c53a`, config-keys.json unchanged through `v0.0.2` -- confirmed no diff in `deploy-info/`) |
 | deploy-info vendored | `config-keys.json`: 2026-10-23 from `v0.0.1`; other artifacts unchanged |
-| Edge image `tag@digest` | _fill in_ |
-| Service images `tag@digest` | _fill in per service_ |
+| Edge image `tag@digest` | _fill in_ (api-gateway not published; placeholder stays at 0 replicas, see edge-config.yaml) |
+| Service images `tag@digest` | auth-service `v0.0.2@sha256:189309e7eba8f3683c20324f77f5920ceab8ac330b527eaea2d261fea2d6c463`; lobby-service `v0.0.2@sha256:cb5654799f03aea85a60cde4539632a5b6f69dc6e01dec84784701412fa78bed`; matchmaking-service `v0.0.2@sha256:a22b7967000ba061e9fd0a2b1e74bf96926c38bda0f6f7cd11b78698cd8be155`; metadata-service `v0.0.2@sha256:b62fb8e977e4c7a491583456f11d857ad4f9a6d62ec1e85eb3ad38fbfcab788f`; notification-service `v0.0.2@sha256:bda618ae2533dfe3c54853a2a23a7c9ada5a1e50da622d1ec64914773a6fe78e`; player-service `v0.0.2@sha256:e8085c1ac3da888b97d6b34e7dcf9b04eb99014cf90450b3d5cb1e35d4fa0bf8`; social-service `v0.0.2@sha256:9342d0e713b708938282a76fd9886bac249ddb309c2628a23e9fe3ab51a01e7f` (source: The-Last-Exam/server publish-images run 40263029044) |
 | Role manifest version | `1` (registry schema `1.3`) |
 | Identity headers | 26 headers + 5 prefixes (see `edge-config.yaml`) |
 | Public routes | 62 routes across 9 services (see `public-routes.json`) |
-| Object storage (S3 endpoint) | _open_: deploy MinIO in-cluster (`tle-dev` + PVC + Service + bucket job) or point `MINIO_ENDPOINT` at an external MinIO; then create the access pair in its console and seed `MINIO_*`. Blocks metadata-service only — nothing deployed today consumes it. |
-| Non-secret service config | Per-service ConfigMaps in `service-config.yaml`; datastore URLs contain no userinfo. Other `config-keys.json` entries with `"secret": false` follow the same pattern when Deployments are authored. |
+| Object storage (S3 endpoint) | _open_: deploy MinIO in-cluster (`tle-dev` + PVC + Service + bucket job) or point `MINIO_ENDPOINT` at an external MinIO; then create the access pair in its console and seed `MINIO_*`. Blocks metadata-service's object-storage path (issue #52 pins `MINIO_ENDPOINT`/`MINIO_BUCKET` to the not-yet-deployed `tle-dev-minio` name so no further wiring change is needed once it exists). |
+| Non-secret service config | Per-service ConfigMaps in `service-config.yaml` carry only datastore addresses (test-enforced, `tests/test_tle_datastore_config.py`); every other required non-secret key (ports, `*_ENV`, tunables) is a literal container env value in `workloads.yaml` (issue #52). |
 | Datastore credential split | Complete in desired state: per-service ConfigMap addresses, credential-only VSO templates, and the `v0.0.1` configuration contract. |
+| Core service workloads | `auth-service`, `lobby-service`, `matchmaking-service`, `metadata-service`, `notification-service`, `player-service`, `social-service` declared in `workloads.yaml` (issue #52), each listening on 8080 for HTTP (see that file's header) regardless of its `.env.example` default port. `matchmaking-service`'s `GAME_MASTER_GRPC_ADDR` points at a not-yet-onboarded `game-master` Service; see Risks below. |
 
 Every Deployment uses `tag@digest`, never `latest`. `images.json` is not in
 git (a digest exists only after a push); record the values here at promotion.
@@ -125,9 +126,14 @@ workloads can run; sync alone is not enough.
 - [ ] On the first service-workload promotion, every service reports ready
       while taking datastore addresses from its `tle-dev-*-config` ConfigMap
       and database credentials from `tle-dev-data-secrets`; record release,
-      date, and result here. As of 2026-10-23 there are no service Deployments
-      to exercise; the read-only check found Argo CD `tle-dev` Synced/Healthy at
-      `ef51252`, edge at 0 replicas, and Valkey/NATS ready.
+      date, and result here. As of 2026-10-23 there were no service
+      Deployments to exercise. Issue #52 (this change) declares
+      `auth-service`, `lobby-service`, `matchmaking-service`,
+      `metadata-service`, `notification-service`, `player-service`, and
+      `social-service`; live rollout evidence is still outstanding --
+      `metadata-service` needs MinIO (see Object storage above) and
+      `matchmaking-service` needs `game-master` (not yet onboarded) before
+      both report ready.
 
 ## Retirement
 

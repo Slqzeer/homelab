@@ -1,0 +1,934 @@
+# TLE core service workloads (issue #52, split from #43).
+#
+# The seven player/support-facing services from the retired manifests
+# (server commit 63566e15): auth-service, lobby-service,
+# matchmaking-service, metadata-service, notification-service,
+# player-service, social-service. Other services from config-keys.json
+# (game-master, game-service, projection-writer, quest-service,
+# admin-audit-writer, internal-admin-gateway, internal-ops-gateway,
+# wsterminator) are NOT onboarded here; they are separate follow-up work.
+#
+# Images: pinned tag@digest from The-Last-Exam/server release v0.0.2
+# (gh run 40263029044's images.json). Every Deployment uses the same
+# release so the pinned auth-service and metadata-service JWT public key
+# below (edge-config.yaml's auth-jwt-ed25519-public-key-pem) matches the
+# auth-service private half seeded for that release.
+#
+# Every service's HTTP port is overridden to 8080 below (its *_PORT env
+# var), regardless of its .env.example default (auth-service defaults to
+# 3000, matchmaking to 8091, etc.): this lets one NetworkPolicy port
+# (tle-dev-edge-to-services, port 8080) cover every service uniformly
+# instead of one rule per service's distinct default port. gRPC ports
+# (50051/9090/9091/9080) stay at their documented defaults since nothing
+# in this namespace assumes a single gRPC port.
+#
+# Non-secret datastore addresses come from service-config.yaml's
+# per-service ConfigMaps (issue #50); do not add other keys there --
+# tests/test_tle_datastore_config.py asserts those ConfigMaps contain
+# exactly the datastore address keys. Every other required non-secret
+# key (ports, *_ENV, tunables) is a literal container env value below.
+# Database user/password pairs come from tle-dev-data-secrets
+# (vault-secrets.yaml), mapped per service onto the plain DATABASE_USER /
+# DATABASE_PASSWORD names each service's code reads.
+#
+# Known gaps (tracked as Risks in PR #52, not blocking static validation):
+#   - matchmaking-service's GAME_MASTER_GRPC_ADDR points at a
+#     game-master Service that does not exist yet (not in this issue's
+#     scope); matchmaking will fail readiness in a live cluster until
+#     game-master is onboarded in a follow-up ticket.
+#   - metadata-service's MINIO_ENDPOINT points at a MinIO Service that
+#     does not exist yet -- this is the pre-existing "open" object
+#     storage item already flagged in docs/runbooks/tle-dev-recovery.md.
+---
+# ------------------------------- auth-service -------------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-auth-service
+  namespace: tle-dev
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tle-dev-auth-service
+  namespace: tle-dev
+  labels:
+    app: tle-dev-auth-service
+    app-group: tle-dev-service
+spec:
+  selector:
+    app: tle-dev-auth-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tle-dev-auth-service
+  namespace: tle-dev
+  labels:
+    app: tle-dev-auth-service
+    app-group: tle-dev-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tle-dev-auth-service
+  template:
+    metadata:
+      labels:
+        app: tle-dev-auth-service
+        app-group: tle-dev-service
+    spec:
+      serviceAccountName: tle-dev-auth-service
+      automountServiceAccountToken: false
+      # AUTH_SERVICE_SHUTDOWN_TIMEOUT_SECONDS defaults to 20; keep this above it.
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: auth-service
+          image: >-
+            ghcr.io/the-last-exam/auth-service:v0.0.2@sha256:189309e7eba8f3683c20324f77f5920ceab8ac330b527eaea2d261fea2d6c463
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: tle-dev-auth-service-config
+          env:
+            - name: AUTH_SERVICE_PORT
+              value: "8080"
+            - name: AUTH_SERVICE_GRPC_PORT
+              value: "50051"
+            - name: AUTH_JWT_ED25519_PUBLIC_KEY_PEM
+              valueFrom:
+                configMapKeyRef:
+                  name: tle-dev-edge-config
+                  key: auth-jwt-ed25519-public-key-pem
+            - name: DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: DATABASE_USER
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: DATABASE_PASSWORD
+            - name: AUTH_SIGNING_STORE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-auth-secrets
+                  key: AUTH_SIGNING_STORE_KEY
+            - name: AUTH_JWT_ED25519_PRIVATE_KEY_PEM
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-auth-secrets
+                  key: AUTH_JWT_ED25519_PRIVATE_KEY_PEM
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: tle-dev-auth-service
+  namespace: tle-dev
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: tle-dev-auth-service
+  minReplicas: 1
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+# ------------------------------ lobby-service -------------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-lobby-service
+  namespace: tle-dev
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tle-dev-lobby-service
+  namespace: tle-dev
+  labels:
+    app: tle-dev-lobby-service
+    app-group: tle-dev-service
+spec:
+  selector:
+    app: tle-dev-lobby-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tle-dev-lobby-service
+  namespace: tle-dev
+  labels:
+    app: tle-dev-lobby-service
+    app-group: tle-dev-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tle-dev-lobby-service
+  template:
+    metadata:
+      labels:
+        app: tle-dev-lobby-service
+        app-group: tle-dev-service
+    spec:
+      serviceAccountName: tle-dev-lobby-service
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: lobby-service
+          image: >-
+            ghcr.io/the-last-exam/lobby-service:v0.0.2@sha256:cb5654799f03aea85a60cde4539632a5b6f69dc6e01dec84784701412fa78bed
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: tle-dev-lobby-service-config
+          env:
+            - name: LOBBY_ENV
+              value: "dev"
+            - name: LOBBY_PORT
+              value: "8080"
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: tle-dev-lobby-service
+  namespace: tle-dev
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: tle-dev-lobby-service
+  minReplicas: 1
+  maxReplicas: 1
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+# --------------------------- matchmaking-service -----------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-matchmaking-service
+  namespace: tle-dev
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tle-dev-matchmaking-service
+  namespace: tle-dev
+  labels:
+    app: tle-dev-matchmaking-service
+    app-group: tle-dev-service
+spec:
+  selector:
+    app: tle-dev-matchmaking-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tle-dev-matchmaking-service
+  namespace: tle-dev
+  labels:
+    app: tle-dev-matchmaking-service
+    app-group: tle-dev-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tle-dev-matchmaking-service
+  template:
+    metadata:
+      labels:
+        app: tle-dev-matchmaking-service
+        app-group: tle-dev-service
+    spec:
+      serviceAccountName: tle-dev-matchmaking-service
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: matchmaking-service
+          image: >-
+            ghcr.io/the-last-exam/matchmaking-service:v0.0.2@sha256:a22b7967000ba061e9fd0a2b1e74bf96926c38bda0f6f7cd11b78698cd8be155
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: tle-dev-matchmaking-service-config
+          env:
+            - name: MATCHMAKING_ENV
+              value: "dev"
+            - name: MATCHMAKING_PORT
+              value: "8080"
+            - name: MATCHMAKING_BRACKET_WIDTH
+              value: "200"
+            - name: MATCHMAKING_BRACKET_EXPANSION_RATE
+              value: "50"
+            - name: MATCHMAKING_BRACKET_EXPANSION_INTERVAL
+              value: "30s"
+            - name: MATCHMAKING_GUILD_AFFINITY_WEIGHT
+              value: "10"
+            - name: MATCHMAKING_POOL_EXHAUSTED_RETRY_INITIAL_BACKOFF
+              value: "5s"
+            - name: MATCHMAKING_POOL_EXHAUSTED_RETRY_MAX_BACKOFF
+              value: "1m"
+            - name: MATCHMAKING_HELD_GROUP_LEASE_TTL
+              value: "30s"
+            - name: MATCHMAKING_HELD_GROUP_RETRY_INTERVAL
+              value: "2s"
+            - name: MATCHMAKING_RETRY_GAME_MODE_IDS
+              value: "ranked"
+            - name: PARTY_RESOLVE_SUBJECT
+              value: "party.resolve"
+            - name: PARTY_RESOLVE_TIMEOUT
+              value: "2s"
+            - name: SOCIAL_GRPC_TIMEOUT
+              value: "750ms"
+            - name: SOCIAL_GRPC_ADDR
+              value: "tle-dev-social-service.tle-dev.svc.cluster.local:9080"
+            # game-master is not onboarded yet (out of this issue's scope);
+            # matchmaking will fail readiness against this address until a
+            # follow-up ticket deploys it. See the file header Risks note.
+            - name: GAME_MASTER_GRPC_ADDR
+              value: "tle-dev-game-master.tle-dev.svc.cluster.local:9100"
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: tle-dev-matchmaking-service
+  namespace: tle-dev
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: tle-dev-matchmaking-service
+  minReplicas: 1
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+# ----------------------------- metadata-service ------------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-metadata-service
+  namespace: tle-dev
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tle-dev-metadata-service
+  namespace: tle-dev
+  labels:
+    app: tle-dev-metadata-service
+    app-group: tle-dev-service
+spec:
+  selector:
+    app: tle-dev-metadata-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+    - name: grpc
+      port: 9091
+      targetPort: grpc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tle-dev-metadata-service
+  namespace: tle-dev
+  labels:
+    app: tle-dev-metadata-service
+    app-group: tle-dev-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tle-dev-metadata-service
+  template:
+    metadata:
+      labels:
+        app: tle-dev-metadata-service
+        app-group: tle-dev-service
+    spec:
+      serviceAccountName: tle-dev-metadata-service
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: metadata-service
+          image: >-
+            ghcr.io/the-last-exam/metadata-service:v0.0.2@sha256:b62fb8e977e4c7a491583456f11d857ad4f9a6d62ec1e85eb3ad38fbfcab788f
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: grpc
+              containerPort: 9091
+          envFrom:
+            - configMapRef:
+                name: tle-dev-metadata-service-config
+          env:
+            - name: METADATA_ENV
+              value: "dev"
+            - name: METADATA_PORT
+              value: "8080"
+            - name: METADATA_GRPC_PORT
+              value: "9091"
+            - name: METADATA_JWT_PUBLIC_KEY
+              valueFrom:
+                configMapKeyRef:
+                  name: tle-dev-edge-config
+                  key: auth-jwt-ed25519-public-key-pem
+            # MinIO is not deployed in this cluster yet (pre-existing open
+            # item, docs/runbooks/tle-dev-recovery.md); this address will
+            # not resolve until that follow-up lands. See Risks.
+            - name: MINIO_ENDPOINT
+              value: "tle-dev-minio.tle-dev.svc.cluster.local:9000"
+            - name: MINIO_BUCKET
+              value: "metadata-bundles"
+            - name: MINIO_USE_SSL
+              value: "false"
+            - name: DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: METADATA_DATABASE_USER
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: METADATA_DATABASE_PASSWORD
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-misc-secrets
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-misc-secrets
+                  key: MINIO_SECRET_KEY
+            - name: METADATA_GRPC_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-misc-secrets
+                  key: METADATA_GRPC_INTERNAL_TOKEN
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+# -------------------------- notification-service -----------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-notification-service
+  namespace: tle-dev
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tle-dev-notification-service
+  namespace: tle-dev
+  labels:
+    app: tle-dev-notification-service
+    app-group: tle-dev-service
+spec:
+  selector:
+    app: tle-dev-notification-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tle-dev-notification-service
+  namespace: tle-dev
+  labels:
+    app: tle-dev-notification-service
+    app-group: tle-dev-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: tle-dev-notification-service
+  template:
+    metadata:
+      labels:
+        app: tle-dev-notification-service
+        app-group: tle-dev-service
+    spec:
+      serviceAccountName: tle-dev-notification-service
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: notification-service
+          image: >-
+            ghcr.io/the-last-exam/notification-service:v0.0.2@sha256:bda618ae2533dfe3c54853a2a23a7c9ada5a1e50da622d1ec64914773a6fe78e
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: tle-dev-notification-service-config
+          env:
+            - name: NOTIFICATION_ENV
+              value: "dev"
+            - name: NOTIFICATION_PORT
+              value: "8080"
+            - name: DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: DATABASE_USER
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: DATABASE_PASSWORD
+            - name: NOTIFICATION_WEBHOOK_SIGNING_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-misc-secrets
+                  key: NOTIFICATION_WEBHOOK_SIGNING_SECRET
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+# ------------------------------ player-service --------------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-player-service
+  namespace: tle-dev
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tle-dev-player-service
+  namespace: tle-dev
+  labels:
+    app: tle-dev-player-service
+    app-group: tle-dev-service
+spec:
+  selector:
+    app: tle-dev-player-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+    - name: grpc
+      port: 9090
+      targetPort: grpc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tle-dev-player-service
+  namespace: tle-dev
+  labels:
+    app: tle-dev-player-service
+    app-group: tle-dev-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tle-dev-player-service
+  template:
+    metadata:
+      labels:
+        app: tle-dev-player-service
+        app-group: tle-dev-service
+    spec:
+      serviceAccountName: tle-dev-player-service
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: player-service
+          image: >-
+            ghcr.io/the-last-exam/player-service:v0.0.2@sha256:e8085c1ac3da888b97d6b34e7dcf9b04eb99014cf90450b3d5cb1e35d4fa0bf8
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: grpc
+              containerPort: 9090
+          envFrom:
+            - configMapRef:
+                name: tle-dev-player-service-config
+          env:
+            - name: PLAYER_ENV
+              value: "dev"
+            - name: PLAYER_PORT
+              value: "8080"
+            - name: PLAYER_GRPC_PORT
+              value: "9090"
+            - name: SOCIAL_GRPC_ADDR
+              value: "tle-dev-social-service.tle-dev.svc.cluster.local:9080"
+            - name: DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: DATABASE_USER
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: DATABASE_PASSWORD
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: tle-dev-player-service
+  namespace: tle-dev
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: tle-dev-player-service
+  minReplicas: 1
+  maxReplicas: 1
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+# ------------------------------ social-service ---------------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-social-service
+  namespace: tle-dev
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tle-dev-social-service
+  namespace: tle-dev
+  labels:
+    app: tle-dev-social-service
+    app-group: tle-dev-service
+spec:
+  selector:
+    app: tle-dev-social-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+    - name: grpc
+      port: 9080
+      targetPort: grpc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tle-dev-social-service
+  namespace: tle-dev
+  labels:
+    app: tle-dev-social-service
+    app-group: tle-dev-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: tle-dev-social-service
+  template:
+    metadata:
+      labels:
+        app: tle-dev-social-service
+        app-group: tle-dev-service
+    spec:
+      serviceAccountName: tle-dev-social-service
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: social-service
+          image: >-
+            ghcr.io/the-last-exam/social-service:v0.0.2@sha256:9342d0e713b708938282a76fd9886bac249ddb309c2628a23e9fe3ab51a01e7f
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: grpc
+              containerPort: 9080
+          envFrom:
+            - configMapRef:
+                name: tle-dev-social-service-config
+          env:
+            - name: SOCIAL_ENV
+              value: "dev"
+            - name: SOCIAL_PORT
+              value: "8080"
+            - name: SOCIAL_GRPC_PORT
+              value: "9080"
+            - name: DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: DATABASE_USER
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: DATABASE_PASSWORD
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
