@@ -656,6 +656,12 @@ tle_generate() {
 tle_placeholder() {
   printf 'disabled' >"$TLE_VAL"
 }
+tle_generate_base64() {
+  # $1 = raw byte length. Unlike tle_generate, output is NOT restricted to
+  # alphanumeric: AUTH_SIGNING_STORE_KEY is consumed as a base64-encoded
+  # 32-byte XChaCha20-Poly1305 key, never composed into a postgres:// URL.
+  head -c "$1" /dev/urandom | base64 | tr -d '\n' >"$TLE_VAL"
+}
 for f in password metadata_password quest_password; do
   tle_generate 32
   tle_ensure_field homelab/tle-dev/data "$f" "generated"
@@ -666,6 +672,12 @@ for spec in "CSRF_SECRET 48" "METADATA_GRPC_INTERNAL_TOKEN 32" \
   tle_generate "$2"
   tle_ensure_field homelab/tle-dev/misc "$1" "generated"
 done
+# AUTH_SIGNING_STORE_KEY (issue #52): encrypts auth-service's private
+# signing PEM persisted in Valkey. Locally generated, not product-issued,
+# so it belongs beside the auth-service workload's other generated value
+# rather than in the AUTH_JWT_ED25519_* placeholder loop below.
+tle_generate_base64 32
+tle_ensure_field homelab/tle-dev/auth AUTH_SIGNING_STORE_KEY "generated"
 for f in MINIO_ACCESS_KEY MINIO_SECRET_KEY NOTIFICATION_APNS_PRIVATE_KEY \
   NOTIFICATION_FCM_CREDENTIALS_JSON AUTH_JWT_ED25519_PRIVATE_KEY_PEM \
   AUTH_JWT_ED25519_STAGED_PRIVATE_KEY_PEM APPLE_PRIVATE_KEY \

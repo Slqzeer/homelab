@@ -50,7 +50,8 @@ What this creates for `tle-dev` (extension at the end of the script):
   into `postgres://` URLs): `password`, `metadata_password`,
   `quest_password` in `homelab/tle-dev/data`; `CSRF_SECRET` (48 chars),
   `METADATA_GRPC_INTERNAL_TOKEN`, `NOTIFICATION_WEBHOOK_SIGNING_SECRET`
-  in `homelab/tle-dev/misc`.
+  in `homelab/tle-dev/misc`; `AUTH_SIGNING_STORE_KEY` (base64, 32 raw
+  bytes, not alphanumeric-restricted) in `homelab/tle-dev/auth`.
 - `disabled` placeholders for every product-issued key: `MINIO_*`,
   `NOTIFICATION_APNS_*`, `NOTIFICATION_FCM_*`,
   `AUTH_JWT_ED25519_*_PRIVATE_KEY_PEM`, `APPLE_*`, `DISCORD_*`,
