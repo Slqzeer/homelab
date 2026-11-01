@@ -17,3 +17,4 @@ resources:
   - datastores.yaml
   - postgres-job.yaml
   - workloads.yaml
+  - game-master.yaml

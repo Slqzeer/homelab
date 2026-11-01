@@ -1,0 +1,185 @@
+# TLE Game Master control-plane workload (issue #44).
+#
+# It is deliberately a single writer: one replica, no HPA, and a PDB that
+# prevents voluntary disruption of the only replica. Its in-memory pod registry
+# is rebuilt from pods in GAME_MASTER_NAMESPACE after restart.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-game-master
+  namespace: tle-dev
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tle-dev-game-master
+  namespace: tle-dev
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - delete
+      - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tle-dev-game-master
+  namespace: tle-dev
+subjects:
+  - kind: ServiceAccount
+    name: tle-dev-game-master
+    namespace: tle-dev
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tle-dev-game-master
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tle-dev-game-master
+  namespace: tle-dev
+  labels:
+    app: tle-dev-game-master
+    app-group: tle-dev-control-plane
+spec:
+  type: ClusterIP
+  selector:
+    app: tle-dev-game-master
+  ports:
+    - name: http
+      port: 8082
+      targetPort: http
+    - name: grpc
+      port: 9100
+      targetPort: grpc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tle-dev-game-master
+  namespace: tle-dev
+  labels:
+    app: tle-dev-game-master
+    app-group: tle-dev-control-plane
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: tle-dev-game-master
+  template:
+    metadata:
+      labels:
+        app: tle-dev-game-master
+        app-group: tle-dev-control-plane
+    spec:
+      serviceAccountName: tle-dev-game-master
+      # The Kubernetes client needs the projected ServiceAccount token to list
+      # and manage game pods under the namespace-scoped Role above.
+      automountServiceAccountToken: true
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: game-master
+          image: >-
+            ghcr.io/the-last-exam/game-master:v0.0.2@sha256:966baf4811fcc71a60069dffa8bef03d1ecc2a10e16f1c48047c479b54662936
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8082
+            - name: grpc
+              containerPort: 9100
+          envFrom:
+            - configMapRef:
+                name: tle-dev-game-master-config
+          env:
+            - name: GAME_MASTER_ENV
+              value: dev
+            - name: GAME_MASTER_GRPC_PORT
+              value: "9100"
+            - name: GAME_MASTER_HTTP_PORT
+              value: "8082"
+            # The homelab intentionally keeps TLE dev services and game pods in
+            # the same restricted namespace. The Role is scoped to this value.
+            - name: GAME_MASTER_NAMESPACE
+              value: tle-dev
+            - name: GAME_MASTER_POOL_MIN
+              value: "2"
+            - name: GAME_MASTER_POOL_MAX
+              value: "6"
+            - name: GAME_MASTER_SPAWN_AHEAD
+              value: "1"
+            - name: GAME_POD_IMAGE
+              value: >-
+                ghcr.io/the-last-exam/game-service:v0.0.2@sha256:b96d88334ddfb682c32845f251a26a7e6c017b62d9b95076fedc2e809bb7e7ef
+            - name: GAME_POD_PUBLIC_WS_URL
+              value: ws://tle-dev-edge.tle-dev.svc.cluster.local:8080/game/v1/ws
+            # Issue #48 supplies this object before live game-pod acceptance.
+            - name: GAME_POD_ENV_CONFIGMAP
+              value: tle-dev-game-pod-env
+            - name: PLAYER_SERVICE_GRPC_TARGET
+              value: tle-dev-player-service.tle-dev.svc.cluster.local:9090
+            - name: GAME_MASTER_POD_REGISTRY_CREDENTIAL
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-misc-secrets
+                  key: GAME_MASTER_POD_REGISTRY_CREDENTIAL
+            - name: GAME_MASTER_MATCHMAKING_CREDENTIAL
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-misc-secrets
+                  key: GAME_MASTER_MATCHMAKING_CREDENTIAL
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: tle-dev-game-master
+  namespace: tle-dev
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: tle-dev-game-master

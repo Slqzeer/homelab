@@ -4,9 +4,11 @@
 # (server commit 63566e15): auth-service, lobby-service,
 # matchmaking-service, metadata-service, notification-service,
 # player-service, social-service. Other services from config-keys.json
-# (game-master, game-service, projection-writer, quest-service,
-# admin-audit-writer, internal-admin-gateway, internal-ops-gateway,
-# wsterminator) are NOT onboarded here; they are separate follow-up work.
+# (game-service, projection-writer, quest-service, admin-audit-writer,
+# internal-admin-gateway, internal-ops-gateway, wsterminator) are separate
+# follow-up work. Game Master is declared in game-master.yaml because its
+# single-writer, RBAC, PDB and network contract differ from this file's
+# scalable service workload pattern.
 #
 # Images: pinned tag@digest from The-Last-Exam/server release v0.0.2
 # (gh run 40263029044's images.json). Every Deployment uses the same
@@ -31,11 +33,7 @@
 # (vault-secrets.yaml), mapped per service onto the plain DATABASE_USER /
 # DATABASE_PASSWORD names each service's code reads.
 #
-# Known gaps (tracked as Risks in PR #52, not blocking static validation):
-#   - matchmaking-service's GAME_MASTER_GRPC_ADDR points at a
-#     game-master Service that does not exist yet (not in this issue's
-#     scope); matchmaking will fail readiness in a live cluster until
-#     game-master is onboarded in a follow-up ticket.
+# Known gap (tracked as a Risk in PR #52, not blocking static validation):
 #   - metadata-service's MINIO_ENDPOINT points at a MinIO Service that
 #     does not exist yet -- this is the pre-existing "open" object
 #     storage item already flagged in docs/runbooks/tle-dev-recovery.md.
@@ -391,11 +389,13 @@ spec:
               value: "750ms"
             - name: SOCIAL_GRPC_ADDR
               value: "tle-dev-social-service.tle-dev.svc.cluster.local:9080"
-            # game-master is not onboarded yet (out of this issue's scope);
-            # matchmaking will fail readiness against this address until a
-            # follow-up ticket deploys it. See the file header Risks note.
             - name: GAME_MASTER_GRPC_ADDR
               value: "tle-dev-game-master.tle-dev.svc.cluster.local:9100"
+            - name: GAME_MASTER_MATCHMAKING_CREDENTIAL
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-misc-secrets
+                  key: GAME_MASTER_MATCHMAKING_CREDENTIAL
           startupProbe:
             httpGet:
               path: /healthz
