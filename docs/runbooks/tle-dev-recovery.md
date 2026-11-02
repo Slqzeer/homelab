@@ -13,13 +13,15 @@ re-vendor on each TLE release with `gh api repos/The-Last-Exam/server/...`).
 | deploy-info vendored | `config-keys.json`: 2026-10-23 from `v0.0.1`; other artifacts unchanged |
 | Edge image `tag@digest` | _fill in_ (api-gateway not published; placeholder stays at 0 replicas, see edge-config.yaml) |
 | Service images `tag@digest` | auth-service `v0.0.2@sha256:189309e7eba8f3683c20324f77f5920ceab8ac330b527eaea2d261fea2d6c463`; lobby-service `v0.0.2@sha256:cb5654799f03aea85a60cde4539632a5b6f69dc6e01dec84784701412fa78bed`; matchmaking-service `v0.0.2@sha256:a22b7967000ba061e9fd0a2b1e74bf96926c38bda0f6f7cd11b78698cd8be155`; metadata-service `v0.0.2@sha256:b62fb8e977e4c7a491583456f11d857ad4f9a6d62ec1e85eb3ad38fbfcab788f`; notification-service `v0.0.2@sha256:bda618ae2533dfe3c54853a2a23a7c9ada5a1e50da622d1ec64914773a6fe78e`; player-service `v0.0.2@sha256:e8085c1ac3da888b97d6b34e7dcf9b04eb99014cf90450b3d5cb1e35d4fa0bf8`; social-service `v0.0.2@sha256:9342d0e713b708938282a76fd9886bac249ddb309c2628a23e9fe3ab51a01e7f` (source: The-Last-Exam/server publish-images run 40263029044) |
+| Game control images `tag@digest` | game-master `v0.0.2@sha256:966baf4811fcc71a60069dffa8bef03d1ecc2a10e16f1c48047c479b54662936`; game-service `v0.0.2@sha256:b96d88334ddfb682c32845f251a26a7e6c017b62d9b95076fedc2e809bb7e7ef` (source: the same publish-images run) |
 | Role manifest version | `1` (registry schema `1.3`) |
 | Identity headers | 26 headers + 5 prefixes (see `edge-config.yaml`) |
 | Public routes | 62 routes across 9 services (see `public-routes.json`) |
 | Object storage (S3 endpoint) | _open_: deploy MinIO in-cluster (`tle-dev` + PVC + Service + bucket job) or point `MINIO_ENDPOINT` at an external MinIO; then create the access pair in its console and seed `MINIO_*`. Blocks metadata-service's object-storage path (issue #52 pins `MINIO_ENDPOINT`/`MINIO_BUCKET` to the not-yet-deployed `tle-dev-minio` name so no further wiring change is needed once it exists). |
 | Non-secret service config | Per-service ConfigMaps in `service-config.yaml` carry only datastore addresses (test-enforced, `tests/test_tle_datastore_config.py`); every other required non-secret key (ports, `*_ENV`, tunables) is a literal container env value in `workloads.yaml` (issue #52). |
 | Datastore credential split | Complete in desired state: per-service ConfigMap addresses, credential-only VSO templates, and the `v0.0.1` configuration contract. |
-| Core service workloads | `auth-service`, `lobby-service`, `matchmaking-service`, `metadata-service`, `notification-service`, `player-service`, `social-service` declared in `workloads.yaml` (issue #52), each listening on 8080 for HTTP (see that file's header) regardless of its `.env.example` default port. `matchmaking-service`'s `GAME_MASTER_GRPC_ADDR` points at a not-yet-onboarded `game-master` Service; see Risks below. |
+| Core service workloads | `auth-service`, `lobby-service`, `matchmaking-service`, `metadata-service`, `notification-service`, `player-service`, `social-service` declared in `workloads.yaml` (issue #52), each listening on 8080 for HTTP (see that file's header) regardless of its `.env.example` default port. `matchmaking-service` reaches the Game Master Service on gRPC `9100` and presents the dedicated matchmaking credential from VSO. |
+| Game Master | `game-master.yaml` declares one replica with no HPA, a `minAvailable: 1` PDB, namespace-scoped pod RBAC, HTTP `8082`, gRPC `9100`, and only the three issue #44 ingress caller classes. `GAME_MASTER_NAMESPACE=tle-dev`, so the Role and registry target the same restricted namespace. Issue #48 supplies `tle-dev-game-pod-env` and the game-pod network/limit contract before live warm-pool acceptance. |
 
 Every Deployment uses `tag@digest`, never `latest`. `images.json` is not in
 git (a digest exists only after a push); record the values here at promotion.
@@ -66,6 +68,7 @@ Canonical ordered checklist: `docs/runbooks/tle-dev-vault-ceremony.md`
 `platform/vault/configure-vault.sh` carries the tle-dev extension: 4
 policies/roles (`vso-tle-dev-auth/data/misc` in `tle-dev`, `vso-tle-dev-db`
 in `databases`), generated db passwords + CSRF/internal/webhook secrets,
+distinct generated Game Master pod-registry and matchmaking credentials,
 and `disabled` placeholders for product-issued keys. Run it first (inside
 vault-0); it never overwrites. It also creates the independent Keycloak
 client secrets for `tle-admin-dev` and `tle-admin-prod`; Keycloak's VSO role
@@ -131,9 +134,106 @@ workloads can run; sync alone is not enough.
       `auth-service`, `lobby-service`, `matchmaking-service`,
       `metadata-service`, `notification-service`, `player-service`, and
       `social-service`; live rollout evidence is still outstanding --
-      `metadata-service` needs MinIO (see Object storage above) and
-      `matchmaking-service` needs `game-master` (not yet onboarded) before
-      both report ready.
+      `metadata-service` needs MinIO (see Object storage above). Game Master
+      is now declared by issue #44; its live registry and mutation acceptance
+      remains pending the issue #48 game-pod environment described below.
+
+### Game Master operator acceptance
+
+This is a live, mutating acceptance procedure. It is **not** a repository
+validation step and must be run by the Homelab operator with the approved
+write-capable identity. Hermes' read-only identity must not run it.
+
+Prerequisites: issue #48 is merged and reconciled; the Vault configure ceremony
+has generated the two distinct Game Master credentials; VSO reports the
+`tle-dev-misc` secret ready; the pinned game-service image is pullable; and the
+operator has selected an approved restricted-compatible diagnostic image for
+the temporary pod below.
+
+1. Confirm desired state and the single-writer boundary:
+
+   ```bash
+   kubectl -n tle-dev get deploy tle-dev-game-master \
+     -o jsonpath='{.spec.replicas}{"\n"}'
+   kubectl -n tle-dev get hpa tle-dev-game-master
+   kubectl -n tle-dev get pdb tle-dev-game-master \
+     -o jsonpath='{.spec.minAvailable}{"\n"}'
+   kubectl -n tle-dev rollout status deploy/tle-dev-game-master
+   ```
+
+   Expected: replicas `1`, HPA `NotFound`, PDB minimum `1`, rollout complete.
+
+2. Create an assigned test game pod through the Game Master ServiceAccount,
+   then recreate Game Master and verify its registry rebuilds that pod. Replace
+   `<approved-image@sha256:digest>` with the operator-approved diagnostic image:
+
+   ```bash
+   cat <<'EOF' | kubectl \
+     --as=system:serviceaccount:tle-dev:tle-dev-game-master create -f -
+   apiVersion: v1
+   kind: Pod
+   metadata:
+     name: game-master-acceptance
+     namespace: tle-dev
+     labels:
+       role: game-pod
+       status: assigned
+       match-id: acceptance
+   spec:
+     restartPolicy: Never
+     securityContext:
+       runAsNonRoot: true
+       runAsUser: 10001
+       runAsGroup: 10001
+       seccompProfile:
+         type: RuntimeDefault
+     containers:
+       - name: diagnostic
+         image: <approved-image@sha256:digest>
+         command: ["sh", "-c", "sleep 3600"]
+         securityContext:
+           allowPrivilegeEscalation: false
+           readOnlyRootFilesystem: true
+           capabilities:
+             drop: ["ALL"]
+   EOF
+   kubectl -n tle-dev delete pod -l app=tle-dev-game-master
+   kubectl -n tle-dev rollout status deploy/tle-dev-game-master
+   kubectl -n tle-dev logs deploy/tle-dev-game-master | \
+     grep 'pod registry rebuilt'
+   ```
+
+   Expected: the create succeeds, the replacement Game Master becomes ready,
+   and its log records a rebuilt registry with at least one active pod.
+
+3. Exercise the remaining pod verbs through the same ServiceAccount and clean
+   up the test object:
+
+   ```bash
+   kubectl --as=system:serviceaccount:tle-dev:tle-dev-game-master \
+     -n tle-dev get pod game-master-acceptance
+   kubectl --as=system:serviceaccount:tle-dev:tle-dev-game-master \
+     -n tle-dev patch pod game-master-acceptance --type merge \
+     -p '{"metadata":{"labels":{"acceptance":"patched"}}}'
+   kubectl --as=system:serviceaccount:tle-dev:tle-dev-game-master \
+     -n tle-dev delete pod game-master-acceptance
+   ```
+
+   Expected: get, patch, and delete succeed. Also verify `list` and `watch`
+   with `kubectl auth can-i --list --as=system:serviceaccount:tle-dev:tle-dev-game-master
+   -n tle-dev`; it must show only `get/list/watch/create/delete/patch` on core
+   pods and no wildcard resource or verb.
+
+4. From temporary diagnostic pods carrying, in turn, the exact matchmaking,
+   `role=game-pod`, ops-job, and player-edge labels, probe Game Master. Expected:
+   matchmaking and game-pod callers connect only to TCP `9100`, ops-job callers
+   reach HTTP `8082`, and the player-edge caller times out on both ports. Use the
+   same approved image and delete every temporary pod after the probes.
+
+5. Record the date, operator, command output, Game Master log excerpt, allowed
+   and denied network results, and cleanup result in Slqzeer/homelab#44. If any
+   check fails, delete the temporary pods, revert the Git change that introduced
+   the failure, and let Argo CD reconcile the previous immutable revision.
 
 ## Retirement
 

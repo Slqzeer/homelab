@@ -667,7 +667,9 @@ for f in password metadata_password quest_password; do
   tle_ensure_field homelab/tle-dev/data "$f" "generated"
 done
 for spec in "CSRF_SECRET 48" "METADATA_GRPC_INTERNAL_TOKEN 32" \
-  "NOTIFICATION_WEBHOOK_SIGNING_SECRET 32"; do
+  "NOTIFICATION_WEBHOOK_SIGNING_SECRET 32" \
+  "GAME_MASTER_POD_REGISTRY_CREDENTIAL 48" \
+  "GAME_MASTER_MATCHMAKING_CREDENTIAL 48"; do
   set -- $spec
   tle_generate "$2"
   tle_ensure_field homelab/tle-dev/misc "$1" "generated"

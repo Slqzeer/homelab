@@ -242,6 +242,9 @@ spec:
         - podSelector:
             matchLabels:
               app: tle-dev-edge
+        - podSelector:
+            matchLabels:
+              app: tle-dev-game-master
       ports:
         - protocol: TCP
           port: 6379
@@ -265,6 +268,9 @@ spec:
         - podSelector:
             matchLabels:
               app: tle-dev-edge
+        - podSelector:
+            matchLabels:
+              app: tle-dev-game-master
       ports:
         - protocol: TCP
           port: 4222
@@ -359,3 +365,117 @@ spec:
       ports:
         - protocol: TCP
           port: 9000
+---
+# Game Master is cluster-internal. Exactly three caller classes are admitted:
+# matchmaking and game pods on gRPC, and labelled operations Jobs on HTTP.
+# The player edge and tailnet proxy match none of these selectors.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-game-master-ingress
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchLabels:
+      app: tle-dev-game-master
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-matchmaking-service
+      ports:
+        - protocol: TCP
+          port: 9100
+    - from:
+        - podSelector:
+            matchLabels:
+              role: game-pod
+      ports:
+        - protocol: TCP
+          port: 9100
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: ops-job
+      ports:
+        - protocol: TCP
+          port: 8082
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-matchmaking-to-game-master
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchLabels:
+      app: tle-dev-matchmaking-service
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-game-master
+      ports:
+        - protocol: TCP
+          port: 9100
+---
+# Game Master needs state backends for reconciliation and player-service gRPC
+# when it allocates a game pod. DNS and Kubernetes API access are supplied by
+# tle-dev-dns-api above.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-game-master-egress
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchLabels:
+      app: tle-dev-game-master
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-nats
+      ports:
+        - protocol: TCP
+          port: 4222
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-valkey
+      ports:
+        - protocol: TCP
+          port: 6379
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-player-service
+      ports:
+        - protocol: TCP
+          port: 9090
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-player-grpc-from-game-master
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchLabels:
+      app: tle-dev-player-service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-game-master
+      ports:
+        - protocol: TCP
+          port: 9090
