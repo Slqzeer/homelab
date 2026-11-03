@@ -192,12 +192,13 @@ path "homelab/data/ghcr" {
 POLICY
 
 echo "==> role vso-ghcr"
-# bound_service_account_names must match the ServiceAccount created in
-# platform/registry/config/vault-secrets.yaml, and audience must match that
-# file's VaultAuth spec.kubernetes.audiences.
+# bound_service_account_names and namespaces must match the registry identities
+# in platform/registry/config/vault-secrets.yaml and
+# apps/tle-dev/config/registry-credentials.yaml. The audience must match both
+# VaultAuth objects.
 vault write auth/kubernetes/role/vso-ghcr \
-    bound_service_account_names=registry \
-    bound_service_account_namespaces=apps \
+    bound_service_account_names=registry,tle-dev-registry \
+    bound_service_account_namespaces=apps,tle-dev \
     audience=vault \
     token_policies=vso-ghcr-read \
     ttl=1h

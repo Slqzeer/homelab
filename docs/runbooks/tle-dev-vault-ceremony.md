@@ -16,6 +16,10 @@ field, and `seed-tle-dev-vault.sh` patches only the keys you filled in
 ## Prerequisites
 
 - Access to the cluster host (the commands below assume a shell on it).
+- The existing `homelab/ghcr` credential can read the private
+  `ghcr.io/the-last-exam/*` packages as well as Homelab packages. Follow
+  `platform/registry/README.md` to create or rotate it; never copy it into a
+  TLE-specific Vault path.
 - The TLE release's product-issued values at hand for the providers you
   enable: Ed25519 JWT private key, MinIO pair, OAuth client secrets, push
   credentials. Per-key sources are documented in the
@@ -46,6 +50,9 @@ What this creates for `tle-dev` (extension at the end of the script):
   (bound to ServiceAccounts `tle-dev-auth/data/misc` in namespace
   `tle-dev`) and `vso-tle-dev-db` (bound to `tle-dev-db` in namespace
   `databases`, used by the postgres Job).
+- The existing `vso-ghcr` role also admits only the `tle-dev-registry`
+  ServiceAccount in `tle-dev`, allowing VSO to project `homelab/ghcr` as the
+  namespace-local `ghcr-pull` docker config.
 - Generated values (random, server-side, alphanumeric so they compose
   into `postgres://` URLs): `password`, `metadata_password`,
   `quest_password` in `homelab/tle-dev/data`; `CSRF_SECRET` (48 chars),
@@ -99,12 +106,16 @@ kubectl -n vault exec vault-0 -- sh -c '
     vault kv get -format=json "homelab/$p" 2>/dev/null | grep -o "\"[a-zA-Z_]*\":" || echo "  (unreadable)"
   done
 '
-kubectl -n tle-dev get vaultstaticsecret tle-dev-auth tle-dev-data tle-dev-misc
-kubectl -n tle-dev get secret tle-dev-auth-secrets tle-dev-data-secrets tle-dev-misc-secrets
+kubectl -n tle-dev get vaultstaticsecret tle-dev-auth tle-dev-data tle-dev-misc ghcr-pull
+kubectl -n tle-dev get secret \
+  tle-dev-auth-secrets tle-dev-data-secrets tle-dev-misc-secrets ghcr-pull
+kubectl -n tle-dev get secret ghcr-pull \
+  -o go-template='{{range $key, $_ := .data}}{{printf "%s\n" $key}}{{end}}'
 ```
 
-Expected: all three paths list their keys; all three `VaultStaticSecret`
-objects report synced; all three K8s Secrets exist. If a path is
+Expected: all three TLE paths list their keys; all four `VaultStaticSecret`
+objects report synced; all four K8s Secrets exist. `ghcr-pull` has type
+`kubernetes.io/dockerconfigjson` and only the `.dockerconfigjson` key. If a path is
 missing, step 1 has not run. If REQUIRED keys are still `disabled`,
 step 2 has not run (or their `.env` entries were left empty).
 
