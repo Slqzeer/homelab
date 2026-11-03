@@ -26,6 +26,25 @@ rules:
       - create
       - delete
       - patch
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    resourceNames:
+      - tle-dev-game-pod-env
+    verbs:
+      - get
+  # Reserved for datastore authentication. The Secret and
+  # GAME_POD_ENV_SECRET stay absent until NATS/Valkey credentials exist, but
+  # Game Master cannot read any Secret other than this future named object.
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    resourceNames:
+      - tle-dev-game-pod-credentials
+    verbs:
+      - get
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

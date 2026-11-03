@@ -72,13 +72,14 @@ class TleGameMasterTests(unittest.TestCase):
         role = self.resources_by_kind(path, "Role")[GAME_MASTER_APP]
         self.assertEqual(GAME_NAMESPACE, role["metadata"]["namespace"])
         self.assertEqual(
-            [{
+            {
                 "apiGroups": [""],
                 "resources": ["pods"],
                 "verbs": ["get", "list", "watch", "create", "delete", "patch"],
-            }],
-            role["rules"],
+            },
+            role["rules"][0],
         )
+        self.assertEqual(3, len(role["rules"]))
 
         binding = self.resources_by_kind(path, "RoleBinding")[GAME_MASTER_APP]
         self.assertEqual(GAME_NAMESPACE, binding["metadata"]["namespace"])
