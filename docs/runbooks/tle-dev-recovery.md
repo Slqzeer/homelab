@@ -116,7 +116,8 @@ workloads can run; sync alone is not enough.
 
 - [ ] Operator in admin-composite group signs in via Keycloak, sees admin tools
 - [ ] `tle-admin-dev` and `tle-admin-prod` registration Job succeeded; their
-      callbacks use `/auth/callback` and roles match the pinned manifest
+      callbacks use `/auth/callback`, default scopes include `basic` and
+      `roles`, and roles match the pinned manifest
 - [ ] Operator without TLE roles refused
 - [ ] Player token refused by rotation endpoint (`AUTH_FORBIDDEN`); no token → 401
 - [ ] `/auth/admin/rotate-key/promote` unreachable via tailnet host

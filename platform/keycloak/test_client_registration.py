@@ -37,7 +37,9 @@ import sys
 
 state_path = Path(os.environ["FAKE_STATE"])
 events_path = Path(os.environ["FAKE_EVENTS"])
+scopes_path = Path(os.environ["FAKE_SCOPES"])
 state = json.loads(state_path.read_text())
+scopes = json.loads(scopes_path.read_text())
 args = sys.argv[1:]
 event = {"args": args}
 
@@ -93,8 +95,12 @@ elif args[0] == "get" and args[1].startswith("clients/"):
     else:
         print(json.dumps({k: v for k, v in client.items() if not k.startswith("_")}))
 elif args[:2] == ["get", "client-scopes"]:
-    print(json.dumps([{"id": name + "-id", "name": name}
-                      for name in ("profile", "email", "groups")]))
+    print(json.dumps(scopes))
+elif args[:2] == ["create", "client-scopes"]:
+    body = json.load(sys.stdin)
+    event["body"] = body
+    body["id"] = body["name"] + "-id"
+    scopes.append(body)
 elif args[:2] == ["create", "clients"]:
     body = json.load(sys.stdin)
     if os.environ.get("FAKE_LEAK_ON_CREATE"):
@@ -148,17 +154,18 @@ elif args[0] == "update" and args[1].startswith("clients/"):
     else:
         body = json.load(sys.stdin)
         event["body_keys"] = sorted(body)
-        scopes = client.get("_default_scopes", [])
+        client_scopes = client.get("_default_scopes", [])
         if "--merge" in args:
             client.update({k: v for k, v in body.items() if k != "defaultClientScopes"})
         else:
             client.clear()
             client.update({k: v for k, v in body.items() if k != "defaultClientScopes"})
             client["id"] = uuid
-        client["_default_scopes"] = scopes
+        client["_default_scopes"] = client_scopes
 else:
     sys.exit(18)
 state_path.write_text(json.dumps(state))
+scopes_path.write_text(json.dumps(scopes))
 with events_path.open("a") as output:
     output.write(json.dumps(event) + "\n")
 '''
@@ -237,6 +244,34 @@ REDIS_PATH = {"username": "default", "password": REDIS_PASSWORD}
 
 
 class ClientRegistrationTests(unittest.TestCase):
+    def test_rotation_client_scopes_match_keycloak_26_contract(self):
+        runs, _, events, _ = self.run_hook([])
+        self.assertEqual([0, 0], [run.returncode for run in runs], [run.stderr for run in runs])
+        scopes = {
+            event["body"]["name"]: event["body"]
+            for event in events
+            if event["args"][:2] == ["create", "client-scopes"]
+        }
+
+        self.assertEqual(
+            {"oidc-usersessionmodel-note-mapper", "oidc-sub-mapper"},
+            {mapper["protocolMapper"] for mapper in scopes["basic"]["protocolMappers"]},
+        )
+        auth_time = next(
+            mapper for mapper in scopes["basic"]["protocolMappers"]
+            if mapper["name"] == "auth_time"
+        )
+        self.assertEqual("AUTH_TIME", auth_time["config"]["user.session.note"])
+        self.assertEqual("auth_time", auth_time["config"]["claim.name"])
+        self.assertEqual(
+            {
+                "oidc-usermodel-realm-role-mapper",
+                "oidc-usermodel-client-role-mapper",
+                "oidc-audience-resolve-mapper",
+            },
+            {mapper["protocolMapper"] for mapper in scopes["roles"]["protocolMappers"]},
+        )
+
     def test_tle_admin_reconciliation_documentation_contract(self):
         readme = (ROOT / "platform/keycloak/README.md").read_text(encoding="utf-8")
         runbook = (ROOT / "docs/runbooks/tle-dev-recovery.md").read_text(encoding="utf-8")
@@ -306,8 +341,14 @@ class ClientRegistrationTests(unittest.TestCase):
             fake.chmod(0o700)
             state_path = temp / "state.json"
             state_path.write_text(json.dumps(state), encoding="utf-8")
+            scopes_path = temp / "scopes.json"
+            scopes_path.write_text(json.dumps([
+                {"id": name + "-id", "name": name}
+                for name in ("profile", "email", "groups")
+            ]), encoding="utf-8")
             events_path = temp / "events.jsonl"
             env = dict(os.environ, FAKE_STATE=str(state_path), FAKE_EVENTS=str(events_path),
+                       FAKE_SCOPES=str(scopes_path),
                        FAKE_ALLOWLIST="tle-admin-dev,tle-admin-prod,unrelated",
                        KC_ADMIN_USERNAME="admin", KC_CLI_PASSWORD="admin-canary-secret",
                        KCADM=str(fake), JQ="/usr/bin/jq", TLE_ADMIN_CLIENT_IDS=client_ids)
@@ -488,10 +529,16 @@ class ClientRegistrationTests(unittest.TestCase):
             script_path.write_text(script, encoding="utf-8")
             state_path = temp / "state.json"
             state_path.write_text(json.dumps(state), encoding="utf-8")
+            scopes_path = temp / "scopes.json"
+            scopes_path.write_text(json.dumps([
+                {"id": name + "-id", "name": name}
+                for name in ("profile", "email", "groups")
+            ]), encoding="utf-8")
             events_path = temp / "events.jsonl"
             jq_args_path = temp / "jq-args"
             env = dict(os.environ, FAKE_STATE=str(state_path), FAKE_EVENTS=str(events_path),
-                       FAKE_JQ_ARGS=str(jq_args_path), KC_ADMIN_USERNAME="admin",
+                       FAKE_SCOPES=str(scopes_path), FAKE_JQ_ARGS=str(jq_args_path),
+                       KC_ADMIN_USERNAME="admin",
                        KC_CLI_PASSWORD="admin-canary-secret",
                        PORTAL_CLIENT_SECRET="portal-canary-secret",
                        PENPOT_CLIENT_SECRET="penpot-canary-secret",
@@ -544,6 +591,11 @@ class ClientRegistrationTests(unittest.TestCase):
                 self.assertEqual([origin], client["webOrigins"])
                 self.assertEqual(origin + "/", client["attributes"]["post.logout.redirect.uris"])
                 self.assertEqual(secret, client["secret"])
+                self.assertTrue(
+                    {"profile", "email", "groups", "basic", "roles"}.issubset(
+                        client["_default_scopes"]
+                    )
+                )
         output = "".join(run.stdout + run.stderr for run in runs) + jq_args
         for secret in expected.values():
             self.assertNotIn(secret[1], output)
@@ -579,11 +631,13 @@ class ClientRegistrationTests(unittest.TestCase):
             hermes["attributes"]["pkce.code.challenge.method"],
         )
         writes = [event for event in events if event["args"][0] in ("create", "update")]
-        # Portal, Penpot, the two TLE clients, then Hermes: each needs one create and
-        # one `groups` scope add; the second run adds nothing.
+        # Portal, Penpot, the two missing Keycloak scopes, the two TLE clients,
+        # then Hermes. TLE clients gain groups/basic/roles; the second run adds
+        # nothing.
         self.assertEqual(
-            ["create", "update", "create", "update", "create", "update", "create", "update",
-             "create", "update"],
+            ["create", "update", "create", "update", "create", "create",
+             "create", "update", "update", "update",
+             "create", "update", "update", "update", "create", "update"],
             [event["args"][0] for event in writes],
         )
         self.assertEqual(
@@ -595,11 +649,19 @@ class ClientRegistrationTests(unittest.TestCase):
             writes[3]["args"][1],
         )
         self.assertEqual("clients/created-tle-admin-dev/default-client-scopes/groups-id",
-                         writes[5]["args"][1])
-        self.assertEqual("clients/created-tle-admin-prod/default-client-scopes/groups-id",
                          writes[7]["args"][1])
-        self.assertEqual("clients/created-hermes-dashboard/default-client-scopes/groups-id",
+        self.assertEqual("clients/created-tle-admin-dev/default-client-scopes/basic-id",
+                         writes[8]["args"][1])
+        self.assertEqual("clients/created-tle-admin-dev/default-client-scopes/roles-id",
                          writes[9]["args"][1])
+        self.assertEqual("clients/created-tle-admin-prod/default-client-scopes/groups-id",
+                         writes[11]["args"][1])
+        self.assertEqual("clients/created-tle-admin-prod/default-client-scopes/basic-id",
+                         writes[12]["args"][1])
+        self.assertEqual("clients/created-tle-admin-prod/default-client-scopes/roles-id",
+                         writes[13]["args"][1])
+        self.assertEqual("clients/created-hermes-dashboard/default-client-scopes/groups-id",
+                         writes[15]["args"][1])
         for event in events:
             self.assertNotIn("portal-canary-secret", " ".join(event["args"]))
             self.assertNotIn("admin-canary-secret", " ".join(event["args"]))
@@ -686,7 +748,8 @@ class ClientRegistrationTests(unittest.TestCase):
         # scope adds, because the fixture has no `_default_scopes` at all.
         # Two more for Penpot, which is created and then gains `groups`.
         self.assertEqual(["update", "update", "update", "update", "create", "update",
-                          "create", "update", "create", "update", "create", "update"],
+                          "create", "create", "create", "update", "update", "update",
+                          "create", "update", "update", "update", "create", "update"],
                          [event["args"][0] for event in writes])
         self.assertEqual("clients/portal-id", writes[0]["args"][1])
         self.assertIn("--merge", writes[0]["args"])
@@ -700,7 +763,7 @@ class ClientRegistrationTests(unittest.TestCase):
         self.assertEqual([0, 0], [run.returncode for run in runs], [run.stderr for run in runs])
         self.assertEqual(["profile", "email", "custom", "groups"], state[0]["_default_scopes"])
         writes = [event for event in events if event["args"][0] == "update"]
-        self.assertEqual(6, len(writes), writes)
+        self.assertEqual(10, len(writes), writes)
         self.assertEqual("clients/portal-id/default-client-scopes/groups-id", writes[1]["args"][1])
 
     def test_scope_link_must_be_verified(self):

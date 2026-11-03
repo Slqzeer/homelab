@@ -110,6 +110,21 @@ spec:
               value: "8080"
             - name: AUTH_SERVICE_GRPC_PORT
               value: "50051"
+            - name: KEYCLOAK_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: tle-dev-edge-config
+                  key: keycloak-issuer
+            - name: KEYCLOAK_OPERATOR_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: tle-dev-edge-config
+                  key: keycloak-operator-client-id
+            - name: KEYCLOAK_JWKS_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: tle-dev-edge-config
+                  key: keycloak-jwks-uri
             - name: AUTH_JWT_ED25519_PUBLIC_KEY_PEM
               valueFrom:
                 configMapKeyRef:
