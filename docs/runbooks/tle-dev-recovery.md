@@ -21,7 +21,7 @@ re-vendor on each TLE release with `gh api repos/The-Last-Exam/server/...`).
 | Non-secret service config | Per-service ConfigMaps in `service-config.yaml` carry only datastore addresses (test-enforced, `tests/test_tle_datastore_config.py`); every other required non-secret key (ports, `*_ENV`, tunables) is a literal container env value in `workloads.yaml` (issue #52). |
 | Datastore credential split | Complete in desired state: per-service ConfigMap addresses, credential-only VSO templates, and the `v0.0.1` configuration contract. |
 | Core service workloads | `auth-service`, `lobby-service`, `matchmaking-service`, `metadata-service`, `notification-service`, `player-service`, `social-service` declared in `workloads.yaml` (issue #52), each listening on 8080 for HTTP (see that file's header) regardless of its `.env.example` default port. `matchmaking-service` reaches the Game Master Service on gRPC `9100` and presents the dedicated matchmaking credential from VSO. |
-| Game Master | `game-master.yaml` declares one replica with no HPA, a `minAvailable: 1` PDB, namespace-scoped pod RBAC, HTTP `8082`, gRPC `9100`, and only the three issue #44 ingress caller classes. `GAME_MASTER_NAMESPACE=tle-dev`, so the Role and registry target the same restricted namespace. Issue #48 supplies `tle-dev-game-pod-env` and the game-pod network/limit contract before live warm-pool acceptance. |
+| Game Master | `game-master.yaml` declares one replica with no HPA, a `minAvailable: 1` PDB, namespace-scoped pod RBAC, HTTP `8082`, gRPC `9100`, and only the three issue #44 ingress caller classes. `GAME_MASTER_NAMESPACE=tle-dev`, so the Role and registry target the same restricted namespace. `game-pod-environment.yaml` supplies the shared environment and default resources; `networkpolicy.yaml` limits game pods to the edge and their four runtime dependencies. |
 
 Every Deployment uses `tag@digest`, never `latest`. `images.json` is not in
 git (a digest exists only after a push); record the values here at promotion.
@@ -150,6 +150,32 @@ has generated the two distinct Game Master credentials; VSO reports the
 `tle-dev-misc` secret ready; the pinned game-service image is pullable; and the
 operator has selected an approved restricted-compatible diagnostic image for
 the temporary pod below.
+
+Before exercising Game Master mutations, verify the game-pod environment itself:
+
+```bash
+kubectl -n tle-dev get configmap tle-dev-game-pod-env -o yaml
+kubectl -n tle-dev get limitrange tle-dev-game-pod-defaults -o yaml
+kubectl -n tle-dev auth can-i get configmap/tle-dev-game-pod-env \
+  --as=system:serviceaccount:tle-dev:tle-dev-game-master
+kubectl -n tle-dev auth can-i get secret/tle-dev-game-pod-credentials \
+  --as=system:serviceaccount:tle-dev:tle-dev-game-master
+```
+
+Expected: the ConfigMap contains the Game Master, Metadata Service, NATS, and
+Valkey endpoints without credentials; the LimitRange reports `100m`/`128Mi`
+requests and `500m`/`512Mi` limits; and both named-object checks return `yes`.
+The credential Secret and `GAME_POD_ENV_SECRET` intentionally remain absent
+until NATS or Valkey authentication is enabled.
+
+After the warm pool is ready, inspect one `role=game-pod` pod and confirm its
+effective resources and environment, then run allowed probes to NATS `4222`,
+Valkey `6379`, Metadata Service `8080`, and Game Master `9100`. Run denied probes
+to another `tle-dev` workload and to an external address. From an edge-labelled
+diagnostic pod, probe the game pod only on `8080`; from an unlabelled diagnostic
+pod the same probe must time out. Record command output and cleanup evidence in
+Slqzeer/homelab#62. Static repository validation does not satisfy these live
+checks.
 
 1. Confirm desired state and the single-writer boundary:
 

@@ -27,14 +27,20 @@ spec:
   policyTypes:
     - Egress
 ---
-# DNS + Kubernetes API for every pod (egress foundation).
+# DNS + Kubernetes API for managed workloads (egress foundation). Dynamic game
+# pods use the narrower DNS-only policy below and cannot reach the API server.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: tle-dev-dns-api
   namespace: tle-dev
 spec:
-  podSelector: {}
+  podSelector:
+    matchExpressions:
+      - key: role
+        operator: NotIn
+        values:
+          - game-pod
   policyTypes:
     - Egress
   egress:
@@ -116,6 +122,14 @@ spec:
         - podSelector:
             matchLabels:
               app-group: tle-dev-service
+      ports:
+        - protocol: TCP
+          port: 8080
+    # The game WebSocket route resolves an assigned role=game-pod endpoint.
+    - to:
+        - podSelector:
+            matchLabels:
+              role: game-pod
       ports:
         - protocol: TCP
           port: 8080
@@ -245,6 +259,9 @@ spec:
         - podSelector:
             matchLabels:
               app: tle-dev-game-master
+        - podSelector:
+            matchLabels:
+              role: game-pod
       ports:
         - protocol: TCP
           port: 6379
@@ -271,6 +288,9 @@ spec:
         - podSelector:
             matchLabels:
               app: tle-dev-game-master
+        - podSelector:
+            matchLabels:
+              role: game-pod
       ports:
         - protocol: TCP
           port: 4222
@@ -479,3 +499,99 @@ spec:
       ports:
         - protocol: TCP
           port: 9090
+---
+# Dynamically created game pods have no stable app label or Service. Select
+# only Game Master's role label and permit the four runtime dependencies plus
+# the edge's game route. DNS is isolated in the following policy so these pods
+# do not inherit the managed-workload Kubernetes API allowance above.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-game-pod
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchLabels:
+      role: game-pod
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-edge
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-nats
+      ports:
+        - protocol: TCP
+          port: 4222
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-valkey
+      ports:
+        - protocol: TCP
+          port: 6379
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-metadata-service
+      ports:
+        - protocol: TCP
+          port: 8080
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-game-master
+      ports:
+        - protocol: TCP
+          port: 9100
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-game-pod-dns
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchLabels:
+      role: game-pod
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-metadata-from-game-pods
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchLabels:
+      app: tle-dev-metadata-service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              role: game-pod
+      ports:
+        - protocol: TCP
+          port: 8080

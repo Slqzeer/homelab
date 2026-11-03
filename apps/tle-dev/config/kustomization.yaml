@@ -19,6 +19,7 @@ resources:
   - postgres-job.yaml
   - workloads.yaml
   - game-master.yaml
+  - game-pod-environment.yaml
 patches:
   - target:
       group: apps

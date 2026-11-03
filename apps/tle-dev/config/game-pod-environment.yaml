@@ -1,0 +1,34 @@
+# Shared environment and namespace defaults for Game Master-created game pods
+# (issue #48). Per-pod identity, address, and port values remain in the pod
+# manifest built by Game Master. Datastore credentials remain absent until the
+# datastores enable authentication; GAME_POD_ENV_SECRET is optional.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tle-dev-game-pod-env
+  namespace: tle-dev
+data:
+  GAME_MASTER_GRPC_TARGET: >-
+    http://tle-dev-game-master.tle-dev.svc.cluster.local:9100
+  GAME_METADATA_SERVICE_BASE_URL: >-
+    http://tle-dev-metadata-service.tle-dev.svc.cluster.local:8080
+  NATS_URL: nats://tle-dev-nats.tle-dev.svc.cluster.local:4222
+  VALKEY_URL: redis://tle-dev-valkey.tle-dev.svc.cluster.local:6379
+---
+# Applies to every container in tle-dev that omits resources. Current managed
+# workloads already state their own values, so these defaults principally bound
+# the dynamically created role=game-pod pods.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: tle-dev-game-pod-defaults
+  namespace: tle-dev
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+      default:
+        cpu: 500m
+        memory: 512Mi
