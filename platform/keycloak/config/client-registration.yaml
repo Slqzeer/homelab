@@ -35,8 +35,9 @@ data:
     # This is the entire mutation allowlist. Query errors and duplicate IDs
     # abort the hook; neither may be interpreted as an absent client.
     # Arguments are positional: client_id, optional secret env var, display
-    # name, origin, callback path, logout path. An empty secret env var creates
-    # a public PKCE client; a non-empty one creates a confidential client.
+    # name, origin, callback path, logout path, optional required scope list.
+    # An empty secret env var creates a public PKCE client; a non-empty one
+    # creates a confidential client.
     # The origin and the OIDC callback
     # path are per entry, never constants inside this function: Penpot's
     # callback is /api/auth/oidc/callback, which is NOT the portal's
@@ -44,6 +45,7 @@ data:
     reconcile_client() {
       client_id=$1 secret_var=$2 display_name=$3 origin=$4
       callback=$5 logout_path=$6
+      required_scopes=${7:-"profile email groups"}
       secret_value=
       if [ -n "$secret_var" ]; then
         # jq reads the secret, not the shell: $secret_var (the NAME) goes into
@@ -180,7 +182,7 @@ data:
       current_scopes=$("$KCADM" get "clients/$client_uuid/default-client-scopes" \
         -r homelab --config /tmp/kcadm.config)
       available_scopes=
-      for scope_name in profile email groups; do
+      for scope_name in $required_scopes; do
         if printf '%s' "$current_scopes" | "$JQ" -e \
             --arg name "$scope_name" 'any(.[]; .name == $name)' >/dev/null; then
           continue
@@ -208,7 +210,7 @@ data:
         fi
       done
       # Verify the complete required set, not merely the most recent add.
-      for scope_name in profile email groups; do
+      for scope_name in $required_scopes; do
         if ! printf '%s' "$current_scopes" | "$JQ" -e \
             --arg name "$scope_name" 'any(.[]; .name == $name)' >/dev/null; then
           echo "$client_id default scope verification failed" >&2
@@ -221,6 +223,104 @@ data:
       client_id=$1 display_name=$2 origin=$3 callback=$4 logout_path=$5
       reconcile_client "$client_id" "" "$display_name" "$origin" "$callback" "$logout_path"
     }
+
+    # The realm seed explicitly declares client scopes, which suppresses
+    # Keycloak's built-in scope population. Reconcile the exact Keycloak 26.7.4
+    # basic/roles representations before attaching them to the TLE clients.
+    # This also repairs realms imported before these scopes were required.
+    ensure_client_scope() {
+      scope_name=$1 desired_json=$2
+      scopes_json=$("$KCADM" get client-scopes -r homelab \
+        --config /tmp/kcadm.config)
+      scope_count=$(printf '%s' "$scopes_json" | "$JQ" -r \
+        --arg name "$scope_name" '[.[] | select(.name == $name)] | length')
+      if [ "$scope_count" -gt 1 ]; then
+        echo "$scope_name client scope is duplicated" >&2
+        exit 1
+      fi
+      if [ "$scope_count" -eq 0 ]; then
+        if ! printf '%s' "$desired_json" | "$KCADM" create client-scopes \
+            -r homelab --config /tmp/kcadm.config -f - >/dev/null 2>&1; then
+          echo "$scope_name client scope create failed" >&2
+          exit 1
+        fi
+        scopes_json=$("$KCADM" get client-scopes -r homelab \
+          --config /tmp/kcadm.config)
+        scope_count=$(printf '%s' "$scopes_json" | "$JQ" -r \
+          --arg name "$scope_name" '[.[] | select(.name == $name)] | length')
+        if [ "$scope_count" -ne 1 ]; then
+          echo "$scope_name client scope verification failed" >&2
+          exit 1
+        fi
+      fi
+    }
+
+    basic_scope=$("$JQ" -n '
+      {name: "basic",
+       description: "OpenID Connect scope for add all basic claims to the token",
+       protocol: "openid-connect",
+       attributes: {
+         "include.in.token.scope": "false",
+         "display.on.consent.screen": "false"
+       },
+       protocolMappers: [
+         {name: "auth_time", protocol: "openid-connect",
+          protocolMapper: "oidc-usersessionmodel-note-mapper",
+          consentRequired: false,
+          config: {
+            "user.session.note": "AUTH_TIME",
+            "introspection.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "auth_time",
+            "jsonType.label": "long"
+          }},
+         {name: "sub", protocol: "openid-connect",
+          protocolMapper: "oidc-sub-mapper", consentRequired: false,
+          config: {
+            "introspection.token.claim": "true",
+            "access.token.claim": "true"
+          }}
+       ]}')
+    roles_scope=$("$JQ" -n '
+      {name: "roles",
+       description: "OpenID Connect scope for add user roles to the access token",
+       protocol: "openid-connect",
+       attributes: {
+         "include.in.token.scope": "false",
+         "consent.screen.text": "${rolesScopeConsentText}",
+         "display.on.consent.screen": "true"
+       },
+       protocolMappers: [
+         {name: "client roles", protocol: "openid-connect",
+          protocolMapper: "oidc-usermodel-client-role-mapper",
+          consentRequired: false,
+          config: {
+            "user.attribute": "foo",
+            "introspection.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "resource_access.${client_id}.roles",
+            "jsonType.label": "String", multivalued: "true"
+          }},
+         {name: "audience resolve", protocol: "openid-connect",
+          protocolMapper: "oidc-audience-resolve-mapper",
+          consentRequired: false,
+          config: {
+            "introspection.token.claim": "true",
+            "access.token.claim": "true"
+          }},
+         {name: "realm roles", protocol: "openid-connect",
+          protocolMapper: "oidc-usermodel-realm-role-mapper",
+          consentRequired: false,
+          config: {
+            "user.attribute": "foo",
+            "introspection.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String", multivalued: "true"
+          }}
+       ]}')
 
     reconcile_client homelab-portal PORTAL_CLIENT_SECRET "Homelab Portal" \
       https://portal.taildf6cd4.ts.net /auth/callback /auth/logout
@@ -236,10 +336,14 @@ data:
         "not projected yet. Re-sync the keycloak Application after the" \
         "penpot Application's first sync." >&2
     fi
+    ensure_client_scope basic "$basic_scope"
+    ensure_client_scope roles "$roles_scope"
     reconcile_client tle-admin-dev TLE_ADMIN_DEV_CLIENT_SECRET "The Last Exam Admin (dev)" \
-      https://tle-dev-operator.taildf6cd4.ts.net /auth/callback /
+      https://tle-dev-operator.taildf6cd4.ts.net /auth/callback / \
+      "profile email groups basic roles"
     reconcile_client tle-admin-prod TLE_ADMIN_PROD_CLIENT_SECRET "The Last Exam Admin (prod)" \
-      https://tle-prod-operator.taildf6cd4.ts.net /auth/callback /
+      https://tle-prod-operator.taildf6cd4.ts.net /auth/callback / \
+      "profile email groups basic roles"
     reconcile_public_client hermes-dashboard "Hermes Agent" \
       https://hermes.taildf6cd4.ts.net /auth/callback /
     /bin/sh /tle-role-reconciler/reconcile-tle-admin-roles.sh

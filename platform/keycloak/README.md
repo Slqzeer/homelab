@@ -168,11 +168,13 @@ edits. `keycloak-config-cli` was rejected because its newest build targeted
 identity service was not worth automatic reconciliation.
 
 **Declaring `clientScopes` suppresses Keycloak's built-in scope population.**
-The seed therefore explicitly declares only `groups`, `profile` and
-`email`, and clients reference those three as default client scopes.
-Referencing a built-in name without declaring it here does not create its
-mappers. The `groups` mapper emits bare group names; without it the role
-mapping quietly falls through to Viewer.
+The seed therefore explicitly declares `groups`, `profile` and `email`.
+The client-registration hook additionally creates Keycloak 26.7.4's exact
+`basic` and `roles` scopes when absent and attaches them only to the TLE admin
+clients. `basic` supplies `auth_time` for the 15-minute rotation step-up check;
+`roles` supplies `resource_access.<client>.roles` for capability enforcement.
+The `groups` mapper emits bare group names; without it the role mapping quietly
+falls through to Viewer.
 
 **Declaring `requiredActions` also suppresses built-in registration.**
 The seed explicitly enables `UPDATE_PASSWORD` (non-default) and
