@@ -57,6 +57,16 @@ spec:
         - podSelector:
             matchLabels:
               job: postgres-client
+        # TLE application services, and only those carrying the shared
+        # service-group label. Keeping both selectors in one peer makes this
+        # an AND: other tle-dev pods and identically labelled pods in another
+        # namespace remain denied.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tle-dev
+          podSelector:
+            matchLabels:
+              app-group: tle-dev-service
         # Penpot's backend, and only it: the frontend, exporter and MCP
         # server never open a database connection. Its database Job runs
         # in this namespace and is covered by `job: postgres-client` above.

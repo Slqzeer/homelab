@@ -114,8 +114,9 @@ credential.
 
 `config/networkpolicy.yaml` ships three ingress-only policies:
 `default-deny-ingress` selects every pod in `databases`, `postgres-clients`
-opens 5432 to the `keycloak` namespace, the local `postgres-exporter` pods
-and local pods labelled `job: postgres-client`, and
+opens 5432 to the `keycloak` namespace, the `tle-dev` pods labelled
+`app-group: tle-dev-service`, the local `postgres-exporter` pods and local
+pods labelled `job: postgres-client`, and
 `postgres-exporter-metrics` opens 9187 to `monitoring`. Both the
 `keycloak-database` and `postgres-exporter-role` Sync hooks carry the client
 label. Egress and DNS are unchanged; password authentication still applies.
