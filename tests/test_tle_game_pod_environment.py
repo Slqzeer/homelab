@@ -103,7 +103,7 @@ class TleGamePodEnvironmentTests(unittest.TestCase):
         for rule in rules[1:]:
             self.assertEqual(["get"], rule["verbs"])
 
-    def test_game_master_uses_config_map_and_leaves_optional_secret_unset(self):
+    def test_game_master_uses_config_map_and_pod_registry_secret(self):
         deployment = self.resources_by_kind(
             "apps/tle-dev/config/game-master.yaml", "Deployment"
         )["tle-dev-game-master"]
@@ -112,7 +112,7 @@ class TleGamePodEnvironmentTests(unittest.TestCase):
             for item in deployment["spec"]["template"]["spec"]["containers"][0]["env"]
         }
         self.assertEqual(GAME_POD_CONFIG_MAP, env["GAME_POD_ENV_CONFIGMAP"]["value"])
-        self.assertNotIn("GAME_POD_ENV_SECRET", env)
+        self.assertEqual(GAME_POD_SECRET, env["GAME_POD_ENV_SECRET"]["value"])
 
     def test_game_pod_network_contract_is_exact(self):
         policies = self.resources_by_kind(

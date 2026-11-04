@@ -1,7 +1,8 @@
 # Shared environment and namespace defaults for Game Master-created game pods
 # (issue #48). Per-pod identity, address, and port values remain in the pod
-# manifest built by Game Master. Datastore credentials remain absent until the
-# datastores enable authentication; GAME_POD_ENV_SECRET is optional.
+# manifest built by Game Master. The separate GAME_POD_ENV_SECRET supplies only
+# the Game Master pod-registry caller credential; datastore credentials remain
+# absent until NATS or Valkey authentication is enabled.
 apiVersion: v1
 kind: ConfigMap
 metadata:

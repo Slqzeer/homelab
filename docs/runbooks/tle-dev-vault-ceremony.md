@@ -57,8 +57,12 @@ What this creates for `tle-dev` (extension at the end of the script):
   into `postgres://` URLs): `password`, `metadata_password`,
   `quest_password` in `homelab/tle-dev/data`; `CSRF_SECRET` (48 chars),
   `METADATA_GRPC_INTERNAL_TOKEN`, `NOTIFICATION_WEBHOOK_SIGNING_SECRET`
-  in `homelab/tle-dev/misc`; `AUTH_SIGNING_STORE_KEY` (base64, 32 raw
-  bytes, not alphanumeric-restricted) in `homelab/tle-dev/auth`.
+  and the distinct 48-character `GAME_MASTER_POD_REGISTRY_CREDENTIAL`
+  and `GAME_MASTER_MATCHMAKING_CREDENTIAL` in `homelab/tle-dev/misc`;
+  `AUTH_SIGNING_STORE_KEY` (base64, 32 raw bytes, not
+  alphanumeric-restricted) in `homelab/tle-dev/auth`. The script refuses
+  to continue if either Game Master caller credential is empty or the two
+  values are equal; it never prints either value.
 - `disabled` placeholders for every product-issued key: `MINIO_*`,
   `NOTIFICATION_APNS_*`, `NOTIFICATION_FCM_*`,
   `AUTH_JWT_ED25519_*_PRIVATE_KEY_PEM`, `APPLE_*`, `DISCORD_*`,
@@ -84,7 +88,9 @@ The `.env.tle-dev-*` files are gitignored and must never be committed
 (the seed script refuses to run if a real values file was ever
 tracked). Values travel to Vault over the `kubectl exec` stdin pipe
 into a temp file read as `key=@file`: they never appear in `argv`
-(`ps`) on either side.
+(`ps`) on either side. After optional patches, the script also compares
+the two Game Master caller credentials inside `vault-0` and fails without
+printing them if either is empty or they are equal.
 
 **Gate — REQUIRED before workloads can run; sync alone is not enough:**
 
@@ -106,17 +112,22 @@ kubectl -n vault exec vault-0 -- sh -c '
     vault kv get -format=json "homelab/$p" 2>/dev/null | grep -o "\"[a-zA-Z_]*\":" || echo "  (unreadable)"
   done
 '
-kubectl -n tle-dev get vaultstaticsecret tle-dev-auth tle-dev-data tle-dev-misc ghcr-pull
+kubectl -n tle-dev get vaultstaticsecret \
+  tle-dev-auth tle-dev-data tle-dev-misc tle-dev-game-pod-credentials ghcr-pull
 kubectl -n tle-dev get secret \
-  tle-dev-auth-secrets tle-dev-data-secrets tle-dev-misc-secrets ghcr-pull
+  tle-dev-auth-secrets tle-dev-data-secrets tle-dev-misc-secrets \
+  tle-dev-game-pod-credentials ghcr-pull
+kubectl -n tle-dev get secret tle-dev-game-pod-credentials \
+  -o go-template='{{range $key, $_ := .data}}{{printf "%s\n" $key}}{{end}}'
 kubectl -n tle-dev get secret ghcr-pull \
   -o go-template='{{range $key, $_ := .data}}{{printf "%s\n" $key}}{{end}}'
 ```
 
-Expected: all three TLE paths list their keys; all four `VaultStaticSecret`
-objects report synced; all four K8s Secrets exist. `ghcr-pull` has type
-`kubernetes.io/dockerconfigjson` and only the `.dockerconfigjson` key. If a path is
-missing, step 1 has not run. If REQUIRED keys are still `disabled`,
+Expected: all three TLE paths list their keys; all five `VaultStaticSecret`
+objects report synced; all five K8s Secrets exist. The game-pod Secret lists
+only `GAME_MASTER_POD_REGISTRY_CREDENTIAL`; `ghcr-pull` has type
+`kubernetes.io/dockerconfigjson` and only the `.dockerconfigjson` key. If a
+path is missing, step 1 has not run. If REQUIRED keys are still `disabled`,
 step 2 has not run (or their `.env` entries were left empty).
 
 ## Rotation / rebuild notes
@@ -126,4 +137,8 @@ step 2 has not run (or their `.env` entries were left empty).
   password, fill it in `.env.tle-dev-data` and re-run — the postgres
   Job re-applies role passwords on its next Argo sync, and VSO
   `rolloutRestartTargets` restart the consumers.
+- Rotating either Game Master caller credential through
+  `.env.tle-dev-misc` restarts Game Master; the shared misc projection also
+  restarts matchmaking-service, while the dedicated game-pod projection
+  supplies the pod-registry value to newly spawned game-service pods.
 - Auth signing-key rotation follows the #4 flow (staged key), not this page.

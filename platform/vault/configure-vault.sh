@@ -632,7 +632,9 @@ echo "==> seeding homelab/tle-dev/{auth,data,misc}"
 umask 077
 TLE_READ=$(mktemp)
 TLE_VAL=$(mktemp)
-trap 'rm -f "$KC_PORTAL_SECRET_FILE" "$PORTAL_SESSION_FILE" "$PORTAL_EXISTING_FILE" "$PORTAL_PATH_FILE" "$PORTAL_READ_ERROR_FILE" "$TLE_READ" "$TLE_VAL"' EXIT
+TLE_POD_CREDENTIAL=$(mktemp)
+TLE_MATCHMAKING_CREDENTIAL=$(mktemp)
+trap 'rm -f "$KC_PORTAL_SECRET_FILE" "$PORTAL_SESSION_FILE" "$PORTAL_EXISTING_FILE" "$PORTAL_PATH_FILE" "$PORTAL_READ_ERROR_FILE" "$TLE_READ" "$TLE_VAL" "$TLE_POD_CREDENTIAL" "$TLE_MATCHMAKING_CREDENTIAL"' EXIT
 tle_ensure_field() {
   # $1 = vault path, $2 = field, $3 = "generated"|"placeholder".
   # $TLE_VAL already holds the value to seed when absent.
@@ -663,6 +665,25 @@ tle_generate_base64() {
   # 32-byte XChaCha20-Poly1305 key, never composed into a postgres:// URL.
   head -c "$1" /dev/urandom | base64 | tr -d '\n' >"$TLE_VAL"
 }
+tle_assert_distinct_game_master_credentials() {
+  vault_optional_get homelab/tle-dev/misc \
+    GAME_MASTER_POD_REGISTRY_CREDENTIAL "$TLE_POD_CREDENTIAL" || exit 1
+  if [ "$VAULT_READ_STATUS" != present ] || [ ! -s "$TLE_POD_CREDENTIAL" ]; then
+    echo "Game Master pod-registry credential is missing or empty" >&2
+    exit 1
+  fi
+  vault_optional_get homelab/tle-dev/misc \
+    GAME_MASTER_MATCHMAKING_CREDENTIAL "$TLE_MATCHMAKING_CREDENTIAL" || exit 1
+  if [ "$VAULT_READ_STATUS" != present ] || [ ! -s "$TLE_MATCHMAKING_CREDENTIAL" ]; then
+    echo "Game Master matchmaking credential is missing or empty" >&2
+    exit 1
+  fi
+  if cmp -s "$TLE_POD_CREDENTIAL" "$TLE_MATCHMAKING_CREDENTIAL"; then
+    echo "Game Master caller credentials must be distinct; rotate one field" >&2
+    exit 1
+  fi
+  echo "    verified distinct non-empty Game Master caller credentials"
+}
 for f in password metadata_password quest_password; do
   tle_generate 32
   tle_ensure_field homelab/tle-dev/data "$f" "generated"
@@ -675,6 +696,7 @@ for spec in "CSRF_SECRET 48" "METADATA_GRPC_INTERNAL_TOKEN 32" \
   tle_generate "$2"
   tle_ensure_field homelab/tle-dev/misc "$1" "generated"
 done
+tle_assert_distinct_game_master_credentials
 # AUTH_SIGNING_STORE_KEY (issue #52): encrypts auth-service's private
 # signing PEM persisted in Valkey. Locally generated, not product-issued,
 # so it belongs beside the auth-service workload's other generated value
@@ -695,7 +717,7 @@ for f in MINIO_ACCESS_KEY MINIO_SECRET_KEY NOTIFICATION_APNS_PRIVATE_KEY \
     *) tle_ensure_field homelab/tle-dev/auth "$f" "$kind" ;;
   esac
 done
-rm -f "$TLE_READ" "$TLE_VAL"
+rm -f "$TLE_READ" "$TLE_VAL" "$TLE_POD_CREDENTIAL" "$TLE_MATCHMAKING_CREDENTIAL"
 echo "    NOTE: placeholders marked REQUIRED (JWT private key, MinIO pair)"
 echo "    must be replaced via apps/tle-dev/vault-seed/seed-tle-dev-vault.sh"
 echo "    before the workloads can actually run; sync alone is not enough"

@@ -178,6 +178,22 @@ class TleGameMasterTests(unittest.TestCase):
         self.assertIn("GAME_MASTER_POD_REGISTRY_CREDENTIAL", templates)
         self.assertIn("GAME_MASTER_MATCHMAKING_CREDENTIAL", templates)
 
+        game_pod_secret = secrets["tle-dev-game-pod-credentials"]["spec"]
+        self.assertEqual("tle-dev-misc", game_pod_secret["vaultAuthRef"])
+        self.assertEqual("tle-dev/misc", game_pod_secret["path"])
+        self.assertEqual(
+            "tle-dev-game-pod-credentials",
+            game_pod_secret["destination"]["name"],
+        )
+        self.assertEqual(
+            {"GAME_MASTER_POD_REGISTRY_CREDENTIAL"},
+            set(game_pod_secret["destination"]["transformation"]["templates"]),
+        )
+        self.assertEqual(
+            [{"kind": "Deployment", "name": GAME_MASTER_APP}],
+            game_pod_secret["rolloutRestartTargets"],
+        )
+
         game_master = self.resources_by_kind(
             "apps/tle-dev/config/game-master.yaml", "Deployment"
         )[GAME_MASTER_APP]
@@ -210,6 +226,26 @@ class TleGameMasterTests(unittest.TestCase):
             matchmaking_env["GAME_MASTER_MATCHMAKING_CREDENTIAL"]["valueFrom"]["secretKeyRef"],
         )
         self.assertNotIn("GAME_MASTER_POD_REGISTRY_CREDENTIAL", matchmaking_env)
+
+        configure_vault = (
+            REPOSITORY_ROOT / "platform/vault/configure-vault.sh"
+        ).read_text(encoding="utf-8")
+        guard = configure_vault.split(
+            "tle_assert_distinct_game_master_credentials() {", 1
+        )[1].split("\n}", 1)[0]
+        self.assertEqual(2, guard.count("vault_optional_get homelab/tle-dev/misc"))
+        self.assertIn("GAME_MASTER_POD_REGISTRY_CREDENTIAL", guard)
+        self.assertIn("GAME_MASTER_MATCHMAKING_CREDENTIAL", guard)
+        self.assertIn(
+            'cmp -s "$TLE_POD_CREDENTIAL" "$TLE_MATCHMAKING_CREDENTIAL"',
+            guard,
+        )
+
+        seed_vault = (
+            REPOSITORY_ROOT / "apps/tle-dev/vault-seed/seed-tle-dev-vault.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("verify_game_master_credentials", seed_vault)
+        self.assertIn('[ "$pod_registry" != "$matchmaking" ]', seed_vault)
 
     def test_game_master_is_in_the_tle_render(self):
         kustomization = self.load_documents("apps/tle-dev/config/kustomization.yaml")[0]

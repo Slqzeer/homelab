@@ -34,9 +34,8 @@ rules:
       - tle-dev-game-pod-env
     verbs:
       - get
-  # Reserved for datastore authentication. The Secret and
-  # GAME_POD_ENV_SECRET stay absent until NATS/Valkey credentials exist, but
-  # Game Master cannot read any Secret other than this future named object.
+  # Game Master copies the dedicated pod-registry credential from this Secret
+  # into each spawned game-service pod. It cannot read any other Secret.
   - apiGroups:
       - ""
     resources:
@@ -156,6 +155,8 @@ spec:
             # Issue #48 supplies this object before live game-pod acceptance.
             - name: GAME_POD_ENV_CONFIGMAP
               value: tle-dev-game-pod-env
+            - name: GAME_POD_ENV_SECRET
+              value: tle-dev-game-pod-credentials
             - name: PLAYER_SERVICE_GRPC_TARGET
               value: tle-dev-player-service.tle-dev.svc.cluster.local:9090
             - name: GAME_MASTER_POD_REGISTRY_CREDENTIAL
