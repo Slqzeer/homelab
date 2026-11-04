@@ -147,6 +147,62 @@ workloads can run; sync alone is not enough.
       `iss` and `aud` claims required by quest-api; player quest requests are
       expected to remain denied until the product release contract is aligned.
 
+### Quest rollout operator acceptance
+
+Merging the quest workload change is itself the rollout trigger: Argo CD runs
+the database migration and baseline seed hooks automatically. Before merge, the
+Homelab operator must take and inspect a `tle_dev_quest` backup using the
+approved write-capable identity; Hermes' read-only identity must not run this
+ceremony:
+
+```bash
+mkdir -p /backups/databases/tle-dev
+sg k3s-admin -c \
+  'kubectl -n databases exec postgres-0 -- pg_dump -U postgres tle_dev_quest' \
+  | gzip > /backups/databases/tle-dev/tle-dev-quest-pre-rollout.sql.gz
+zcat /backups/databases/tle-dev/tle-dev-quest-pre-rollout.sql.gz \
+  | grep -m1 '^-- PostgreSQL database dump'
+sg k3s-admin -c \
+  'kubectl -n tle-dev get vaultstaticsecret tle-dev-data'
+```
+
+Expected before merge: the dump header is present and `tle-dev-data` reports a
+ready projection. Also confirm PostgreSQL, NATS, and the GHCR pull projection
+are healthy and the pinned `v0.0.2` quest image is pullable.
+
+After merge and reconciliation, collect the rollout evidence without changing
+desired state:
+
+```bash
+sg k3s-admin -c 'kubectl -n argocd get application tle-dev'
+sg k3s-admin -c \
+  'kubectl -n tle-dev get jobs tle-dev-quest-migrate tle-dev-quest-seed-baseline'
+sg k3s-admin -c 'kubectl -n tle-dev logs job/tle-dev-quest-migrate'
+sg k3s-admin -c 'kubectl -n tle-dev logs job/tle-dev-quest-seed-baseline'
+for role in api ingress evaluator operations outbox; do
+  sg k3s-admin -c \
+    "kubectl -n tle-dev rollout status deployment/tle-dev-quest-$role"
+done
+sg k3s-admin -c \
+  'kubectl -n tle-dev get hpa tle-dev-quest-api tle-dev-quest-evaluator'
+sg k3s-admin -c \
+  'kubectl -n tle-dev exec deployment/tle-dev-quest-operations -- test -r /config/history-hydration.json'
+```
+
+Expected: migration completes before seed, both Jobs are complete, all five
+Deployments are available, the HPA bounds are `1-6` and `1-8`, and the
+operations hydration file is readable. Record the command output, timestamps,
+operator, release digest, and Argo CD revision in `Slqzeer/homelab#54`.
+
+If either hook or any Deployment fails, revert the Git change and let Argo CD
+prune the five Deployments. Do not run `quest-migrate -direction down`: that
+command rolls back every quest migration. If the previous release cannot use
+the migrated schema, restore the pre-rollout dump into an empty
+`tle_dev_quest` database using the PostgreSQL restore procedure's plain-SQL
+`psql` path in `platform/databases/postgres/README.md`; that restore path is
+documented but not yet exercised, so database restoration requires explicit
+operator approval and evidence.
+
 ### Game Master operator acceptance
 
 This is a live, mutating acceptance procedure. It is **not** a repository
