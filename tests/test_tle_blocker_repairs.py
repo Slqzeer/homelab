@@ -81,7 +81,7 @@ class TleBlockerRepairTests(unittest.TestCase):
             "Sync", job["metadata"]["annotations"]["argocd.argoproj.io/hook"]
         )
         self.assertEqual(
-            "1", job["metadata"]["annotations"]["argocd.argoproj.io/sync-wave"]
+            "-1", job["metadata"]["annotations"]["argocd.argoproj.io/sync-wave"]
         )
         pod_spec = job["spec"]["template"]["spec"]
         self.assertFalse(pod_spec["automountServiceAccountToken"])
@@ -120,6 +120,38 @@ class TleBlockerRepairTests(unittest.TestCase):
     def test_bootstrap_is_in_the_tle_render(self):
         kustomization = documents("kustomization.yaml")[0]
         self.assertIn("jetstream-bootstrap.yaml", kustomization["resources"])
+
+
+    def test_streams_exist_before_the_services_that_wait_for_them(self):
+        # Argo waits for each sync wave to be healthy before the next. A
+        # consumer Deployment in an earlier or equal wave than the hook
+        # deadlocks the sync and the hook never runs.
+        def wave(resource):
+            annotations = resource["metadata"].get("annotations") or {}
+            return int(annotations.get("argocd.argoproj.io/sync-wave", "0"))
+
+        kustomization = documents("kustomization.yaml")[0]
+        rendered = [
+            resource
+            for name in kustomization["resources"]
+            for resource in documents(name)
+        ]
+        bootstrap = {
+            (resource["kind"], resource["metadata"]["name"]): wave(resource)
+            for resource in documents("jetstream-bootstrap.yaml")
+        }
+        hook = bootstrap[("Job", "tle-dev-jetstream-bootstrap")]
+        self.assertEqual({hook}, set(bootstrap.values()))
+        nats = [
+            wave(resource)
+            for resource in rendered
+            if resource["metadata"]["name"] == "tle-dev-nats"
+        ]
+        self.assertEqual(3, len(nats))
+        self.assertLess(max(nats), hook)
+        deployments = [wave(r) for r in rendered if r["kind"] == "Deployment"]
+        self.assertTrue(deployments)
+        self.assertLess(hook, min(deployments))
 
 
 if __name__ == "__main__":
