@@ -108,8 +108,11 @@ spec:
       terminationGracePeriodSeconds: 30
       securityContext:
         runAsNonRoot: true
-        runAsUser: 10001
-        runAsGroup: 10001
+        # The pinned distroless image owns /home/nonroot as 65532:65532.
+        # Keep its default working directory traversable for optional dotenv
+        # loading instead of overriding the image identity.
+        runAsUser: 65532
+        runAsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
       containers:
