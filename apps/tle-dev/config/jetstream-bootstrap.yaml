@@ -2,11 +2,19 @@
 # product deploy-info supplies the release set; PARTY and METADATA cover the
 # rollout-discovered party.* and metadata.version.published contracts. SOCIAL
 # includes social.block.created and social.block.removed.
+#
+# Sync waves: Argo waits for every resource of a wave to be healthy before the
+# next one. The services that consume these streams (wave 0) cannot become
+# healthy without them, so the hook and the stream list it mounts run at -1,
+# after NATS (-2, datastores.yaml). A later wave deadlocks the sync on
+# "waiting for healthy state" and the Job never runs (2026-11-04, #71).
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: tle-dev-jetstream-streams
   namespace: tle-dev
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
 data:
   streams.tsv: |
     AUTH	auth.>
@@ -26,6 +34,8 @@ kind: ServiceAccount
 metadata:
   name: tle-dev-jetstream-bootstrap
   namespace: tle-dev
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
 automountServiceAccountToken: false
 ---
 apiVersion: batch/v1
@@ -36,7 +46,7 @@ metadata:
   annotations:
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-wave: "-1"
 spec:
   backoffLimit: 2
   activeDeadlineSeconds: 300
