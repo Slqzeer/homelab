@@ -14,6 +14,7 @@ re-vendor on each TLE release with `gh api repos/The-Last-Exam/server/...`).
 | Edge image `tag@digest` | _fill in_ (api-gateway not published; placeholder stays at 0 replicas, see edge-config.yaml) |
 | Service images `tag@digest` | auth-service `v0.0.2@sha256:189309e7eba8f3683c20324f77f5920ceab8ac330b527eaea2d261fea2d6c463`; lobby-service `v0.0.2@sha256:cb5654799f03aea85a60cde4539632a5b6f69dc6e01dec84784701412fa78bed`; matchmaking-service `v0.0.2@sha256:a22b7967000ba061e9fd0a2b1e74bf96926c38bda0f6f7cd11b78698cd8be155`; metadata-service `v0.0.2@sha256:b62fb8e977e4c7a491583456f11d857ad4f9a6d62ec1e85eb3ad38fbfcab788f`; notification-service `v0.0.2@sha256:bda618ae2533dfe3c54853a2a23a7c9ada5a1e50da622d1ec64914773a6fe78e`; player-service `v0.0.2@sha256:e8085c1ac3da888b97d6b34e7dcf9b04eb99014cf90450b3d5cb1e35d4fa0bf8`; social-service `v0.0.2@sha256:9342d0e713b708938282a76fd9886bac249ddb309c2628a23e9fe3ab51a01e7f` (source: The-Last-Exam/server publish-images run 40263029044) |
 | Game control images `tag@digest` | game-master `v0.0.2@sha256:966baf4811fcc71a60069dffa8bef03d1ecc2a10e16f1c48047c479b54662936`; game-service `v0.0.2@sha256:b96d88334ddfb682c32845f251a26a7e6c017b62d9b95076fedc2e809bb7e7ef` (source: the same publish-images run) |
+| Admin images `tag@digest` | admin-audit-writer `v0.0.2@sha256:7c0da00a399b089cf4387cc8474395a6c27729397a292792eb09b479b3f48078`; internal-admin-gateway `v0.0.2@sha256:1048cd10d5c7859169231876e20e76329f56a23b6e05ef0cec61db1a41ac4736`; internal-ops-gateway `v0.0.2@sha256:903ce62cef35744b98878678cd0b0807cc6bf684d73e22a028135fa13a40f46e`; projection-writer `v0.0.2@sha256:8287bdcb383c388b7bba1010c5cdfa20082c87e154a3c25460e016231a2a65b1` (source: the same publish-images run) |
 | Quest image `tag@digest` | quest-service `v0.0.2@sha256:3dc4bf8f9226efb06695c292c67031073ad7b4f13872bc2748547145b7b1ac26` (source: the same publish-images run) |
 | Role manifest version | `1` (registry schema `1.3`) |
 | Identity headers | 26 headers + 5 prefixes (see `edge-config.yaml`) |
@@ -23,6 +24,7 @@ re-vendor on each TLE release with `gh api repos/The-Last-Exam/server/...`).
 | Datastore credential split | Complete in desired state: per-service ConfigMap addresses, credential-only VSO templates, and the `v0.0.1` configuration contract. |
 | Core service workloads | `auth-service`, `lobby-service`, `matchmaking-service`, `metadata-service`, `notification-service`, `player-service`, `social-service` declared in `workloads.yaml` (issue #52), each listening on 8080 for HTTP (see that file's header) regardless of its `.env.example` default port. `matchmaking-service` reaches the Game Master Service on gRPC `9100` and presents the dedicated matchmaking credential from VSO. |
 | Game Master | `game-master.yaml` declares one replica with no HPA, a `minAvailable: 1` PDB, namespace-scoped pod RBAC, HTTP `8082`, gRPC `9100`, and only the three issue #44 ingress caller classes. `GAME_MASTER_NAMESPACE=tle-dev`, so the Role and registry target the same restricted namespace. `game-pod-environment.yaml` supplies the shared environment and default resources; `networkpolicy.yaml` limits game pods to the edge and their four runtime dependencies. |
+| Admin workloads | `admin-workloads.yaml` declares admin-audit-writer, internal-admin-gateway, internal-ops-gateway and projection-writer in the separate restricted `tle-admin-dev` namespace (issue #53), with the release probes/resources and HPAs. Namespace-local VSO projections in `admin-secrets.yaml` supply database, CSRF, admin-client and GHCR credentials. `admin-networkpolicy.yaml` denies ingress and egress by default; issue #45 adds only the explicit cross-namespace flows. Issue #51 replaces the ops gateway's temporary in-memory session adapter with Keycloak. |
 | Quest workloads | `quest-workloads.yaml` declares five role-specific Deployments from one pinned image. `quest-api` scales `1-6`, `quest-evaluator` scales `1-8`, and ingress/operations/outbox stay at one replica without HPAs. Wave 0 creates configuration, VSO projections, and policies; Sync-hook waves 1 and 2 run `quest-migrate` and then `quest-seed-baseline`; the Deployments roll out at wave 3 only after both Jobs succeed. `quest-operations` mounts the checked-in `history-hydration.json` ConfigMap item read-only. |
 
 Every Deployment uses `tag@digest`, never `latest`. `images.json` is not in
@@ -50,7 +52,8 @@ recreates the legacy URL keys before pinning any pre-`v0.0.1` server release.
 
 ## Ownership and state
 
-- Namespace `tle-dev` (restricted PSS `v1.36`), sole owner
+- Namespaces `tle-dev` (player-facing) and `tle-admin-dev` (administrative),
+  both restricted PSS `v1.36` and both owned solely by
   `bootstrap/namespaces/namespaces.yaml`.
 - Child Application `environments/homelab/apps/tle-dev.yaml` (wave 25,
   prune/self-heal, `ServerSideApply=true`, `homelab.io/state: durable`).
@@ -71,9 +74,12 @@ diagnostics only.
 Canonical ordered checklist: `docs/runbooks/tle-dev-vault-ceremony.md`
 (this section is only a summary — follow that page step by step).
 
-`platform/vault/configure-vault.sh` carries the tle-dev extension: 4
-policies/roles (`vso-tle-dev-auth/data/misc` in `tle-dev`, `vso-tle-dev-db`
-in `databases`), generated db passwords + CSRF/internal/webhook secrets,
+`platform/vault/configure-vault.sh` carries the TLE extension: the original
+`vso-tle-dev-auth/data/misc` roles in `tle-dev` and `vso-tle-dev-db` in
+`databases`, plus namespace-bound `tle-admin-dev` data, misc, OIDC and GHCR
+roles. They reuse only the required Vault paths without sharing Kubernetes
+identities across namespaces. The script also creates generated database
+passwords + CSRF/internal/webhook secrets,
 distinct generated Game Master pod-registry and matchmaking credentials,
 and `disabled` placeholders for product-issued keys. Run it first (inside
 vault-0); it never overwrites. It also creates the independent Keycloak
@@ -179,6 +185,13 @@ no database mutation.
       `metadata-service` needs MinIO (see Object storage above). Game Master
       is now declared by issue #44; its live registry and mutation acceptance
       remains pending the issue #48 game-pod environment described below.
+- [ ] On the first admin-workload promotion, all four Deployments in
+      `tle-admin-dev` complete rollout, their HTTP probes succeed, and their
+      HPAs report the declared 2-4/2-6/2-5/2-5 ranges. Record rollout,
+      image-digest, probe and HPA evidence in issue #45 after its namespace
+      policies land. Record admin sign-in in issue #3 and ops-session evidence
+      in issue #51. Until those issues complete, repository validation is not
+      live acceptance.
 - [ ] On the first quest rollout, record the two Sync-hook Job completions in
       order, all five role Deployments ready, HPA bounds `1-6` and `1-8`, the
       operations hydration file mounted read-only, and allowed/denied network

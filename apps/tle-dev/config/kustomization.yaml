@@ -1,7 +1,8 @@
-# NOTE: no `namespace:` field here on purpose. Two objects in this
+# NOTE: no `namespace:` field here on purpose. Objects in this
 # kustomization land outside the destination namespace (the postgres-job
 # ServiceAccount/VaultAuth/VaultStaticSecret/Job state `namespace:
-# databases`, the keycloak ingress rule states `namespace: keycloak`).
+# databases`, the keycloak ingress rule states `namespace: keycloak`, and
+# the admin workloads and projections state `namespace: tle-admin-dev`).
 # Kustomize rewrites even explicit namespaces, so a default here would
 # silently move those objects into tle-dev (same trap as
 # platform/keycloak, which keeps cross-namespace objects in a separate
@@ -19,6 +20,9 @@ resources:
   - jetstream-bootstrap.yaml
   - postgres-job.yaml
   - workloads.yaml
+  - admin-secrets.yaml
+  - admin-networkpolicy.yaml
+  - admin-workloads.yaml
   - quest-workloads.yaml
   - game-master.yaml
   - game-pod-environment.yaml

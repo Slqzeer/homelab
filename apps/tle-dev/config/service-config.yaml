@@ -8,7 +8,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: tle-dev-admin-audit-writer-config
-  namespace: tle-dev
+  namespace: tle-admin-dev
 data:
   DATABASE_URL: "postgres://postgres.databases:5432/tle_dev"
 ---
@@ -44,7 +44,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: tle-dev-internal-admin-gateway-config
-  namespace: tle-dev
+  namespace: tle-admin-dev
 data:
   VALKEY_URL: "redis://tle-dev-valkey.tle-dev.svc.cluster.local:6379"
 ---
@@ -52,7 +52,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: tle-dev-internal-ops-gateway-config
-  namespace: tle-dev
+  namespace: tle-admin-dev
 data:
   VALKEY_URL: "redis://tle-dev-valkey.tle-dev.svc.cluster.local:6379"
 ---
@@ -110,7 +110,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: tle-dev-projection-writer-config
-  namespace: tle-dev
+  namespace: tle-admin-dev
 data:
   DATABASE_URL: "postgres://postgres.databases:5432/tle_dev"
   NATS_URL: "nats://tle-dev-nats.tle-dev.svc.cluster.local:4222"

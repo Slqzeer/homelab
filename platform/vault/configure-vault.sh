@@ -566,6 +566,25 @@ path "homelab/data/tle-dev/misc" {
 }
 POLICY
 
+echo "==> policies for the tle-admin-dev namespace"
+# Separate policy and role names preserve the namespace boundary even where
+# the admin workloads consume keys from the same TLE dev Vault paths.
+vault policy write vso-tle-admin-dev-data-read - <<'POLICY'
+path "homelab/data/tle-dev/data" {
+  capabilities = ["read"]
+}
+POLICY
+vault policy write vso-tle-admin-dev-misc-read - <<'POLICY'
+path "homelab/data/tle-dev/misc" {
+  capabilities = ["read"]
+}
+POLICY
+vault policy write vso-tle-admin-dev-oidc-read - <<'POLICY'
+path "homelab/data/tle-admin-dev-client" {
+  capabilities = ["read"]
+}
+POLICY
+
 echo "==> policy vso-tle-dev-db-read"
 # A separate policy object from vso-tle-dev-data-read on purpose, even
 # though both read homelab/data/tle-dev/data: the Job in `databases`
@@ -601,6 +620,32 @@ vault write auth/kubernetes/role/vso-tle-dev-misc \
     bound_service_account_namespaces=tle-dev \
     audience=vault \
     token_policies=vso-tle-dev-misc-read \
+    ttl=1h
+
+echo "==> roles for the tle-admin-dev namespace"
+vault write auth/kubernetes/role/vso-tle-admin-dev-data \
+    bound_service_account_names=tle-admin-dev-data \
+    bound_service_account_namespaces=tle-admin-dev \
+    audience=vault \
+    token_policies=vso-tle-admin-dev-data-read \
+    ttl=1h
+vault write auth/kubernetes/role/vso-tle-admin-dev-misc \
+    bound_service_account_names=tle-admin-dev-misc \
+    bound_service_account_namespaces=tle-admin-dev \
+    audience=vault \
+    token_policies=vso-tle-admin-dev-misc-read \
+    ttl=1h
+vault write auth/kubernetes/role/vso-tle-admin-dev-oidc \
+    bound_service_account_names=tle-admin-dev-oidc \
+    bound_service_account_namespaces=tle-admin-dev \
+    audience=vault \
+    token_policies=vso-tle-admin-dev-oidc-read \
+    ttl=1h
+vault write auth/kubernetes/role/vso-tle-admin-dev-ghcr \
+    bound_service_account_names=tle-admin-dev-registry \
+    bound_service_account_namespaces=tle-admin-dev \
+    audience=vault \
+    token_policies=vso-ghcr-read \
     ttl=1h
 
 echo "==> role vso-tle-dev-db"

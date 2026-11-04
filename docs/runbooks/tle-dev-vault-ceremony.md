@@ -44,12 +44,16 @@ The token is typed at a hidden prompt in the first command and removed
 in the last. It is never an argument, never an environment variable,
 and never in history.
 
-What this creates for `tle-dev` (extension at the end of the script):
+What this creates for the TLE dev environment (extension at the end of the
+script):
 
-- 4 policies + 4 Kubernetes auth roles: `vso-tle-dev-auth/data/misc`
+- 7 dedicated policies + 8 Kubernetes auth roles: `vso-tle-dev-auth/data/misc`
   (bound to ServiceAccounts `tle-dev-auth/data/misc` in namespace
   `tle-dev`) and `vso-tle-dev-db` (bound to `tle-dev-db` in namespace
-  `databases`, used by the postgres Job).
+  `databases`, used by the postgres Job), plus `vso-tle-admin-dev-data/misc`,
+  `vso-tle-admin-dev-oidc` and `vso-tle-admin-dev-ghcr` bound only to their
+  matching ServiceAccounts in `tle-admin-dev`. The GHCR role reuses the
+  existing read-only GHCR policy; the other three have dedicated policies.
 - The existing `vso-ghcr` role also admits only the `tle-dev-registry`
   ServiceAccount in `tle-dev`, allowing VSO to project `homelab/ghcr` as the
   namespace-local `ghcr-pull` docker config.
@@ -167,13 +171,19 @@ kubectl -n tle-dev get secret tle-dev-game-pod-credentials \
   -o go-template='{{range $key, $_ := .data}}{{printf "%s\n" $key}}{{end}}'
 kubectl -n tle-dev get secret ghcr-pull \
   -o go-template='{{range $key, $_ := .data}}{{printf "%s\n" $key}}{{end}}'
+kubectl -n tle-admin-dev get vaultstaticsecret \
+  tle-admin-dev-data tle-admin-dev-misc tle-admin-dev-oidc \
+  tle-admin-dev-ghcr-pull
+kubectl -n tle-admin-dev get secret \
+  tle-admin-dev-data-secrets tle-admin-dev-misc-secrets \
+  tle-admin-dev-oidc-secrets ghcr-pull
 ```
 
-Expected: all three TLE paths list their keys; all five `VaultStaticSecret`
-objects report synced; all five K8s Secrets exist. The game-pod Secret lists
-only `GAME_MASTER_POD_REGISTRY_CREDENTIAL`; `ghcr-pull` has type
-`kubernetes.io/dockerconfigjson` and only the `.dockerconfigjson` key. If a
-path is missing, step 1 has not run. If REQUIRED keys are still `disabled`,
+Expected: all three TLE paths list their keys; all `VaultStaticSecret` objects
+in both namespaces report synced; all listed K8s Secrets exist. The game-pod
+Secret lists only `GAME_MASTER_POD_REGISTRY_CREDENTIAL`; each `ghcr-pull` has
+type `kubernetes.io/dockerconfigjson` and only the `.dockerconfigjson` key. If
+a path is missing, step 1 has not run. If REQUIRED keys are still `disabled`,
 step 2 has not run (or their `.env` entries were left empty).
 
 ## Rotation / rebuild notes
