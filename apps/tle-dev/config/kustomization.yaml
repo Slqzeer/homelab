@@ -19,6 +19,7 @@ resources:
   - jetstream-bootstrap.yaml
   - postgres-job.yaml
   - workloads.yaml
+  - quest-workloads.yaml
   - game-master.yaml
   - game-pod-environment.yaml
 patches:

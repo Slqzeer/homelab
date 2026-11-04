@@ -14,6 +14,7 @@ re-vendor on each TLE release with `gh api repos/The-Last-Exam/server/...`).
 | Edge image `tag@digest` | _fill in_ (api-gateway not published; placeholder stays at 0 replicas, see edge-config.yaml) |
 | Service images `tag@digest` | auth-service `v0.0.2@sha256:189309e7eba8f3683c20324f77f5920ceab8ac330b527eaea2d261fea2d6c463`; lobby-service `v0.0.2@sha256:cb5654799f03aea85a60cde4539632a5b6f69dc6e01dec84784701412fa78bed`; matchmaking-service `v0.0.2@sha256:a22b7967000ba061e9fd0a2b1e74bf96926c38bda0f6f7cd11b78698cd8be155`; metadata-service `v0.0.2@sha256:b62fb8e977e4c7a491583456f11d857ad4f9a6d62ec1e85eb3ad38fbfcab788f`; notification-service `v0.0.2@sha256:bda618ae2533dfe3c54853a2a23a7c9ada5a1e50da622d1ec64914773a6fe78e`; player-service `v0.0.2@sha256:e8085c1ac3da888b97d6b34e7dcf9b04eb99014cf90450b3d5cb1e35d4fa0bf8`; social-service `v0.0.2@sha256:9342d0e713b708938282a76fd9886bac249ddb309c2628a23e9fe3ab51a01e7f` (source: The-Last-Exam/server publish-images run 40263029044) |
 | Game control images `tag@digest` | game-master `v0.0.2@sha256:966baf4811fcc71a60069dffa8bef03d1ecc2a10e16f1c48047c479b54662936`; game-service `v0.0.2@sha256:b96d88334ddfb682c32845f251a26a7e6c017b62d9b95076fedc2e809bb7e7ef` (source: the same publish-images run) |
+| Quest image `tag@digest` | quest-service `v0.0.2@sha256:3dc4bf8f9226efb06695c292c67031073ad7b4f13872bc2748547145b7b1ac26` (source: the same publish-images run) |
 | Role manifest version | `1` (registry schema `1.3`) |
 | Identity headers | 26 headers + 5 prefixes (see `edge-config.yaml`) |
 | Public routes | 62 routes across 9 services (see `public-routes.json`) |
@@ -22,6 +23,7 @@ re-vendor on each TLE release with `gh api repos/The-Last-Exam/server/...`).
 | Datastore credential split | Complete in desired state: per-service ConfigMap addresses, credential-only VSO templates, and the `v0.0.1` configuration contract. |
 | Core service workloads | `auth-service`, `lobby-service`, `matchmaking-service`, `metadata-service`, `notification-service`, `player-service`, `social-service` declared in `workloads.yaml` (issue #52), each listening on 8080 for HTTP (see that file's header) regardless of its `.env.example` default port. `matchmaking-service` reaches the Game Master Service on gRPC `9100` and presents the dedicated matchmaking credential from VSO. |
 | Game Master | `game-master.yaml` declares one replica with no HPA, a `minAvailable: 1` PDB, namespace-scoped pod RBAC, HTTP `8082`, gRPC `9100`, and only the three issue #44 ingress caller classes. `GAME_MASTER_NAMESPACE=tle-dev`, so the Role and registry target the same restricted namespace. `game-pod-environment.yaml` supplies the shared environment and default resources; `networkpolicy.yaml` limits game pods to the edge and their four runtime dependencies. |
+| Quest workloads | `quest-workloads.yaml` declares five role-specific Deployments from one pinned image. `quest-api` scales `1-6`, `quest-evaluator` scales `1-8`, and ingress/operations/outbox stay at one replica without HPAs. Wave 0 creates configuration, VSO projections, and policies; Sync-hook waves 1 and 2 run `quest-migrate` and then `quest-seed-baseline`; the Deployments roll out at wave 3 only after both Jobs succeed. `quest-operations` mounts the checked-in `history-hydration.json` ConfigMap item read-only. |
 
 Every Deployment uses `tag@digest`, never `latest`. `images.json` is not in
 git (a digest exists only after a push); record the values here at promotion.
@@ -177,6 +179,68 @@ no database mutation.
       `metadata-service` needs MinIO (see Object storage above). Game Master
       is now declared by issue #44; its live registry and mutation acceptance
       remains pending the issue #48 game-pod environment described below.
+- [ ] On the first quest rollout, record the two Sync-hook Job completions in
+      order, all five role Deployments ready, HPA bounds `1-6` and `1-8`, the
+      operations hydration file mounted read-only, and allowed/denied network
+      probes. The pinned auth-service access-token format currently omits the
+      `iss` and `aud` claims required by quest-api; player quest requests are
+      expected to remain denied until the product release contract is aligned.
+
+### Quest rollout operator acceptance
+
+Merging the quest workload change is itself the rollout trigger: Argo CD runs
+the database migration and baseline seed hooks automatically. Before merge, the
+Homelab operator must take and inspect a `tle_dev_quest` backup using the
+approved write-capable identity; Hermes' read-only identity must not run this
+ceremony:
+
+```bash
+mkdir -p /backups/databases/tle-dev
+sg k3s-admin -c \
+  'kubectl -n databases exec postgres-0 -- pg_dump -U postgres tle_dev_quest' \
+  | gzip > /backups/databases/tle-dev/tle-dev-quest-pre-rollout.sql.gz
+zcat /backups/databases/tle-dev/tle-dev-quest-pre-rollout.sql.gz \
+  | grep -m1 '^-- PostgreSQL database dump'
+sg k3s-admin -c \
+  'kubectl -n tle-dev get vaultstaticsecret tle-dev-data'
+```
+
+Expected before merge: the dump header is present and `tle-dev-data` reports a
+ready projection. Also confirm PostgreSQL, NATS, and the GHCR pull projection
+are healthy and the pinned `v0.0.2` quest image is pullable.
+
+After merge and reconciliation, collect the rollout evidence without changing
+desired state:
+
+```bash
+sg k3s-admin -c 'kubectl -n argocd get application tle-dev'
+sg k3s-admin -c \
+  'kubectl -n tle-dev get jobs tle-dev-quest-migrate tle-dev-quest-seed-baseline'
+sg k3s-admin -c 'kubectl -n tle-dev logs job/tle-dev-quest-migrate'
+sg k3s-admin -c 'kubectl -n tle-dev logs job/tle-dev-quest-seed-baseline'
+for role in api ingress evaluator operations outbox; do
+  sg k3s-admin -c \
+    "kubectl -n tle-dev rollout status deployment/tle-dev-quest-$role"
+done
+sg k3s-admin -c \
+  'kubectl -n tle-dev get hpa tle-dev-quest-api tle-dev-quest-evaluator'
+sg k3s-admin -c \
+  'kubectl -n tle-dev exec deployment/tle-dev-quest-operations -- test -r /config/history-hydration.json'
+```
+
+Expected: migration completes before seed, both Jobs are complete, all five
+Deployments are available, the HPA bounds are `1-6` and `1-8`, and the
+operations hydration file is readable. Record the command output, timestamps,
+operator, release digest, and Argo CD revision in `Slqzeer/homelab#54`.
+
+If either hook or any Deployment fails, revert the Git change and let Argo CD
+prune the five Deployments. Do not run `quest-migrate -direction down`: that
+command rolls back every quest migration. If the previous release cannot use
+the migrated schema, restore the pre-rollout dump into an empty
+`tle_dev_quest` database using the PostgreSQL restore procedure's plain-SQL
+`psql` path in `platform/databases/postgres/README.md`; that restore path is
+documented but not yet exercised, so database restoration requires explicit
+operator approval and evidence.
 
 ### Game Master operator acceptance
 

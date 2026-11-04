@@ -1,0 +1,746 @@
+# TLE quest-service roles and ordered rollout hooks (issue #54).
+#
+# Image: The-Last-Exam/server v0.0.2, publish-images run 40263029044.
+# The two Sync hooks use waves 1 and 2 so wave-0 ConfigMaps, VSO projections,
+# and policies exist first. The five Deployments use wave 3, so migration
+# succeeds before the baseline seed and both succeed before rollout.
+# All roles share the release image but keep distinct Deployments and exact
+# QUEST_ROLE values because their scaling and failure domains differ.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tle-dev-quest-runtime
+  namespace: tle-dev
+data:
+  QUEST_ENV: "production"
+  QUEST_HTTP_PORT: "8080"
+  QUEST_GRPC_PORT: "9094"
+  QUEST_LOG_LEVEL: "info"
+  QUEST_READINESS_TIMEOUT_SECONDS: "2"
+  QUEST_SHUTDOWN_TIMEOUT_SECONDS: "15"
+  QUEST_OTLP_ENABLED: "false"
+  QUEST_METRICS_NAMESPACE: "quest"
+  QUEST_SUBJECT_SHARD_COUNT: "32"
+  QUEST_ADMIN_AUTH_SOURCE: "gateway_headers"
+  QUEST_INGRESS_CAPABILITY_ID: "quest.progress.victory"
+  QUEST_HYDRATION_SOURCE_FILE: "/config/history-hydration.json"
+  QUEST_PLAYER_JWT_ISSUER: "https://tle-dev.taildf6cd4.ts.net/auth"
+  QUEST_PLAYER_JWT_AUDIENCE: "quest-service"
+  QUEST_PLAYER_SERVICE_GRPC_TARGET: >-
+    tle-dev-player-service.tle-dev.svc.cluster.local:9090
+  QUEST_PLAYER_JWT_PUBLIC_KEY_PEM: |
+    -----BEGIN PUBLIC KEY-----
+    MCowBQYDK2VwAyEAgqqP4AwD5hwNTXJbKAPLVawAXSkngLLfaNljMT6XXtw=
+    -----END PUBLIC KEY-----
+  history-hydration.json: "{}"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-quest-api
+  namespace: tle-dev
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-quest-ingress
+  namespace: tle-dev
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-quest-evaluator
+  namespace: tle-dev
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-quest-operations
+  namespace: tle-dev
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-quest-outbox
+  namespace: tle-dev
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-quest-rollout
+  namespace: tle-dev
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tle-dev-quest-service
+  namespace: tle-dev
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  labels:
+    app: tle-dev-quest-api
+    app-group: tle-dev-service
+spec:
+  selector:
+    app: tle-dev-quest-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tle-dev-quest-migrate
+  namespace: tle-dev
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app: tle-dev-quest-migrate
+        app-group: tle-dev-service
+        app.kubernetes.io/part-of: tle-dev-quest
+    spec:
+      serviceAccountName: tle-dev-quest-rollout
+      automountServiceAccountToken: false
+      restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: ghcr-pull
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: quest-migrate
+          image: >-
+            ghcr.io/the-last-exam/quest-service:v0.0.2@sha256:3dc4bf8f9226efb06695c292c67031073ad7b4f13872bc2748547145b7b1ac26
+          imagePullPolicy: IfNotPresent
+          command:
+            - /usr/local/bin/quest-migrate
+          args:
+            - -env
+            - production
+            - -direction
+            - up
+          envFrom:
+            - configMapRef:
+                name: tle-dev-quest-service-config
+          env:
+            - name: QUEST_DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: QUEST_DATABASE_USER
+            - name: QUEST_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: QUEST_DATABASE_PASSWORD
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tle-dev-quest-seed-baseline
+  namespace: tle-dev
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app: tle-dev-quest-seed-baseline
+        app-group: tle-dev-service
+        app.kubernetes.io/part-of: tle-dev-quest
+    spec:
+      serviceAccountName: tle-dev-quest-rollout
+      automountServiceAccountToken: false
+      restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: ghcr-pull
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: quest-seed-baseline
+          image: >-
+            ghcr.io/the-last-exam/quest-service:v0.0.2@sha256:3dc4bf8f9226efb06695c292c67031073ad7b4f13872bc2748547145b7b1ac26
+          imagePullPolicy: IfNotPresent
+          command:
+            - /usr/local/bin/quest-seed-baseline
+          args:
+            - production
+          envFrom:
+            - configMapRef:
+                name: tle-dev-quest-service-config
+            - configMapRef:
+                name: tle-dev-quest-runtime
+          env:
+            - name: QUEST_ROLE
+              value: quest-evaluator
+            - name: QUEST_DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: QUEST_DATABASE_USER
+            - name: QUEST_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: QUEST_DATABASE_PASSWORD
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tle-dev-quest-api
+  namespace: tle-dev
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  labels:
+    app: tle-dev-quest-api
+    app-group: tle-dev-service
+    app.kubernetes.io/part-of: tle-dev-quest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tle-dev-quest-api
+  template:
+    metadata:
+      labels:
+        app: tle-dev-quest-api
+        app-group: tle-dev-service
+        app.kubernetes.io/part-of: tle-dev-quest
+        quest-role: quest-api
+    spec:
+      serviceAccountName: tle-dev-quest-api
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: quest-service
+          image: >-
+            ghcr.io/the-last-exam/quest-service:v0.0.2@sha256:3dc4bf8f9226efb06695c292c67031073ad7b4f13872bc2748547145b7b1ac26
+          imagePullPolicy: IfNotPresent
+          args:
+            - -env
+            - production
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: tle-dev-quest-service-config
+            - configMapRef:
+                name: tle-dev-quest-runtime
+          env:
+            - name: QUEST_ROLE
+              value: quest-api
+            - name: QUEST_DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: QUEST_DATABASE_USER
+            - name: QUEST_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: QUEST_DATABASE_PASSWORD
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: tle-dev-quest-api
+  namespace: tle-dev
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: tle-dev-quest-api
+  minReplicas: 1
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tle-dev-quest-ingress
+  namespace: tle-dev
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  labels:
+    app: tle-dev-quest-ingress
+    app.kubernetes.io/part-of: tle-dev-quest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tle-dev-quest-ingress
+  template:
+    metadata:
+      labels:
+        app: tle-dev-quest-ingress
+        app.kubernetes.io/part-of: tle-dev-quest
+        quest-role: quest-ingress
+    spec:
+      serviceAccountName: tle-dev-quest-ingress
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: quest-service
+          image: >-
+            ghcr.io/the-last-exam/quest-service:v0.0.2@sha256:3dc4bf8f9226efb06695c292c67031073ad7b4f13872bc2748547145b7b1ac26
+          imagePullPolicy: IfNotPresent
+          args:
+            - -env
+            - production
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: tle-dev-quest-service-config
+            - configMapRef:
+                name: tle-dev-quest-runtime
+          env:
+            - name: QUEST_ROLE
+              value: quest-ingress
+            - name: QUEST_DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: QUEST_DATABASE_USER
+            - name: QUEST_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: QUEST_DATABASE_PASSWORD
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tle-dev-quest-evaluator
+  namespace: tle-dev
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  labels:
+    app: tle-dev-quest-evaluator
+    app.kubernetes.io/part-of: tle-dev-quest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tle-dev-quest-evaluator
+  template:
+    metadata:
+      labels:
+        app: tle-dev-quest-evaluator
+        app.kubernetes.io/part-of: tle-dev-quest
+        quest-role: quest-evaluator
+    spec:
+      serviceAccountName: tle-dev-quest-evaluator
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: quest-service
+          image: >-
+            ghcr.io/the-last-exam/quest-service:v0.0.2@sha256:3dc4bf8f9226efb06695c292c67031073ad7b4f13872bc2748547145b7b1ac26
+          imagePullPolicy: IfNotPresent
+          args:
+            - -env
+            - production
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: tle-dev-quest-service-config
+            - configMapRef:
+                name: tle-dev-quest-runtime
+          env:
+            - name: QUEST_ROLE
+              value: quest-evaluator
+            - name: QUEST_DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: QUEST_DATABASE_USER
+            - name: QUEST_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: QUEST_DATABASE_PASSWORD
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: tle-dev-quest-evaluator
+  namespace: tle-dev
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: tle-dev-quest-evaluator
+  minReplicas: 1
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tle-dev-quest-operations
+  namespace: tle-dev
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  labels:
+    app: tle-dev-quest-operations
+    app.kubernetes.io/part-of: tle-dev-quest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tle-dev-quest-operations
+  template:
+    metadata:
+      labels:
+        app: tle-dev-quest-operations
+        app.kubernetes.io/part-of: tle-dev-quest
+        quest-role: quest-operations
+    spec:
+      serviceAccountName: tle-dev-quest-operations
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: quest-service
+          image: >-
+            ghcr.io/the-last-exam/quest-service:v0.0.2@sha256:3dc4bf8f9226efb06695c292c67031073ad7b4f13872bc2748547145b7b1ac26
+          imagePullPolicy: IfNotPresent
+          args:
+            - -env
+            - production
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: tle-dev-quest-service-config
+            - configMapRef:
+                name: tle-dev-quest-runtime
+          env:
+            - name: QUEST_ROLE
+              value: quest-operations
+            - name: QUEST_DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: QUEST_DATABASE_USER
+            - name: QUEST_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: QUEST_DATABASE_PASSWORD
+          volumeMounts:
+            - name: history-hydration
+              mountPath: /config/history-hydration.json
+              subPath: history-hydration.json
+              readOnly: true
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: history-hydration
+          configMap:
+            name: tle-dev-quest-runtime
+            items:
+              - key: history-hydration.json
+                path: history-hydration.json
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tle-dev-quest-outbox
+  namespace: tle-dev
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  labels:
+    app: tle-dev-quest-outbox
+    app.kubernetes.io/part-of: tle-dev-quest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tle-dev-quest-outbox
+  template:
+    metadata:
+      labels:
+        app: tle-dev-quest-outbox
+        app.kubernetes.io/part-of: tle-dev-quest
+        quest-role: quest-outbox
+    spec:
+      serviceAccountName: tle-dev-quest-outbox
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: quest-service
+          image: >-
+            ghcr.io/the-last-exam/quest-service:v0.0.2@sha256:3dc4bf8f9226efb06695c292c67031073ad7b4f13872bc2748547145b7b1ac26
+          imagePullPolicy: IfNotPresent
+          args:
+            - -env
+            - production
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: tle-dev-quest-service-config
+            - configMapRef:
+                name: tle-dev-quest-runtime
+          env:
+            - name: QUEST_ROLE
+              value: quest-outbox
+            - name: QUEST_DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: QUEST_DATABASE_USER
+            - name: QUEST_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: QUEST_DATABASE_PASSWORD
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL

@@ -4,9 +4,10 @@
 # (server commit 63566e15): auth-service, lobby-service,
 # matchmaking-service, metadata-service, notification-service,
 # player-service, social-service. Other services from config-keys.json
-# (game-service, projection-writer, quest-service, admin-audit-writer,
+# (game-service, projection-writer, admin-audit-writer,
 # internal-admin-gateway, internal-ops-gateway, wsterminator) are separate
-# follow-up work. Game Master is declared in game-master.yaml because its
+# follow-up work. Quest roles are declared in quest-workloads.yaml. Game
+# Master is declared in game-master.yaml because its
 # single-writer, RBAC, PDB and network contract differ from this file's
 # scalable service workload pattern.
 #
