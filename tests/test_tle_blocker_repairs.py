@@ -29,6 +29,31 @@ class TleBlockerRepairTests(unittest.TestCase):
         self.assertIn("--protected-mode", args)
         self.assertEqual("no", args[args.index("--protected-mode") + 1])
 
+    def test_player_migrations_use_their_own_schema(self):
+        # golang-migrate's schema_migrations(version, dirty) cannot share
+        # tle_dev.public with notification-service's filename-keyed table.
+        from urllib.parse import parse_qs, urlparse
+
+        config = next(
+            item
+            for item in documents("service-config.yaml")
+            if item["metadata"]["name"] == "tle-dev-player-service-config"
+        )
+        url = urlparse(config["data"]["DATABASE_URL"])
+        self.assertEqual("/tle_dev", url.path)
+        self.assertEqual(["player"], parse_qs(url.query)["search_path"])
+
+        job = next(
+            item
+            for item in documents("postgres-job.yaml")
+            if item["kind"] == "Job"
+        )
+        script = job["spec"]["template"]["spec"]["containers"][0]["command"][-1]
+        self.assertRegex(
+            script,
+            r"-d tle_dev -c \\\s+\"CREATE SCHEMA IF NOT EXISTS player AUTHORIZATION tle_dev\"",
+        )
+
     def test_only_game_master_can_reach_the_k3s_api_endpoint(self):
         policies = {
             item["metadata"]["name"]: item
