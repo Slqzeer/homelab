@@ -84,6 +84,8 @@ kind: Deployment
 metadata:
   name: tle-dev-game-master
   namespace: tle-dev
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
   labels:
     app: tle-dev-game-master
     app-group: tle-dev-control-plane

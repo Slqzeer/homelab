@@ -19,6 +19,7 @@ resources:
   - datastores.yaml
   - jetstream-bootstrap.yaml
   - postgres-job.yaml
+  - metadata-bootstrap.yaml
   - workloads.yaml
   - admin-secrets.yaml
   - admin-networkpolicy.yaml
