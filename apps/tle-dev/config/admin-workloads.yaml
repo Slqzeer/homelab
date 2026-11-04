@@ -1,0 +1,562 @@
+# TLE admin workloads (issue #53, split from #43).
+#
+# The retired manifests used the logical `tle-admin` namespace. In this
+# environment that isolation boundary is `tle-admin-dev`; it is deliberately
+# separate from the player-facing `tle-dev` namespace. A default-deny baseline
+# lands here; issue #45 adds the explicit cross-namespace NetworkPolicies.
+#
+# Images are pinned from The-Last-Exam/server release v0.0.2, publish-images
+# run 40263029044 (artifact image-record-v0.0.2/images.json).
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-admin-audit-writer
+  namespace: tle-admin-dev
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tle-dev-admin-audit-writer
+  namespace: tle-admin-dev
+  labels:
+    app: tle-dev-admin-audit-writer
+    app-group: tle-dev-admin-service
+spec:
+  selector:
+    app: tle-dev-admin-audit-writer
+  ports:
+    - name: http
+      port: 8095
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tle-dev-admin-audit-writer
+  namespace: tle-admin-dev
+  labels:
+    app: tle-dev-admin-audit-writer
+    app-group: tle-dev-admin-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: tle-dev-admin-audit-writer
+  template:
+    metadata:
+      labels:
+        app: tle-dev-admin-audit-writer
+        app-group: tle-dev-admin-service
+        metrics: tle-admin-dev
+    spec:
+      serviceAccountName: tle-dev-admin-audit-writer
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: admin-audit-writer
+          image: >-
+            ghcr.io/the-last-exam/admin-audit-writer:v0.0.2@sha256:7c0da00a399b089cf4387cc8474395a6c27729397a292792eb09b479b3f48078
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8095
+          envFrom:
+            - configMapRef:
+                name: tle-dev-admin-audit-writer-config
+          env:
+            - name: AUDIT_WRITER_ENV
+              value: dev
+            - name: AUDIT_WRITER_PORT
+              value: "8095"
+            - name: DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tle-admin-dev-data-secrets
+                  key: DATABASE_USER
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tle-admin-dev-data-secrets
+                  key: DATABASE_PASSWORD
+            - name: LOG_LEVEL
+              value: info
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 30
+            periodSeconds: 5
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: tle-dev-admin-audit-writer
+  namespace: tle-admin-dev
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: tle-dev-admin-audit-writer
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-internal-admin-gateway
+  namespace: tle-admin-dev
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tle-dev-internal-admin-gateway
+  namespace: tle-admin-dev
+  labels:
+    app: tle-dev-internal-admin-gateway
+    app-group: tle-dev-admin-service
+spec:
+  selector:
+    app: tle-dev-internal-admin-gateway
+  ports:
+    - name: http
+      port: 8100
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tle-dev-internal-admin-gateway
+  namespace: tle-admin-dev
+  labels:
+    app: tle-dev-internal-admin-gateway
+    app-group: tle-dev-admin-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: tle-dev-internal-admin-gateway
+  template:
+    metadata:
+      labels:
+        app: tle-dev-internal-admin-gateway
+        app-group: tle-dev-admin-service
+        metrics: tle-admin-dev
+    spec:
+      serviceAccountName: tle-dev-internal-admin-gateway
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: internal-admin-gateway
+          image: >-
+            ghcr.io/the-last-exam/internal-admin-gateway:v0.0.2@sha256:1048cd10d5c7859169231876e20e76329f56a23b6e05ef0cec61db1a41ac4736
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8100
+          envFrom:
+            - configMapRef:
+                name: tle-dev-internal-admin-gateway-config
+          env:
+            - name: ADMIN_GATEWAY_ENV
+              value: dev
+            - name: ADMIN_GATEWAY_LISTEN_ADDR
+              value: ":8100"
+            - name: AUDIT_WRITER_URL
+              value: >-
+                http://tle-dev-admin-audit-writer.tle-admin-dev.svc.cluster.local:8095
+            - name: PROJECTION_WRITER_URL
+              value: >-
+                http://tle-dev-projection-writer.tle-admin-dev.svc.cluster.local:8120
+            - name: OPERATOR_SESSION_ADAPTER
+              value: keycloak
+            - name: KEYCLOAK_ISSUER_URL
+              value: https://keycloak.taildf6cd4.ts.net/realms/homelab
+            - name: KEYCLOAK_INTERNAL_BASE_URL
+              value: >-
+                http://keycloak.keycloak.svc.cluster.local:8080/realms/homelab
+            - name: KEYCLOAK_CLIENT_ID
+              value: tle-admin-dev
+            - name: KEYCLOAK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: tle-admin-dev-oidc-secrets
+                  key: KEYCLOAK_CLIENT_SECRET
+            - name: KEYCLOAK_REDIRECT_URL
+              value: >-
+                https://tle-dev-operator.taildf6cd4.ts.net/auth/callback
+            - name: CSRF_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: tle-admin-dev-misc-secrets
+                  key: CSRF_SECRET
+            - name: LOG_LEVEL
+              value: info
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: tle-dev-internal-admin-gateway
+  namespace: tle-admin-dev
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: tle-dev-internal-admin-gateway
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-internal-ops-gateway
+  namespace: tle-admin-dev
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tle-dev-internal-ops-gateway
+  namespace: tle-admin-dev
+  labels:
+    app: tle-dev-internal-ops-gateway
+    app-group: tle-dev-admin-service
+spec:
+  selector:
+    app: tle-dev-internal-ops-gateway
+  ports:
+    - name: http
+      port: 8110
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tle-dev-internal-ops-gateway
+  namespace: tle-admin-dev
+  labels:
+    app: tle-dev-internal-ops-gateway
+    app-group: tle-dev-admin-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: tle-dev-internal-ops-gateway
+  template:
+    metadata:
+      labels:
+        app: tle-dev-internal-ops-gateway
+        app-group: tle-dev-admin-service
+        metrics: tle-admin-dev
+    spec:
+      serviceAccountName: tle-dev-internal-ops-gateway
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: internal-ops-gateway
+          image: >-
+            ghcr.io/the-last-exam/internal-ops-gateway:v0.0.2@sha256:903ce62cef35744b98878678cd0b0807cc6bf684d73e22a028135fa13a40f46e
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8110
+          envFrom:
+            - configMapRef:
+                name: tle-dev-internal-ops-gateway-config
+          env:
+            - name: OPS_GATEWAY_ENV
+              value: dev
+            - name: OPS_GATEWAY_LISTEN_ADDR
+              value: ":8110"
+            - name: OPS_GATEWAY_TOOL_ID
+              value: ops-gateway-v1
+            - name: GAME_MASTER_CONTROL_URL
+              value: >-
+                http://tle-dev-game-master.tle-dev.svc.cluster.local:8082/healthz
+            - name: MATCHMAKING_CONTROL_URL
+              value: >-
+                http://tle-dev-matchmaking-service.tle-dev.svc.cluster.local:8080/healthz
+            - name: AUTH_CONTROL_URL
+              value: >-
+                http://tle-dev-auth-service.tle-dev.svc.cluster.local:8080/healthz
+            - name: AUDIT_WRITER_URL
+              value: >-
+                http://tle-dev-admin-audit-writer.tle-admin-dev.svc.cluster.local:8095
+            # Issue #51 replaces this temporary adapter with Keycloak and its
+            # dedicated confidential ops client after the workload exists.
+            - name: OPERATOR_SESSION_ADAPTER
+              value: memory
+            - name: LOG_LEVEL
+              value: info
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: tle-dev-internal-ops-gateway
+  namespace: tle-admin-dev
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: tle-dev-internal-ops-gateway
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-projection-writer
+  namespace: tle-admin-dev
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tle-dev-projection-writer
+  namespace: tle-admin-dev
+  labels:
+    app: tle-dev-projection-writer
+    app-group: tle-dev-admin-service
+spec:
+  selector:
+    app: tle-dev-projection-writer
+  ports:
+    - name: http
+      port: 8120
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tle-dev-projection-writer
+  namespace: tle-admin-dev
+  labels:
+    app: tle-dev-projection-writer
+    app-group: tle-dev-admin-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: tle-dev-projection-writer
+  template:
+    metadata:
+      labels:
+        app: tle-dev-projection-writer
+        app-group: tle-dev-admin-service
+        metrics: tle-admin-dev
+    spec:
+      serviceAccountName: tle-dev-projection-writer
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: projection-writer
+          image: >-
+            ghcr.io/the-last-exam/projection-writer:v0.0.2@sha256:8287bdcb383c388b7bba1010c5cdfa20082c87e154a3c25460e016231a2a65b1
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8120
+          envFrom:
+            - configMapRef:
+                name: tle-dev-projection-writer-config
+          env:
+            - name: PROJECTION_WRITER_ENV
+              value: dev
+            - name: PROJECTION_WRITER_LISTEN_ADDR
+              value: ":8120"
+            - name: DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tle-admin-dev-data-secrets
+                  key: DATABASE_USER
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tle-admin-dev-data-secrets
+                  key: DATABASE_PASSWORD
+            - name: NATS_STREAM
+              value: ADMIN_ACTIONS
+            - name: NATS_SUBJECT
+              value: admin.actions.>
+            - name: NATS_CONSUMER
+              value: projection-writer
+            - name: SSE_BROADCAST_TIMEOUT_MS
+              value: "4500"
+            - name: STALE_ACTIVE_TTL_SECONDS
+              value: "60"
+            - name: STALE_COMPLETED_TTL_SECONDS
+              value: "600"
+            - name: LOG_LEVEL
+              value: info
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: tle-dev-projection-writer
+  namespace: tle-admin-dev
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: tle-dev-projection-writer
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
