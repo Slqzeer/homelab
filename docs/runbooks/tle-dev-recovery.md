@@ -60,6 +60,10 @@ recreates the legacy URL keys before pinning any pre-`v0.0.1` server release.
   addresses come from per-service ConfigMaps.
 - Reconstructible: NATS streams, Valkey cache contents.
 
+JetStream streams are reconciled by the `tle-dev-jetstream-bootstrap` Argo Sync
+hook after NATS becomes healthy; manual `nats stream add` commands are recovery
+diagnostics only.
+
 ## Vault ceremony extension
 
 Canonical ordered checklist: `docs/runbooks/tle-dev-vault-ceremony.md`
@@ -105,6 +109,41 @@ workloads can run; sync alone is not enough.
 5. Rollback target: previous row of this table (immutable revision).
    Stateful rollback: Postgres restores may be required on schema change;
    Valkey/NATS roll back by recreation (reconstructible).
+
+## Player migration-table inspection ceremony
+
+Player Service uses `golang-migrate`, which requires
+`public.schema_migrations(version bigint, dirty boolean)`. A table with the
+filename-based contract belongs to another migrator and must not be altered,
+renamed, or dropped until its owner and rows are identified.
+
+Run the following read-only inspection with the approved operator identity:
+
+```bash
+sg k3s-admin -c 'kubectl -n databases exec postgres-0 -- \
+  psql -U postgres -d tle_dev -v ON_ERROR_STOP=1 \
+  -c "SELECT table_schema, table_name FROM information_schema.tables WHERE table_name = '\''schema_migrations'\'';" \
+  -c "SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = '\''public'\'' AND table_name = '\''schema_migrations'\'' ORDER BY ordinal_position;" \
+  -c "SELECT * FROM public.schema_migrations ORDER BY 1;"'
+sg k3s-admin -c 'kubectl -n databases exec postgres-0 -- \
+  pg_dump -U postgres -d tle_dev --schema-only --table=public.schema_migrations'
+```
+
+Capture the output in the owning issue without credentials or unrelated row
+data. Compare every filename row with the migration directories of the services
+sharing `tle_dev`; determine which service created the table and whether its
+migrations are complete. Before any repair, take and verify a full `tle_dev`
+backup using the PostgreSQL runbook.
+
+The repair decision must explicitly choose a non-conflicting migration-table
+contract for every service sharing the database. Do not add `version`/`dirty`
+columns to the filename table: that creates a hybrid table understood by
+neither migration engine. The approved repair must name the exact DDL, owner,
+backup, rollback SQL, and post-repair checks before it is executed. Expected
+post-repair evidence is Player Service applying its migrations without a dirty
+version, the original filename-based migrator retaining all of its markers,
+and both workloads becoming ready. This repository patch deliberately performs
+no database mutation.
 
 ## Restore drill (before production acceptance)
 
