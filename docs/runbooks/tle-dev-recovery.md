@@ -191,7 +191,7 @@ no database mutation.
       matchmaking-service, or Game Master starts. A second Application sync
       completes successfully, reports that it kept the same active version,
       and leaves exactly one active row. Follow the operator acceptance below
-      and record evidence in `Slqzeer/homelab#57`.
+      and record evidence in `Slqzeer/homelab#77`.
 - [ ] On the first admin-workload promotion, all four Deployments in
       `tle-admin-dev` complete rollout, their HTTP probes succeed, and their
       HPAs report the declared 2-4/2-6/2-5/2-5 ranges. Record rollout,
@@ -208,9 +208,10 @@ no database mutation.
 
 ### Metadata baseline operator acceptance
 
-This is live rollout acceptance for issue #57, not repository validation. The
-Homelab operator must run it in a fresh `tle-dev` environment with the approved
-write-capable identity; Hermes' read-only identity must not trigger either sync.
+This is live rollout acceptance for issue #57, tracked by follow-up issue #77;
+it is not repository validation. The Homelab operator must run it in a fresh
+`tle-dev` environment with the approved write-capable identity; Hermes'
+read-only identity must not trigger either sync.
 
 Prerequisites: PostgreSQL is healthy; the Vault configure ceremony has created
 the `tle-dev/data` metadata password; the `tle-dev-data` and `ghcr-pull`
@@ -238,7 +239,7 @@ runbook. Do not print or copy database credentials into the evidence.
    Expected: the Job is `Complete`; its log says it activated one baseline
    version; the first query returns that version; and the count is exactly `1`.
    Record the active version ID, Job completion timestamp, image digest, Argo CD
-   revision, operator, and command output in `Slqzeer/homelab#57`.
+   revision, operator, and command output in `Slqzeer/homelab#77`.
 
 2. In the Argo CD UI, start a second Sync operation for `tle-dev` without
    changing the release. `BeforeHookCreation` replaces the prior hook Job. Run
