@@ -170,6 +170,31 @@ class TleDatastoreConfigTests(unittest.TestCase):
         kustomization = self.load_documents("apps/tle-dev/config/kustomization.yaml")[0]
         self.assertIn("service-config.yaml", kustomization["resources"])
 
+    def test_postgres_ingress_admits_the_tle_service_group(self):
+        policies = self.load_documents(
+            "platform/databases/postgres/config/networkpolicy.yaml"
+        )
+        postgres_clients = next(
+            policy
+            for policy in policies
+            if policy["kind"] == "NetworkPolicy"
+            and policy["metadata"]["name"] == "postgres-clients"
+        )
+
+        rule, = postgres_clients["spec"]["ingress"]
+        self.assertEqual([{"protocol": "TCP", "port": 5432}], rule["ports"])
+        self.assertIn(
+            {
+                "namespaceSelector": {
+                    "matchLabels": {"kubernetes.io/metadata.name": "tle-dev"}
+                },
+                "podSelector": {
+                    "matchLabels": {"app-group": "tle-dev-service"}
+                },
+            },
+            rule["from"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
