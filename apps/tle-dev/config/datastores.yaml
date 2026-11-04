@@ -64,6 +64,12 @@ spec:
             - "yes"
             - --save
             - "60 1"
+            # The image default binds loopback only. NetworkPolicy supplies
+            # the cluster boundary, so listen on the pod interface.
+            - --bind
+            - 0.0.0.0
+            - --protected-mode
+            - "no"
           volumeMounts:
             - name: data
               mountPath: /data
@@ -113,6 +119,9 @@ kind: Service
 metadata:
   name: tle-dev-nats
   namespace: tle-dev
+  annotations:
+    # Before the JetStream bootstrap hook (-1); see jetstream-bootstrap.yaml.
+    argocd.argoproj.io/sync-wave: "-2"
   labels:
     app: tle-dev-nats
     metrics: tle-dev
@@ -132,6 +141,9 @@ kind: StatefulSet
 metadata:
   name: tle-dev-nats
   namespace: tle-dev
+  annotations:
+    # Before the JetStream bootstrap hook (-1); see jetstream-bootstrap.yaml.
+    argocd.argoproj.io/sync-wave: "-2"
 spec:
   serviceName: tle-dev-nats
   replicas: 1
@@ -217,3 +229,6 @@ kind: ServiceAccount
 metadata:
   name: tle-dev-nats
   namespace: tle-dev
+  annotations:
+    # Before the JetStream bootstrap hook (-1); see jetstream-bootstrap.yaml.
+    argocd.argoproj.io/sync-wave: "-2"

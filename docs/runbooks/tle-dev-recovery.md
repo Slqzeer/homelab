@@ -15,6 +15,7 @@ re-vendor on each TLE release with `gh api repos/The-Last-Exam/server/...`).
 | Service images `tag@digest` | auth-service `v0.0.2@sha256:189309e7eba8f3683c20324f77f5920ceab8ac330b527eaea2d261fea2d6c463`; lobby-service `v0.0.2@sha256:cb5654799f03aea85a60cde4539632a5b6f69dc6e01dec84784701412fa78bed`; matchmaking-service `v0.0.2@sha256:a22b7967000ba061e9fd0a2b1e74bf96926c38bda0f6f7cd11b78698cd8be155`; metadata-service `v0.0.2@sha256:b62fb8e977e4c7a491583456f11d857ad4f9a6d62ec1e85eb3ad38fbfcab788f`; notification-service `v0.0.2@sha256:bda618ae2533dfe3c54853a2a23a7c9ada5a1e50da622d1ec64914773a6fe78e`; player-service `v0.0.2@sha256:e8085c1ac3da888b97d6b34e7dcf9b04eb99014cf90450b3d5cb1e35d4fa0bf8`; social-service `v0.0.2@sha256:9342d0e713b708938282a76fd9886bac249ddb309c2628a23e9fe3ab51a01e7f` (source: The-Last-Exam/server publish-images run 40263029044) |
 | Game control images `tag@digest` | game-master `v0.0.2@sha256:966baf4811fcc71a60069dffa8bef03d1ecc2a10e16f1c48047c479b54662936`; game-service `v0.0.2@sha256:b96d88334ddfb682c32845f251a26a7e6c017b62d9b95076fedc2e809bb7e7ef` (source: the same publish-images run) |
 | Admin images `tag@digest` | admin-audit-writer `v0.0.2@sha256:7c0da00a399b089cf4387cc8474395a6c27729397a292792eb09b479b3f48078`; internal-admin-gateway `v0.0.2@sha256:1048cd10d5c7859169231876e20e76329f56a23b6e05ef0cec61db1a41ac4736`; internal-ops-gateway `v0.0.2@sha256:903ce62cef35744b98878678cd0b0807cc6bf684d73e22a028135fa13a40f46e`; projection-writer `v0.0.2@sha256:8287bdcb383c388b7bba1010c5cdfa20082c87e154a3c25460e016231a2a65b1` (source: the same publish-images run) |
+| Quest image `tag@digest` | quest-service `v0.0.2@sha256:3dc4bf8f9226efb06695c292c67031073ad7b4f13872bc2748547145b7b1ac26` (source: the same publish-images run) |
 | Role manifest version | `1` (registry schema `1.3`) |
 | Identity headers | 26 headers + 5 prefixes (see `edge-config.yaml`) |
 | Public routes | 62 routes across 9 services (see `public-routes.json`) |
@@ -24,6 +25,7 @@ re-vendor on each TLE release with `gh api repos/The-Last-Exam/server/...`).
 | Core service workloads | `auth-service`, `lobby-service`, `matchmaking-service`, `metadata-service`, `notification-service`, `player-service`, `social-service` declared in `workloads.yaml` (issue #52), each listening on 8080 for HTTP (see that file's header) regardless of its `.env.example` default port. `matchmaking-service` reaches the Game Master Service on gRPC `9100` and presents the dedicated matchmaking credential from VSO. |
 | Game Master | `game-master.yaml` declares one replica with no HPA, a `minAvailable: 1` PDB, namespace-scoped pod RBAC, HTTP `8082`, gRPC `9100`, and only the three issue #44 ingress caller classes. `GAME_MASTER_NAMESPACE=tle-dev`, so the Role and registry target the same restricted namespace. `game-pod-environment.yaml` supplies the shared environment and default resources; `networkpolicy.yaml` limits game pods to the edge and their four runtime dependencies. |
 | Admin workloads | `admin-workloads.yaml` declares admin-audit-writer, internal-admin-gateway, internal-ops-gateway and projection-writer in the separate restricted `tle-admin-dev` namespace (issue #53), with the release probes/resources and HPAs. Namespace-local VSO projections in `admin-secrets.yaml` supply database, CSRF, admin-client and GHCR credentials. `admin-networkpolicy.yaml` denies ingress and egress by default; issue #45 adds only the explicit cross-namespace flows. Issue #51 replaces the ops gateway's temporary in-memory session adapter with Keycloak. |
+| Quest workloads | `quest-workloads.yaml` declares five role-specific Deployments from one pinned image. `quest-api` scales `1-6`, `quest-evaluator` scales `1-8`, and ingress/operations/outbox stay at one replica without HPAs. Wave 0 creates configuration, VSO projections, and policies; Sync-hook waves 1 and 2 run `quest-migrate` and then `quest-seed-baseline`; the Deployments roll out at wave 3 only after both Jobs succeed. `quest-operations` mounts the checked-in `history-hydration.json` ConfigMap item read-only. |
 
 Every Deployment uses `tag@digest`, never `latest`. `images.json` is not in
 git (a digest exists only after a push); record the values here at promotion.
@@ -62,6 +64,10 @@ recreates the legacy URL keys before pinning any pre-`v0.0.1` server release.
   credentials via Vault (`tle-dev/{auth,data,misc}`) + VSO. Datastore
   addresses come from per-service ConfigMaps.
 - Reconstructible: NATS streams, Valkey cache contents.
+
+JetStream streams are reconciled by the `tle-dev-jetstream-bootstrap` Argo Sync
+hook after NATS becomes healthy; manual `nats stream add` commands are recovery
+diagnostics only.
 
 ## Vault ceremony extension
 
@@ -112,6 +118,41 @@ workloads can run; sync alone is not enough.
    Stateful rollback: Postgres restores may be required on schema change;
    Valkey/NATS roll back by recreation (reconstructible).
 
+## Player migration-table inspection ceremony
+
+Player Service uses `golang-migrate`, which requires
+`public.schema_migrations(version bigint, dirty boolean)`. A table with the
+filename-based contract belongs to another migrator and must not be altered,
+renamed, or dropped until its owner and rows are identified.
+
+Run the following read-only inspection with the approved operator identity:
+
+```bash
+sg k3s-admin -c 'kubectl -n databases exec postgres-0 -- \
+  psql -U postgres -d tle_dev -v ON_ERROR_STOP=1 \
+  -c "SELECT table_schema, table_name FROM information_schema.tables WHERE table_name = '\''schema_migrations'\'';" \
+  -c "SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = '\''public'\'' AND table_name = '\''schema_migrations'\'' ORDER BY ordinal_position;" \
+  -c "SELECT * FROM public.schema_migrations ORDER BY 1;"'
+sg k3s-admin -c 'kubectl -n databases exec postgres-0 -- \
+  pg_dump -U postgres -d tle_dev --schema-only --table=public.schema_migrations'
+```
+
+Capture the output in the owning issue without credentials or unrelated row
+data. Compare every filename row with the migration directories of the services
+sharing `tle_dev`; determine which service created the table and whether its
+migrations are complete. Before any repair, take and verify a full `tle_dev`
+backup using the PostgreSQL runbook.
+
+The repair decision must explicitly choose a non-conflicting migration-table
+contract for every service sharing the database. Do not add `version`/`dirty`
+columns to the filename table: that creates a hybrid table understood by
+neither migration engine. The approved repair must name the exact DDL, owner,
+backup, rollback SQL, and post-repair checks before it is executed. Expected
+post-repair evidence is Player Service applying its migrations without a dirty
+version, the original filename-based migrator retaining all of its markers,
+and both workloads becoming ready. This repository patch deliberately performs
+no database mutation.
+
 ## Restore drill (before production acceptance)
 
 - `pg_dump tle_dev... | gzip > /backups/databases/tle-dev/...`
@@ -151,6 +192,68 @@ workloads can run; sync alone is not enough.
       policies land. Record admin sign-in in issue #3 and ops-session evidence
       in issue #51. Until those issues complete, repository validation is not
       live acceptance.
+- [ ] On the first quest rollout, record the two Sync-hook Job completions in
+      order, all five role Deployments ready, HPA bounds `1-6` and `1-8`, the
+      operations hydration file mounted read-only, and allowed/denied network
+      probes. The pinned auth-service access-token format currently omits the
+      `iss` and `aud` claims required by quest-api; player quest requests are
+      expected to remain denied until the product release contract is aligned.
+
+### Quest rollout operator acceptance
+
+Merging the quest workload change is itself the rollout trigger: Argo CD runs
+the database migration and baseline seed hooks automatically. Before merge, the
+Homelab operator must take and inspect a `tle_dev_quest` backup using the
+approved write-capable identity; Hermes' read-only identity must not run this
+ceremony:
+
+```bash
+mkdir -p /backups/databases/tle-dev
+sg k3s-admin -c \
+  'kubectl -n databases exec postgres-0 -- pg_dump -U postgres tle_dev_quest' \
+  | gzip > /backups/databases/tle-dev/tle-dev-quest-pre-rollout.sql.gz
+zcat /backups/databases/tle-dev/tle-dev-quest-pre-rollout.sql.gz \
+  | grep -m1 '^-- PostgreSQL database dump'
+sg k3s-admin -c \
+  'kubectl -n tle-dev get vaultstaticsecret tle-dev-data'
+```
+
+Expected before merge: the dump header is present and `tle-dev-data` reports a
+ready projection. Also confirm PostgreSQL, NATS, and the GHCR pull projection
+are healthy and the pinned `v0.0.2` quest image is pullable.
+
+After merge and reconciliation, collect the rollout evidence without changing
+desired state:
+
+```bash
+sg k3s-admin -c 'kubectl -n argocd get application tle-dev'
+sg k3s-admin -c \
+  'kubectl -n tle-dev get jobs tle-dev-quest-migrate tle-dev-quest-seed-baseline'
+sg k3s-admin -c 'kubectl -n tle-dev logs job/tle-dev-quest-migrate'
+sg k3s-admin -c 'kubectl -n tle-dev logs job/tle-dev-quest-seed-baseline'
+for role in api ingress evaluator operations outbox; do
+  sg k3s-admin -c \
+    "kubectl -n tle-dev rollout status deployment/tle-dev-quest-$role"
+done
+sg k3s-admin -c \
+  'kubectl -n tle-dev get hpa tle-dev-quest-api tle-dev-quest-evaluator'
+sg k3s-admin -c \
+  'kubectl -n tle-dev exec deployment/tle-dev-quest-operations -- test -r /config/history-hydration.json'
+```
+
+Expected: migration completes before seed, both Jobs are complete, all five
+Deployments are available, the HPA bounds are `1-6` and `1-8`, and the
+operations hydration file is readable. Record the command output, timestamps,
+operator, release digest, and Argo CD revision in `Slqzeer/homelab#54`.
+
+If either hook or any Deployment fails, revert the Git change and let Argo CD
+prune the five Deployments. Do not run `quest-migrate -direction down`: that
+command rolls back every quest migration. If the previous release cannot use
+the migrated schema, restore the pre-rollout dump into an empty
+`tle_dev_quest` database using the PostgreSQL restore procedure's plain-SQL
+`psql` path in `platform/databases/postgres/README.md`; that restore path is
+documented but not yet exercised, so database restoration requires explicit
+operator approval and evidence.
 
 ### Game Master operator acceptance
 

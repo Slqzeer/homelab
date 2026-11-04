@@ -106,6 +106,52 @@ printing them if either is empty or they are equal.
 Everything else stays `disabled` until you enable its provider (OAuth,
 APNs, FCM) — that is expected, not an error.
 
+### Derive and pin the JWT public key
+
+The public ConfigMap value must be the PKIX SubjectPublicKeyInfo PEM derived
+from the exact private key stored at
+`homelab/tle-dev/auth:AUTH_JWT_ED25519_PRIVATE_KEY_PEM`. A raw 32-byte hex key
+is not accepted by auth-service or metadata-service. Perform this step only on
+the cluster host, with shell tracing disabled:
+
+```bash
+set +x
+umask 077
+jwt_key_dir=$(mktemp -d)
+trap 'rm -rf "$jwt_key_dir"' EXIT HUP INT TERM
+
+sg k3s-admin -c 'kubectl -n vault exec vault-0 -- \
+  vault kv get -field=AUTH_JWT_ED25519_PRIVATE_KEY_PEM \
+  homelab/tle-dev/auth' >"$jwt_key_dir/private.pem"
+openssl pkey -in "$jwt_key_dir/private.pem" -pubout \
+  -out "$jwt_key_dir/public.pem"
+openssl pkey -pubin -in "$jwt_key_dir/public.pem" -text -noout
+```
+
+Expected: OpenSSL reports an ED25519 public key and exits successfully. Replace
+`auth-jwt-ed25519-public-key-pem` in
+`apps/tle-dev/config/edge-config.yaml` with the complete contents of
+`public.pem`, using a YAML literal block (`|`) so the `BEGIN PUBLIC KEY` and
+`END PUBLIC KEY` lines are preserved. The public PEM is non-secret; the private
+file remains mode `0600` in the temporary directory and the trap removes it.
+
+Before review, prove the committed public key is syntactically valid and still
+matches the Vault private key. Copy only the committed public PEM into
+`$jwt_key_dir/committed-public.pem`, then run:
+
+```bash
+openssl pkey -pubin -in "$jwt_key_dir/committed-public.pem" -outform DER \
+  >"$jwt_key_dir/committed-public.der"
+openssl pkey -in "$jwt_key_dir/private.pem" -pubout -outform DER \
+  >"$jwt_key_dir/derived-public.der"
+cmp "$jwt_key_dir/committed-public.der" "$jwt_key_dir/derived-public.der"
+kubectl kustomize apps/tle-dev/config >/dev/null
+```
+
+Expected: `cmp` and the render are silent and exit zero. Do not commit either
+temporary DER file or the private PEM. This ceremony authorizes deriving and
+reviewing the public half only; it does not rotate the Vault private key.
+
 ## Verify (key names only, never values)
 
 ```bash

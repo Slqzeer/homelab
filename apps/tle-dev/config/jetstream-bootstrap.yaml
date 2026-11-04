@@ -1,0 +1,121 @@
+# Reconcile the JetStream streams required by the pinned TLE release. The
+# product deploy-info supplies the release set; PARTY and METADATA cover the
+# rollout-discovered party.* and metadata.version.published contracts. SOCIAL
+# includes social.block.created and social.block.removed.
+#
+# Sync waves: Argo waits for every resource of a wave to be healthy before the
+# next one. The services that consume these streams (wave 0) cannot become
+# healthy without them, so the hook and the stream list it mounts run at -1,
+# after NATS (-2, datastores.yaml). A later wave deadlocks the sync on
+# "waiting for healthy state" and the Job never runs (2026-11-04, #71).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tle-dev-jetstream-streams
+  namespace: tle-dev
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+data:
+  streams.tsv: |
+    AUTH	auth.>
+    GAME_PLAYER	game.>
+    LOBBY	lobby.player.>
+    MATCHMAKING_MATCH_READY	notification.match_ready
+    METADATA	metadata.version.published
+    PARTY	party.>
+    PLAYER	player.>
+    QUEST_EVENTS	quest.events.>
+    QUEST_FACTS	quest.facts.received
+    QUEST_GRANTS	quest.entitlement.>
+    SOCIAL	social.>
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-jetstream-bootstrap
+  namespace: tle-dev
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+automountServiceAccountToken: false
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tle-dev-jetstream-bootstrap
+  namespace: tle-dev
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app: tle-dev-jetstream-bootstrap
+    spec:
+      serviceAccountName: tle-dev-jetstream-bootstrap
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: reconcile-streams
+          image: >-
+            natsio/nats-box:0.14.5@sha256:0784ab710aefaf6ef037ed797ee7dcde613c6ad208c4dbff1945fc7c1b5b5375
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              server=nats://tle-dev-nats.tle-dev.svc.cluster.local:4222
+              attempts=0
+              until nats --server "$server" account info >/dev/null 2>&1; do
+                attempts=$((attempts + 1))
+                if [ "$attempts" -ge 60 ]; then
+                  echo "NATS did not become ready" >&2
+                  exit 1
+                fi
+                sleep 2
+              done
+              while IFS="$(printf '\t')" read -r name subjects; do
+                [ -n "$name" ] || continue
+                if nats --server "$server" stream info "$name" >/dev/null 2>&1; then
+                  nats --server "$server" stream edit "$name" \
+                    --subjects "$subjects" --force
+                else
+                  nats --server "$server" stream add "$name" \
+                    --subjects "$subjects" \
+                    --storage file \
+                    --retention limits \
+                    --discard old \
+                    --max-age 24h \
+                    --defaults
+                fi
+              done </etc/tle-jetstream/streams.tsv
+          workingDir: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: stream-set
+              mountPath: /etc/tle-jetstream
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+      volumes:
+        - name: stream-set
+          configMap:
+            name: tle-dev-jetstream-streams

@@ -14,6 +14,11 @@ DISTROLESS_DEPLOYMENTS = {
     "tle-dev-matchmaking-service",
     "tle-dev-metadata-service",
     "tle-dev-notification-service",
+    "tle-dev-quest-api",
+    "tle-dev-quest-ingress",
+    "tle-dev-quest-evaluator",
+    "tle-dev-quest-operations",
+    "tle-dev-quest-outbox",
     "tle-dev-social-service",
 }
 
@@ -24,6 +29,7 @@ class TleRuntimeIdentityTests(unittest.TestCase):
         for relative_path in (
             "apps/tle-dev/config/workloads.yaml",
             "apps/tle-dev/config/game-master.yaml",
+            "apps/tle-dev/config/quest-workloads.yaml",
         ):
             with (REPOSITORY_ROOT / relative_path).open(encoding="utf-8") as stream:
                 for document in yaml.safe_load_all(stream):

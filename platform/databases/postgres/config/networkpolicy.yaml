@@ -67,6 +67,14 @@ spec:
           podSelector:
             matchLabels:
               app-group: tle-dev-service
+        # Quest worker roles are not player-facing services, so they use a
+        # separate label instead of inheriting edge ingress through app-group.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tle-dev
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: tle-dev-quest
         # Penpot's backend, and only it: the frontend, exporter and MCP
         # server never open a database connection. Its database Job runs
         # in this namespace and is covered by `job: postgres-client` above.
