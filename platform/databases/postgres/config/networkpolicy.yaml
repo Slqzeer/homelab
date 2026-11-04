@@ -67,6 +67,14 @@ spec:
           podSelector:
             matchLabels:
               app-group: tle-dev-service
+        # The metadata baseline hook is deliberately not in the service group:
+        # it needs PostgreSQL only, not the wider Valkey and NATS grants.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tle-dev
+          podSelector:
+            matchLabels:
+              app: tle-dev-metadata-seed-baseline
         # Quest worker roles are not player-facing services, so they use a
         # separate label instead of inheriting edge ingress through app-group.
         - namespaceSelector:
