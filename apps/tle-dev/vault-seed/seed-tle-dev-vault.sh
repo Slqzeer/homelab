@@ -93,12 +93,27 @@ push_env_file() {
   echo "  ($pushed keys patched)"
 }
 
+verify_game_master_credentials() {
+  # Compare inside vault-0 so neither credential crosses the exec boundary or
+  # appears in this script's output. This also validates optional overrides.
+  kubectl -n vault exec vault-0 -- sh -c '
+    pod_registry=$(vault kv get -field=GAME_MASTER_POD_REGISTRY_CREDENTIAL \
+      homelab/tle-dev/misc) || exit 1
+    matchmaking=$(vault kv get -field=GAME_MASTER_MATCHMAKING_CREDENTIAL \
+      homelab/tle-dev/misc) || exit 1
+    [ -n "$pod_registry" ] && [ -n "$matchmaking" ] && \
+      [ "$pod_registry" != "$matchmaking" ]
+  ' || die "Game Master caller credentials must be non-empty and distinct"
+  echo "  verified distinct non-empty Game Master caller credentials"
+}
+
 echo "==> homelab/tle-dev/auth <= .env.tle-dev-auth"
 push_env_file homelab/tle-dev/auth .env.tle-dev-auth
 echo "==> homelab/tle-dev/data <= .env.tle-dev-data"
 push_env_file homelab/tle-dev/data .env.tle-dev-data
 echo "==> homelab/tle-dev/misc <= .env.tle-dev-misc"
 push_env_file homelab/tle-dev/misc .env.tle-dev-misc
+verify_game_master_credentials
 
 echo "==> verifying (key names only, never values)"
 kubectl -n vault exec vault-0 -- sh -c '

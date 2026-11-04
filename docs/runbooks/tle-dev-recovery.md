@@ -146,10 +146,10 @@ validation step and must be run by the Homelab operator with the approved
 write-capable identity. Hermes' read-only identity must not run it.
 
 Prerequisites: issue #48 is merged and reconciled; the Vault configure ceremony
-has generated the two distinct Game Master credentials; VSO reports the
-`tle-dev-misc` secret ready; the pinned game-service image is pullable; and the
-operator has selected an approved restricted-compatible diagnostic image for
-the temporary pod below.
+has generated the two distinct Game Master credentials; VSO reports both the
+`tle-dev-misc` and `tle-dev-game-pod-credentials` projections ready; the pinned
+game-service image is pullable; and the operator has selected an approved
+restricted-compatible diagnostic image for the temporary pod below.
 
 Before exercising Game Master mutations, verify the game-pod environment itself:
 
@@ -160,13 +160,27 @@ kubectl -n tle-dev auth can-i get configmap/tle-dev-game-pod-env \
   --as=system:serviceaccount:tle-dev:tle-dev-game-master
 kubectl -n tle-dev auth can-i get secret/tle-dev-game-pod-credentials \
   --as=system:serviceaccount:tle-dev:tle-dev-game-master
+kubectl -n tle-dev get secret tle-dev-game-pod-credentials \
+  -o go-template='{{range $key, $_ := .data}}{{printf "%s\n" $key}}{{end}}'
+pod_registry=$(kubectl -n tle-dev get secret tle-dev-misc-secrets \
+  -o jsonpath='{.data.GAME_MASTER_POD_REGISTRY_CREDENTIAL}')
+game_pod=$(kubectl -n tle-dev get secret tle-dev-game-pod-credentials \
+  -o jsonpath='{.data.GAME_MASTER_POD_REGISTRY_CREDENTIAL}')
+matchmaking=$(kubectl -n tle-dev get secret tle-dev-misc-secrets \
+  -o jsonpath='{.data.GAME_MASTER_MATCHMAKING_CREDENTIAL}')
+test -n "$pod_registry" && test "$pod_registry" = "$game_pod" && \
+  test "$pod_registry" != "$matchmaking"
+unset pod_registry game_pod matchmaking
 ```
 
 Expected: the ConfigMap contains the Game Master, Metadata Service, NATS, and
 Valkey endpoints without credentials; the LimitRange reports `100m`/`128Mi`
-requests and `500m`/`512Mi` limits; and both named-object checks return `yes`.
-The credential Secret and `GAME_POD_ENV_SECRET` intentionally remain absent
-until NATS or Valkey authentication is enabled.
+requests and `500m`/`512Mi` limits; both named-object checks return `yes`; the
+game-pod Secret lists only `GAME_MASTER_POD_REGISTRY_CREDENTIAL`; and the
+silent comparisons exit successfully, proving the game-pod projection matches
+Game Master's pod-registry value while differing from the matchmaking value.
+Run these comparisons with shell tracing disabled so encoded Secret data is
+not written to logs.
 
 After the warm pool is ready, inspect one `role=game-pod` pod and confirm its
 effective resources and environment, then run allowed probes to NATS `4222`,
