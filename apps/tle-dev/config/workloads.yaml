@@ -364,6 +364,36 @@ spec:
         runAsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
+      # matchmaking-service v0.0.2 dials Valkey once in valkey.NewClient and
+      # keeps that error forever (cache/client.go initErr), so it never turns
+      # ready if the first dial lands before the NetworkPolicy controller
+      # admits the new pod IP, which is a few seconds after start. Init
+      # containers share the pod IP, so wait here until Valkey answers. Drop
+      # this once the service retries its Valkey client.
+      initContainers:
+        - name: wait-for-valkey
+          image: >-
+            valkey/valkey:9.0.1@sha256:546304417feac0874c3dd576e0952c6bb8f06bb4093ea0c9ca303c73cf458f63
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              until valkey-cli -h tle-dev-valkey.tle-dev.svc.cluster.local \
+                -p 6379 PING 2>/dev/null | grep -qx PONG; do
+                echo "waiting for valkey"; sleep 2
+              done
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
       containers:
         - name: matchmaking-service
           image: >-
