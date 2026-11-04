@@ -41,7 +41,7 @@ EXPECTED_SERVICE_CONFIG = {
         "VALKEY_ADDR": VALKEY_ADDR,
     },
     "player-service": {
-        "DATABASE_URL": SHARED_DATABASE_URL,
+        "DATABASE_URL": SHARED_DATABASE_URL + "?search_path=player",
         "NATS_URL": NATS_URL,
         "VALKEY_ADDR": VALKEY_ADDR,
     },

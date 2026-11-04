@@ -161,6 +161,13 @@ spec:
                   echo "database $db created"
                 fi
               done
+              # player-service runs golang-migrate, whose schema_migrations
+              # (version, dirty) clashes with the filename-keyed table that
+              # notification-service and admin-audit-writer own in
+              # tle_dev.public. Player gets its own schema; its DATABASE_URL
+              # selects it with search_path (service-config.yaml).
+              psql -v ON_ERROR_STOP=1 -d tle_dev -c \
+                "CREATE SCHEMA IF NOT EXISTS player AUTHORIZATION tle_dev"
               echo "done"
           resources:
             requests:

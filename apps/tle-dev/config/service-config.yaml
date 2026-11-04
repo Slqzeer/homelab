@@ -100,7 +100,9 @@ metadata:
   name: tle-dev-player-service-config
   namespace: tle-dev
 data:
-  DATABASE_URL: "postgres://postgres.databases:5432/tle_dev"
+  # Own schema: golang-migrate's schema_migrations cannot share
+  # tle_dev.public with notification-service's (postgres-job.yaml).
+  DATABASE_URL: "postgres://postgres.databases:5432/tle_dev?search_path=player"
   NATS_URL: "nats://tle-dev-nats.tle-dev.svc.cluster.local:4222"
   VALKEY_ADDR: "tle-dev-valkey.tle-dev.svc.cluster.local:6379"
 ---
