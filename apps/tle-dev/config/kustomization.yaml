@@ -16,6 +16,7 @@ resources:
   - edge-config.yaml
   - service-config.yaml
   - datastores.yaml
+  - jetstream-bootstrap.yaml
   - postgres-job.yaml
   - workloads.yaml
   - game-master.yaml

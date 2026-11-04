@@ -64,6 +64,12 @@ spec:
             - "yes"
             - --save
             - "60 1"
+            # The image default binds loopback only. NetworkPolicy supplies
+            # the cluster boundary, so listen on the pod interface.
+            - --bind
+            - 0.0.0.0
+            - --protected-mode
+            - "no"
           volumeMounts:
             - name: data
               mountPath: /data
