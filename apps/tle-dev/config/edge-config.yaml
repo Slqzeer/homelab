@@ -82,10 +82,14 @@ data:
   valkey-addr: "tle-dev-valkey.tle-dev.svc.cluster.local:6379"
   postgres-host: "postgres.databases.svc.cluster.local"
   # Ed25519 JWT verification key (config-keys.json: AUTH_JWT_ED25519_PUBLIC_KEY_PEM,
-  # secret: false, and METADATA_JWT_PUBLIC_KEY for metadata-service). Pinned
-  # from the TLE release before promotion; never `latest`-adjacent.
-  auth-jwt-ed25519-public-key-pem: >-
-    82aa8fe00c03e61c0d4d725b2803cb55ac005d292780b2df68d963313e975edc
+  # secret: false, and METADATA_JWT_PUBLIC_KEY for metadata-service). The
+  # services parse an SPKI PEM, so a bare hex key fails with "invalid key
+  # format". It is the public half of Vault homelab/tle-dev/auth
+  # AUTH_JWT_ED25519_PRIVATE_KEY_PEM; rotate both together.
+  auth-jwt-ed25519-public-key-pem: |
+    -----BEGIN PUBLIC KEY-----
+    MCowBQYDK2VwAyEA5J2fZ545EorGhDOkzivGwszmqyzhP65nArvVWuQdoHo=
+    -----END PUBLIC KEY-----
 ---
 # Edge Deployment placeholder. The product repository publishes the gateway
 # image per release; the runbook pins the real tag@digest before promotion.
