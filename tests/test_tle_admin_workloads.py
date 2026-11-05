@@ -176,17 +176,97 @@ class TleAdminWorkloadTests(unittest.TestCase):
             transformation = secret["spec"]["destination"]["transformation"]
             self.assertTrue(transformation["excludeRaw"])
 
-    def test_admin_namespace_starts_default_denied(self):
-        policies = self.load_documents("apps/tle-dev/config/admin-networkpolicy.yaml")
-        self.assertEqual(
-            {"default-deny-ingress", "default-deny-egress"},
-            {policy["metadata"]["name"] for policy in policies},
-        )
-        for policy in policies:
+    def test_admin_namespace_keeps_its_default_deny_baseline(self):
+        policies = {
+            policy["metadata"]["name"]: policy
+            for policy in self.load_documents("apps/tle-dev/config/admin-networkpolicy.yaml")
+        }
+        for name, policy_type in (
+            ("default-deny-ingress", "Ingress"),
+            ("default-deny-egress", "Egress"),
+        ):
+            spec = policies[name]["spec"]
+            self.assertEqual({}, spec["podSelector"])
+            self.assertEqual([policy_type], spec["policyTypes"])
+            self.assertNotIn("ingress", spec)
+            self.assertNotIn("egress", spec)
+        for policy in policies.values():
             self.assertEqual(ADMIN_NAMESPACE, policy["metadata"]["namespace"])
-            self.assertEqual({}, policy["spec"]["podSelector"])
-            self.assertNotIn("ingress", policy["spec"])
-            self.assertNotIn("egress", policy["spec"])
+
+    def test_admin_flows_are_exactly_the_configured_endpoints(self):
+        # (source app, destination namespace, destination app, port), issue #45.
+        expected = {
+            ("tle-dev-admin-audit-writer", "databases", "postgres", 5432),
+            ("tle-dev-projection-writer", "databases", "postgres", 5432),
+            ("tle-dev-projection-writer", "tle-dev", "tle-dev-nats", 4222),
+            ("tle-dev-internal-admin-gateway", ADMIN_NAMESPACE, "tle-dev-admin-audit-writer", 8095),
+            ("tle-dev-internal-admin-gateway", ADMIN_NAMESPACE, "tle-dev-projection-writer", 8120),
+            ("tle-dev-internal-admin-gateway", "tle-dev", "tle-dev-valkey", 6379),
+            ("tle-dev-internal-admin-gateway", "keycloak", "keycloak", 8080),
+            ("tle-dev-internal-ops-gateway", ADMIN_NAMESPACE, "tle-dev-admin-audit-writer", 8095),
+            ("tle-dev-internal-ops-gateway", "tle-dev", "tle-dev-valkey", 6379),
+            ("tle-dev-internal-ops-gateway", "tle-dev", "tle-dev-auth-service", 8080),
+            ("tle-dev-internal-ops-gateway", "tle-dev", "tle-dev-matchmaking-service", 8080),
+            ("tle-dev-internal-ops-gateway", "tle-dev", "tle-dev-game-master", 8082),
+        }
+        policy_files = (
+            "apps/tle-dev/config/admin-networkpolicy.yaml",
+            "apps/tle-dev/config/networkpolicy.yaml",
+            "platform/databases/postgres/config/networkpolicy.yaml",
+            "platform/keycloak/config/networkpolicy.yaml",
+        )
+        policies = [
+            policy
+            for path in policy_files
+            for policy in self.load_documents(path)
+            if policy["kind"] == "NetworkPolicy"
+        ]
+
+        def apps(selector):
+            labels = selector.get("matchLabels", {})
+            if "app" in labels:
+                return {labels["app"]}
+            for expression in selector.get("matchExpressions", []):
+                if expression["key"] == "app" and expression["operator"] == "In":
+                    return set(expression["values"])
+            return set()
+
+        def peers(peer_list, own_namespace):
+            for peer in peer_list:
+                namespace = (
+                    peer.get("namespaceSelector", {})
+                    .get("matchLabels", {})
+                    .get("kubernetes.io/metadata.name", own_namespace)
+                )
+                for app in apps(peer.get("podSelector", {})):
+                    yield namespace, app
+
+        def ports(rule):
+            return {port["port"] for port in rule.get("ports", [])}
+
+        egress, ingress = set(), set()
+        for policy in policies:
+            namespace = policy["metadata"]["namespace"]
+            selected = apps(policy["spec"]["podSelector"])
+            for rule in policy["spec"].get("egress", []):
+                if namespace != ADMIN_NAMESPACE:
+                    continue
+                for source in selected:
+                    for peer_namespace, peer_app in peers(rule.get("to", []), namespace):
+                        for port in ports(rule):
+                            egress.add((source, peer_namespace, peer_app, port))
+            for rule in policy["spec"].get("ingress", []):
+                for peer_namespace, peer_app in peers(rule.get("from", []), namespace):
+                    if peer_namespace != ADMIN_NAMESPACE:
+                        continue
+                    for destination in selected:
+                        for port in ports(rule):
+                            ingress.add((peer_app, namespace, destination, port))
+
+        self.assertEqual(expected, egress)
+        # Every admin egress grant is admitted on the far side, and no far
+        # side admits an admin workload the egress contract does not name.
+        self.assertEqual(expected, ingress)
 
     def test_workloads_use_restricted_distroless_identity(self):
         for deployment in self.resources_by_kind("Deployment").values():
