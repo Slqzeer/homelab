@@ -104,6 +104,37 @@ class TleAdminWorkloadTests(unittest.TestCase):
                 self.assertEqual(expected["hpa"][1], hpa["spec"]["maxReplicas"])
                 self.assertEqual(name, hpa["spec"]["scaleTargetRef"]["name"])
 
+    def test_admin_rollout_cannot_gate_the_player_facing_waves(self):
+        wave = lambda resource: int(
+            (resource["metadata"].get("annotations") or {}).get(
+                "argocd.argoproj.io/sync-wave", "0"
+            )
+        )
+        kustomization = self.load_documents("apps/tle-dev/config/kustomization.yaml")[0]
+        tle_dev_waves = [
+            wave(resource)
+            for name in kustomization["resources"]
+            if not name.startswith("admin-")
+            for resource in self.load_documents(f"apps/tle-dev/config/{name}")
+        ]
+        for kind in ("Deployment", "HorizontalPodAutoscaler"):
+            for name, resource in self.resources_by_kind(kind).items():
+                with self.subTest(kind=kind, name=name):
+                    self.assertGreater(wave(resource), max(tle_dev_waves))
+
+    def test_gateways_run_in_an_environment_v0_0_2_accepts(self):
+        deployments = self.resources_by_kind("Deployment")
+        for name, variable in (
+            ("tle-dev-internal-admin-gateway", "ADMIN_GATEWAY_ENV"),
+            ("tle-dev-internal-ops-gateway", "OPS_GATEWAY_ENV"),
+        ):
+            with self.subTest(name=name):
+                env = {
+                    item["name"]: item.get("value")
+                    for item in deployments[name]["spec"]["template"]["spec"]["containers"][0]["env"]
+                }
+                self.assertEqual("staging", env[variable])
+
     def test_admin_namespace_is_restricted_and_separate(self):
         namespaces = self.load_documents("bootstrap/namespaces/namespaces.yaml")
         namespace = next(
