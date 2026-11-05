@@ -79,6 +79,100 @@ class TleBlockerRepairTests(unittest.TestCase):
         self.assertIn("PING", init["command"][-1])
         self.assertEqual(["ALL"], init["securityContext"]["capabilities"]["drop"])
 
+    def test_minio_serves_metadata_and_nothing_else(self):
+        datastores = documents("datastores.yaml")
+        service = next(
+            item
+            for item in datastores
+            if item["kind"] == "Service"
+            and item["metadata"]["name"] == "tle-dev-minio"
+        )
+        stateful_set = next(
+            item
+            for item in datastores
+            if item["kind"] == "StatefulSet"
+            and item["metadata"]["name"] == "tle-dev-minio"
+        )
+        deployment = next(
+            item
+            for item in documents("workloads.yaml")
+            if item["kind"] == "Deployment"
+            and item["metadata"]["name"] == "tle-dev-metadata-service"
+        )
+        metadata_env = {
+            item["name"]: item
+            for item in deployment["spec"]["template"]["spec"]["containers"][0]["env"]
+        }
+        self.assertEqual(
+            "tle-dev-minio.tle-dev.svc.cluster.local:9000",
+            metadata_env["MINIO_ENDPOINT"]["value"],
+        )
+        self.assertEqual(9000, service["spec"]["ports"][0]["port"])
+
+        pod = stateful_set["spec"]["template"]["spec"]
+        container = pod["containers"][0]
+        self.assertRegex(container["image"], r":RELEASE\.[^@]+@sha256:[0-9a-f]{64}$")
+        self.assertTrue(pod["securityContext"]["runAsNonRoot"])
+        self.assertFalse(pod["automountServiceAccountToken"])
+        self.assertEqual(["ALL"], container["securityContext"]["capabilities"]["drop"])
+
+        # Server and client must read the same Vault pair, never a literal.
+        env = {item["name"]: item for item in container["env"]}
+        for server_key, client_key in (
+            ("MINIO_ROOT_USER", "MINIO_ACCESS_KEY"),
+            ("MINIO_ROOT_PASSWORD", "MINIO_SECRET_KEY"),
+        ):
+            self.assertEqual(
+                metadata_env[client_key]["valueFrom"],
+                env[server_key]["valueFrom"],
+            )
+        self.assertEqual("off", env["MINIO_BROWSER"]["value"])
+
+        policies = {
+            item["metadata"]["name"]: item
+            for item in documents("networkpolicy.yaml")
+            if item["kind"] == "NetworkPolicy"
+        }
+        self.assertEqual(
+            [
+                {
+                    "from": [
+                        {"podSelector": {"matchLabels": {"app": "tle-dev-metadata-service"}}}
+                    ],
+                    "ports": [{"protocol": "TCP", "port": 9000}],
+                }
+            ],
+            policies["tle-dev-minio-clients"]["spec"]["ingress"],
+        )
+        self.assertEqual(
+            [
+                {
+                    "to": [{"podSelector": {"matchLabels": {"app": "tle-dev-minio"}}}],
+                    "ports": [{"protocol": "TCP", "port": 9000}],
+                }
+            ],
+            policies["tle-dev-metadata-to-minio"]["spec"]["egress"],
+        )
+        # Nothing else in the namespace grants the MinIO pod a connection.
+        for name, policy in policies.items():
+            if "egress" in policy["spec"] and name != "tle-dev-dns-api":
+                self.assertNotEqual(
+                    {"app": "tle-dev-minio"},
+                    policy["spec"]["podSelector"].get("matchLabels"),
+                    name,
+                )
+
+        secret = next(
+            item
+            for item in documents("vault-secrets.yaml")
+            if item["metadata"]["name"] == "tle-dev-misc"
+            and item["kind"] == "VaultStaticSecret"
+        )
+        self.assertIn(
+            {"kind": "StatefulSet", "name": "tle-dev-minio"},
+            secret["spec"]["rolloutRestartTargets"],
+        )
+
     def test_only_game_master_can_reach_the_k3s_api_endpoint(self):
         policies = {
             item["metadata"]["name"]: item

@@ -19,7 +19,7 @@ re-vendor on each TLE release with `gh api repos/The-Last-Exam/server/...`).
 | Role manifest version | `1` (registry schema `1.3`) |
 | Identity headers | 26 headers + 5 prefixes (see `edge-config.yaml`) |
 | Public routes | 62 routes across 9 services (see `public-routes.json`) |
-| Object storage (S3 endpoint) | _open_: deploy MinIO in-cluster (`tle-dev` + PVC + Service + bucket job) or point `MINIO_ENDPOINT` at an external MinIO; then create the access pair in its console and seed `MINIO_*`. Blocks metadata-service's object-storage path (issue #52 pins `MINIO_ENDPOINT`/`MINIO_BUCKET` to the not-yet-deployed `tle-dev-minio` name so no further wiring change is needed once it exists). |
+| Object storage (S3 endpoint) | In-cluster `tle-dev-minio` (`datastores.yaml`, PVC `data-tle-dev-minio-0`), reachable only from metadata-service; metadata-service creates its own bucket. Upstream MinIO no longer publishes an image, so this pins the community fork `pgsty/minio` by digest. Generate the `MINIO_*` pair and seed it **before** the first boot; see the [ceremony](tle-dev-vault-ceremony.md). |
 | Non-secret service config | Per-service ConfigMaps in `service-config.yaml` carry only datastore addresses (test-enforced, `tests/test_tle_datastore_config.py`); every other required non-secret key (ports, `*_ENV`, tunables) is a literal container env value in `workloads.yaml` (issue #52). |
 | Datastore credential split | Complete in desired state: per-service ConfigMap addresses, credential-only VSO templates, and the `v0.0.1` configuration contract. |
 | Core service workloads | `auth-service`, `lobby-service`, `matchmaking-service`, `metadata-service`, `notification-service`, `player-service`, `social-service` declared in `workloads.yaml` (issue #52), each listening on 8080 for HTTP (see that file's header) regardless of its `.env.example` default port. `matchmaking-service` reaches the Game Master Service on gRPC `9100` and presents the dedicated matchmaking credential from VSO. |
@@ -182,8 +182,7 @@ no database mutation.
       Deployments to exercise. Issue #52 (this change) declares
       `auth-service`, `lobby-service`, `matchmaking-service`,
       `metadata-service`, `notification-service`, `player-service`, and
-      `social-service`; live rollout evidence is still outstanding --
-      `metadata-service` needs MinIO (see Object storage above). Game Master
+      `social-service`; live rollout evidence is still outstanding. Game Master
       is now declared by issue #44; its live registry and mutation acceptance
       remains pending the issue #48 game-pod environment described below.
 - [ ] On the first fresh-environment reconciliation, the metadata baseline hook

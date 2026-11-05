@@ -1,4 +1,4 @@
-# TLE-local Valkey + NATS (issue #2, ticket 4).
+# TLE-local Valkey + NATS (issue #2, ticket 4), and MinIO (end of this file).
 #
 # Single-node dev scope: 1 replica each, local-path PVCs. Valkey runs
 # append-only (cache/state the services address via VALKEY_ADDR); NATS runs
@@ -232,3 +232,140 @@ metadata:
   annotations:
     # Before the JetStream bootstrap hook (-1); see jetstream-bootstrap.yaml.
     argocd.argoproj.io/sync-wave: "-2"
+---
+# Object storage for metadata-service bundles. Same single-node dev scope as
+# Valkey and NATS, except that bundles are not reconstructible from elsewhere
+# once published, so the PVC is the copy that matters. metadata-service creates
+# its own bucket at startup (EnsureBucket), so no bucket job is needed.
+#
+# Image: upstream MinIO no longer publishes one. github.com/minio/minio is
+# archived and docker.io/minio/minio is gone, so this pins the community fork
+# pgsty/minio by digest. It keeps MinIO's binary, env vars and S3 API. The pod
+# has no egress and only metadata-service may reach it (networkpolicy.yaml),
+# which contains a third-party image; it is pinned, so it also stops receiving
+# fixes until someone bumps the digest.
+apiVersion: v1
+kind: Service
+metadata:
+  name: tle-dev-minio
+  namespace: tle-dev
+  labels:
+    app: tle-dev-minio
+spec:
+  selector:
+    app: tle-dev-minio
+  ports:
+    - name: s3
+      port: 9000
+      targetPort: s3
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: tle-dev-minio
+  namespace: tle-dev
+spec:
+  serviceName: tle-dev-minio
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tle-dev-minio
+  template:
+    metadata:
+      labels:
+        app: tle-dev-minio
+    spec:
+      serviceAccountName: tle-dev-minio
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: minio
+          image: >-
+            pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: s3
+              containerPort: 9000
+          args:
+            - server
+            - /data
+            - --address
+            - :9000
+            # This UID has no home directory for the default ~/.minio/certs.
+            - --certs-dir
+            - /tmp/certs
+          env:
+            # The pair metadata-service logs in with is the root pair: there
+            # is one client, and a second Vault identity would protect nothing.
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-misc-secrets
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-misc-secrets
+                  key: MINIO_SECRET_KEY
+            - name: MINIO_BROWSER
+              value: "off"
+            - name: MINIO_UPDATE
+              value: "off"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+          startupProbe:
+            httpGet:
+              path: /minio/health/live
+              port: s3
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: s3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: s3
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 25m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - # apiVersion/kind are required, not decorative; see the Valkey note above.
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 5Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tle-dev-minio
+  namespace: tle-dev

@@ -101,7 +101,10 @@ printing them if either is empty or they are equal.
 - `AUTH_JWT_ED25519_PRIVATE_KEY_PEM` (JWT signing key; pin its public
   half as `auth-jwt-ed25519-public-key-pem` in
   `apps/tle-dev/config/edge-config.yaml`)
-- `MINIO_ACCESS_KEY` + `MINIO_SECRET_KEY` (object storage)
+- `MINIO_ACCESS_KEY` + `MINIO_SECRET_KEY` (object storage). These are not issued
+  by anyone: generate them (`.env.tle-dev-misc.example`). `tle-dev-minio` uses
+  them as its root pair, so while they read `disabled` it would start with that
+  known value. Seed them before its first boot.
 
 Everything else stays `disabled` until you enable its provider (OAuth,
 APNs, FCM) — that is expected, not an error.

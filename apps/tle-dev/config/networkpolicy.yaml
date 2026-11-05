@@ -693,3 +693,45 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
+---
+# Only metadata-service reaches object storage. default-deny-egress stays in
+# force for the MinIO pod itself: it has no reason to open a connection.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-minio-clients
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchLabels:
+      app: tle-dev-minio
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-metadata-service
+      ports:
+        - protocol: TCP
+          port: 9000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-metadata-to-minio
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchLabels:
+      app: tle-dev-metadata-service
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-minio
+      ports:
+        - protocol: TCP
+          port: 9000

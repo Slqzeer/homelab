@@ -33,11 +33,6 @@
 # Database user/password pairs come from tle-dev-data-secrets
 # (vault-secrets.yaml), mapped per service onto the plain DATABASE_USER /
 # DATABASE_PASSWORD names each service's code reads.
-#
-# Known gap (tracked as a Risk in PR #52, not blocking static validation):
-#   - metadata-service's MINIO_ENDPOINT points at a MinIO Service that
-#     does not exist yet -- this is the pre-existing "open" object
-#     storage item already flagged in docs/runbooks/tle-dev-recovery.md.
 ---
 # ------------------------------- auth-service -------------------------------
 apiVersion: v1
@@ -580,9 +575,6 @@ spec:
                 configMapKeyRef:
                   name: tle-dev-edge-config
                   key: auth-jwt-ed25519-public-key-pem
-            # MinIO is not deployed in this cluster yet (pre-existing open
-            # item, docs/runbooks/tle-dev-recovery.md); this address will
-            # not resolve until that follow-up lands. See Risks.
             - name: MINIO_ENDPOINT
               value: "tle-dev-minio.tle-dev.svc.cluster.local:9000"
             - name: MINIO_BUCKET
