@@ -83,6 +83,18 @@ spec:
           podSelector:
             matchLabels:
               app.kubernetes.io/part-of: tle-dev-quest
+        # The two tle-admin-dev writers (#45); the gateways never open a
+        # database connection.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tle-admin-dev
+          podSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values:
+                  - tle-dev-admin-audit-writer
+                  - tle-dev-projection-writer
         # Penpot's backend, and only it: the frontend, exporter and MCP
         # server never open a database connection. Its database Job runs
         # in this namespace and is covered by `job: postgres-client` above.
