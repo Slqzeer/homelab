@@ -23,8 +23,8 @@ spec:
 ---
 # Issue #45: the selected flows. Peers are named per workload, never by
 # namespace alone, and every cross-namespace grant has its matching ingress
-# rule on the far side (networkpolicy.yaml, game-master.yaml, and the
-# postgres and keycloak fences). The service configuration is authoritative:
+# rule on the far side (networkpolicy.yaml and the postgres fence). The
+# service configuration is authoritative:
 # only endpoints the v0.0.2 workloads are configured to call are opened.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

@@ -212,6 +212,33 @@ spec:
         - protocol: TCP
           port: 8080
 ---
+# Same ownership as tle-dev-keycloak-from-auth: a TLE client's grant ships with
+# TLE, not in the Keycloak platform fence. The admin gateway's
+# KEYCLOAK_INTERNAL_BASE_URL only; the ops gateway runs the memory session
+# adapter (#45).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-admin-dev-keycloak-from-admin-gateway
+  namespace: keycloak
+spec:
+  podSelector:
+    matchLabels:
+      app: keycloak
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tle-admin-dev
+          podSelector:
+            matchLabels:
+              app: tle-dev-internal-admin-gateway
+      ports:
+        - protocol: TCP
+          port: 8080
+---
 # Services -> shared Postgres 5432, local Valkey 6379, local NATS 4222.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

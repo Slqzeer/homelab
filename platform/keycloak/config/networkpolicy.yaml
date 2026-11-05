@@ -120,14 +120,6 @@ spec:
           podSelector:
             matchLabels:
               app.kubernetes.io/name: penpot-backend
-        # TLE operator sessions: KEYCLOAK_INTERNAL_BASE_URL of the admin
-        # gateway only; the ops gateway runs the memory session adapter (#45).
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: tle-admin-dev
-          podSelector:
-            matchLabels:
-              app: tle-dev-internal-admin-gateway
       ports:
         - protocol: TCP
           port: 8080

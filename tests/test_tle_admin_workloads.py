@@ -213,7 +213,6 @@ class TleAdminWorkloadTests(unittest.TestCase):
             "apps/tle-dev/config/admin-networkpolicy.yaml",
             "apps/tle-dev/config/networkpolicy.yaml",
             "platform/databases/postgres/config/networkpolicy.yaml",
-            "platform/keycloak/config/networkpolicy.yaml",
         )
         policies = [
             policy
