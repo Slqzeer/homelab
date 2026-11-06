@@ -116,6 +116,9 @@ PersistentVolume directories under `/srv/kubernetes/storage` inherited the same
 ACL. Vault, PostgreSQL, Prometheus and Grafana all run non-root and mount PVCs,
 so the same fault would have resurfaced at plan phases 16, 18, 22 and 23.
 
+The Docker and system containerd roots also live under `/srv`, so they carry the
+same risk. See the [host Docker storage runbook](runbooks/host-docker-storage.md).
+
 ---
 
 ## 2. Cluster DNS dead: CoreDNS in CrashLoopBackOff
