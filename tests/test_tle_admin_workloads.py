@@ -50,11 +50,11 @@ EXPECTED = {
             "ghcr.io/the-last-exam/projection-writer:v0.0.2@sha256:"
             "8287bdcb383c388b7bba1010c5cdfa20082c87e154a3c25460e016231a2a65b1"
         ),
-        "replicas": 2,
+        "replicas": 1,
         "probes": (None, "/healthz", "/readyz"),
         "requests": {"cpu": "50m", "memory": "64Mi"},
         "limits": {"cpu": "250m", "memory": "256Mi"},
-        "hpa": (2, 5),
+        "hpa": (1, 1),
     },
 }
 
@@ -162,6 +162,12 @@ class TleAdminWorkloadTests(unittest.TestCase):
 
         self.assertIn("SET ROLE tle_dev;", script)
         self.assertIn("CREATE TABLE IF NOT EXISTS admin_control_projections", script)
+
+    def test_projection_writer_never_runs_two_consumers_at_once(self):
+        writer = self.resources_by_kind("Deployment")["tle-dev-projection-writer"]
+
+        self.assertEqual(1, writer["spec"]["replicas"])
+        self.assertEqual("Recreate", writer["spec"]["strategy"]["type"])
 
     def test_gateways_run_in_an_environment_v0_0_2_accepts(self):
         deployments = self.resources_by_kind("Deployment")
