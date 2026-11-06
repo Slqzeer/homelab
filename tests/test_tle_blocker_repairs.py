@@ -111,6 +111,7 @@ class TleBlockerRepairTests(unittest.TestCase):
             streams[name] = subjects
         self.assertEqual(
             {
+                "ADMIN_ACTIONS": "admin.actions.>",
                 "AUTH": "auth.>",
                 "GAME_PLAYER": "game.>",
                 "LOBBY": "lobby.player.>",

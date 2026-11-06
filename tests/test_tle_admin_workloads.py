@@ -116,11 +116,33 @@ class TleAdminWorkloadTests(unittest.TestCase):
             for name in kustomization["resources"]
             if not name.startswith("admin-")
             for resource in self.load_documents(f"apps/tle-dev/config/{name}")
+            if resource["metadata"]["name"] != "tle-dev-metadata-service"
         ]
         for kind in ("Deployment", "HorizontalPodAutoscaler"):
             for name, resource in self.resources_by_kind(kind).items():
                 with self.subTest(kind=kind, name=name):
                     self.assertGreater(wave(resource), max(tle_dev_waves))
+
+    def test_metadata_without_minio_cannot_gate_any_other_wave(self):
+        wave = lambda resource: int(
+            (resource["metadata"].get("annotations") or {}).get(
+                "argocd.argoproj.io/sync-wave", "0"
+            )
+        )
+        kustomization = self.load_documents("apps/tle-dev/config/kustomization.yaml")[0]
+        resources = [
+            resource
+            for name in kustomization["resources"]
+            for resource in self.load_documents(f"apps/tle-dev/config/{name}")
+        ]
+        metadata = next(
+            resource
+            for resource in resources
+            if resource["kind"] == "Deployment"
+            and resource["metadata"]["name"] == "tle-dev-metadata-service"
+        )
+        others = [wave(resource) for resource in resources if resource is not metadata]
+        self.assertGreater(wave(metadata), max(others))
 
     def test_gateways_run_in_an_environment_v0_0_2_accepts(self):
         deployments = self.resources_by_kind("Deployment")
