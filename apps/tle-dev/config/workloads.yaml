@@ -573,8 +573,16 @@ spec:
             - configMapRef:
                 name: tle-dev-metadata-service-config
           env:
+            # Issue #59: this is the production Metadata Service deployment,
+            # so METADATA_ENV must not be "dev" -- "dev" is the server's
+            # explicit local-development escape hatch that accepts gRPC
+            # callers even without METADATA_GRPC_INTERNAL_TOKEN. The token
+            # below is already non-empty, so the gRPC internal-token
+            # interceptor already rejects unauthenticated callers; this value
+            # also satisfies The-Last-Exam/server#200's upcoming startup
+            # check once a release containing it is deployed.
             - name: METADATA_ENV
-              value: "dev"
+              value: "prod"
             - name: METADATA_PORT
               value: "8080"
             - name: METADATA_GRPC_PORT
