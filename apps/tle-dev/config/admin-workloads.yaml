@@ -395,9 +395,10 @@ spec:
             - name: MATCHMAKING_CONTROL_URL
               value: >-
                 http://tle-dev-matchmaking-service.tle-dev.svc.cluster.local:8080/healthz
+            # auth-service serves /health/live, not /healthz like the others.
             - name: AUTH_CONTROL_URL
               value: >-
-                http://tle-dev-auth-service.tle-dev.svc.cluster.local:8080/healthz
+                http://tle-dev-auth-service.tle-dev.svc.cluster.local:8080/health/live
             - name: AUDIT_WRITER_URL
               value: >-
                 http://tle-dev-admin-audit-writer.tle-admin-dev.svc.cluster.local:8095

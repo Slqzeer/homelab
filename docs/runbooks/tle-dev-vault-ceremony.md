@@ -59,7 +59,8 @@ script):
   namespace-local `ghcr-pull` docker config.
 - Generated values (random, server-side, alphanumeric so they compose
   into `postgres://` URLs): `password`, `metadata_password`,
-  `quest_password` in `homelab/tle-dev/data`; `CSRF_SECRET` (48 chars),
+  `quest_password` in `homelab/tle-dev/data`; `CSRF_SECRET` (hex, 32 raw
+  bytes, which `internal-admin-gateway` decodes at startup),
   `METADATA_GRPC_INTERNAL_TOKEN`, `NOTIFICATION_WEBHOOK_SIGNING_SECRET`
   and the distinct 48-character `GAME_MASTER_POD_REGISTRY_CREDENTIAL`
   and `GAME_MASTER_MATCHMAKING_CREDENTIAL` in `homelab/tle-dev/misc`;
