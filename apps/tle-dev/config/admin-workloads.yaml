@@ -487,7 +487,12 @@ metadata:
     app: tle-dev-projection-writer
     app-group: tle-dev-admin-service
 spec:
-  replicas: 2
+  # v0.0.2 holds a durable push consumer with no queue group, and NATS allows
+  # it one subscriber: a second pod exits with "consumer is already bound to
+  # a subscription". Recreate releases it before the new pod subscribes.
+  replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: tle-dev-projection-writer
@@ -587,8 +592,8 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: tle-dev-projection-writer
-  minReplicas: 2
-  maxReplicas: 5
+  minReplicas: 1
+  maxReplicas: 1
   metrics:
     - type: Resource
       resource:
