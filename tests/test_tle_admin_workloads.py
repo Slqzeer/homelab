@@ -152,6 +152,17 @@ class TleAdminWorkloadTests(unittest.TestCase):
         }
         self.assertTrue(environment["AUTH_CONTROL_URL"].strip().endswith(":8080/health/live"))
 
+    def test_database_hook_creates_the_projection_writer_table(self):
+        job = next(
+            resource
+            for resource in self.load_documents("apps/tle-dev/config/postgres-job.yaml")
+            if resource["kind"] == "Job"
+        )
+        script = job["spec"]["template"]["spec"]["containers"][0]["command"][2]
+
+        self.assertIn("SET ROLE tle_dev;", script)
+        self.assertIn("CREATE TABLE IF NOT EXISTS admin_control_projections", script)
+
     def test_gateways_run_in_an_environment_v0_0_2_accepts(self):
         deployments = self.resources_by_kind("Deployment")
         for name, variable in (

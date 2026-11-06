@@ -168,6 +168,30 @@ spec:
               # selects it with search_path (service-config.yaml).
               psql -v ON_ERROR_STOP=1 -d tle_dev -c \
                 "CREATE SCHEMA IF NOT EXISTS player AUTHORIZATION tle_dev"
+              # projection-writer v0.0.2 packages no migration runner, so its
+              # migrations/001_create_projection_tables.up.sql is applied here.
+              # SET ROLE keeps tle_dev, its database user, as the table owner.
+              psql -v ON_ERROR_STOP=1 -d tle_dev --single-transaction <<'SQL'
+              SET ROLE tle_dev;
+              CREATE TABLE IF NOT EXISTS admin_control_projections (
+                  id                          BIGSERIAL PRIMARY KEY,
+                  control_id                  TEXT        NOT NULL,
+                  operation_id                TEXT        NOT NULL,
+                  service_id                  TEXT        NOT NULL,
+                  source_event_id             TEXT        NOT NULL,
+                  confidence_state            TEXT        NOT NULL,
+                  event_timestamp             TIMESTAMPTZ NOT NULL,
+                  consumer_lag_at_observation INTERVAL,
+                  raw_payload_hash            TEXT        NOT NULL,
+                  created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                  CONSTRAINT uq_projection_key
+                      UNIQUE (control_id, service_id, source_event_id)
+              );
+              CREATE INDEX IF NOT EXISTS idx_projections_control_service
+                  ON admin_control_projections (control_id, service_id);
+              CREATE INDEX IF NOT EXISTS idx_projections_created_at
+                  ON admin_control_projections (created_at);
+              SQL
               echo "done"
           resources:
             requests:
