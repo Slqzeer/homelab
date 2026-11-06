@@ -526,7 +526,11 @@ metadata:
   name: tle-dev-metadata-service
   namespace: tle-dev
   annotations:
-    argocd.argoproj.io/sync-wave: "2"
+    # Last wave: v0.0.2 exits without MinIO, which tle-dev does not deploy, and
+    # a failed wave stops every later one. Nothing here waits for this service.
+    # Back to wave 2 once the MinIO removal ships
+    # (game-development-knowledge#57).
+    argocd.argoproj.io/sync-wave: "5"
   labels:
     app: tle-dev-metadata-service
     app-group: tle-dev-service
