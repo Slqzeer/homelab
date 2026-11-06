@@ -146,6 +146,7 @@ class TleBlockerRepairTests(unittest.TestCase):
         self.assertIn("stream info", command)
         self.assertIn("stream edit", command)
         self.assertIn("stream add", command)
+        self.assertIn("--dupe-window 2m", command)
 
         policies = {
             item["metadata"]["name"]: item
@@ -172,6 +173,27 @@ class TleBlockerRepairTests(unittest.TestCase):
         kustomization = documents("kustomization.yaml")[0]
         self.assertIn("jetstream-bootstrap.yaml", kustomization["resources"])
 
+    def test_matchmaking_match_ready_stream_has_a_non_zero_duplicate_window(self):
+        # notification.match_ready publishes carry deterministic Nats-Msg-Id
+        # values; the duplicate window is what makes retry-driven
+        # republication safe (Slqzeer/homelab#60).
+        resources = documents("jetstream-bootstrap.yaml")
+        by_kind = {item["kind"]: item for item in resources}
+        streams = {}
+        for line in by_kind["ConfigMap"]["data"]["streams.tsv"].splitlines():
+            name, subjects = line.split("\t")
+            streams[name] = subjects
+        self.assertIn("MATCHMAKING_MATCH_READY", streams)
+        self.assertEqual("notification.match_ready", streams["MATCHMAKING_MATCH_READY"])
+
+        command = by_kind["Job"]["spec"]["template"]["spec"]["containers"][0][
+            "command"
+        ][2]
+        add_clause = command.split("stream add", 1)[1]
+        edit_clause = command.split("stream edit", 1)[1]
+        self.assertRegex(add_clause, r"--dupe-window\s+2m")
+        self.assertRegex(edit_clause, r"--dupe-window\s+2m")
+        self.assertNotRegex(add_clause, r"--dupe-window\s+0")
 
     def test_streams_exist_before_the_services_that_wait_for_them(self):
         # Argo waits for each sync wave to be healthy before the next. A

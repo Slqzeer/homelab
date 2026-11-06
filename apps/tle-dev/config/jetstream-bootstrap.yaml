@@ -3,6 +3,11 @@
 # rollout-discovered party.* and metadata.version.published contracts. SOCIAL
 # includes social.block.created and social.block.removed. ADMIN_ACTIONS is what
 # projection-writer subscribes to; v0.0.2 has no publisher for it yet.
+# MATCHMAKING_MATCH_READY carries notification.match_ready: matchmaking-service
+# publishes each player's match-ready notification with a deterministic
+# Nats-Msg-Id and relies on the stream's duplicate window to deduplicate
+# partial-publication retries, so the window is pinned explicitly here rather
+# than left to the server's implicit default (Slqzeer/homelab#60).
 #
 # Sync waves: Argo waits for every resource of a wave to be healthy before the
 # next one. The services that consume these streams (wave 0) cannot become
@@ -89,7 +94,7 @@ spec:
                 [ -n "$name" ] || continue
                 if nats --server "$server" stream info "$name" >/dev/null 2>&1; then
                   nats --server "$server" stream edit "$name" \
-                    --subjects "$subjects" --force
+                    --subjects "$subjects" --dupe-window 2m --force
                 else
                   nats --server "$server" stream add "$name" \
                     --subjects "$subjects" \
@@ -97,6 +102,7 @@ spec:
                     --retention limits \
                     --discard old \
                     --max-age 24h \
+                    --dupe-window 2m \
                     --defaults
                 fi
               done </etc/tle-jetstream/streams.tsv
