@@ -1,0 +1,67 @@
+# Seed the packaged metadata baseline once the database bootstrap has completed.
+# The command is idempotent: a fresh database receives one active version, while
+# an existing active version is preserved. Wave 1 follows the wave-0 database
+# creation hook; the metadata, matchmaking, and Game Master Deployments wait at
+# wave 2 so matches cannot start before this hook succeeds.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tle-dev-metadata-seed-baseline
+  namespace: tle-dev
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app: tle-dev-metadata-seed-baseline
+    spec:
+      serviceAccountName: tle-dev-metadata-service
+      automountServiceAccountToken: false
+      restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: ghcr-pull
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: metadata-seed-baseline
+          image: >-
+            ghcr.io/the-last-exam/metadata-service:v0.0.2@sha256:b62fb8e977e4c7a491583456f11d857ad4f9a6d62ec1e85eb3ad38fbfcab788f
+          imagePullPolicy: IfNotPresent
+          command:
+            - /usr/local/bin/metadata-seed-baseline
+          envFrom:
+            - configMapRef:
+                name: tle-dev-metadata-service-config
+          env:
+            - name: DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: METADATA_DATABASE_USER
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-data-secrets
+                  key: METADATA_DATABASE_PASSWORD
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

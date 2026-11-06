@@ -1,7 +1,8 @@
 # Reconcile the JetStream streams required by the pinned TLE release. The
 # product deploy-info supplies the release set; PARTY and METADATA cover the
 # rollout-discovered party.* and metadata.version.published contracts. SOCIAL
-# includes social.block.created and social.block.removed.
+# includes social.block.created and social.block.removed. ADMIN_ACTIONS is what
+# projection-writer subscribes to; v0.0.2 has no publisher for it yet.
 #
 # Sync waves: Argo waits for every resource of a wave to be healthy before the
 # next one. The services that consume these streams (wave 0) cannot become
@@ -17,6 +18,7 @@ metadata:
     argocd.argoproj.io/sync-wave: "-1"
 data:
   streams.tsv: |
+    ADMIN_ACTIONS	admin.actions.>
     AUTH	auth.>
     GAME_PLAYER	game.>
     LOBBY	lobby.player.>

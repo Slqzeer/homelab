@@ -4,6 +4,7 @@
 # environment that isolation boundary is `tle-admin-dev`; it is deliberately
 # separate from the player-facing `tle-dev` namespace. A default-deny baseline
 # lands here; issue #45 adds the explicit cross-namespace NetworkPolicies.
+# Deployments and HPAs sync in wave 4, after every tle-dev wave.
 #
 # Images are pinned from The-Last-Exam/server release v0.0.2, publish-images
 # run 40263029044 (artifact image-record-v0.0.2/images.json).
@@ -35,6 +36,10 @@ kind: Deployment
 metadata:
   name: tle-dev-admin-audit-writer
   namespace: tle-admin-dev
+  annotations:
+    # After every tle-dev wave: nothing there depends on admin, so admin
+    # health (pending #45) must not gate player-facing rollouts.
+    argocd.argoproj.io/sync-wave: "4"
   labels:
     app: tle-dev-admin-audit-writer
     app-group: tle-dev-admin-service
@@ -129,6 +134,10 @@ kind: HorizontalPodAutoscaler
 metadata:
   name: tle-dev-admin-audit-writer
   namespace: tle-admin-dev
+  annotations:
+    # After every tle-dev wave: nothing there depends on admin, so admin
+    # health (pending #45) must not gate player-facing rollouts.
+    argocd.argoproj.io/sync-wave: "4"
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
@@ -171,6 +180,10 @@ kind: Deployment
 metadata:
   name: tle-dev-internal-admin-gateway
   namespace: tle-admin-dev
+  annotations:
+    # After every tle-dev wave: nothing there depends on admin, so admin
+    # health (pending #45) must not gate player-facing rollouts.
+    argocd.argoproj.io/sync-wave: "4"
   labels:
     app: tle-dev-internal-admin-gateway
     app-group: tle-dev-admin-service
@@ -213,8 +226,9 @@ spec:
             - configMapRef:
                 name: tle-dev-internal-admin-gateway-config
           env:
+            # v0.0.2 accepts only staging or production; tle-dev is staging.
             - name: ADMIN_GATEWAY_ENV
-              value: dev
+              value: staging
             - name: ADMIN_GATEWAY_LISTEN_ADDR
               value: ":8100"
             - name: AUDIT_WRITER_URL
@@ -276,6 +290,10 @@ kind: HorizontalPodAutoscaler
 metadata:
   name: tle-dev-internal-admin-gateway
   namespace: tle-admin-dev
+  annotations:
+    # After every tle-dev wave: nothing there depends on admin, so admin
+    # health (pending #45) must not gate player-facing rollouts.
+    argocd.argoproj.io/sync-wave: "4"
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
@@ -318,6 +336,10 @@ kind: Deployment
 metadata:
   name: tle-dev-internal-ops-gateway
   namespace: tle-admin-dev
+  annotations:
+    # After every tle-dev wave: nothing there depends on admin, so admin
+    # health (pending #45) must not gate player-facing rollouts.
+    argocd.argoproj.io/sync-wave: "4"
   labels:
     app: tle-dev-internal-ops-gateway
     app-group: tle-dev-admin-service
@@ -360,8 +382,9 @@ spec:
             - configMapRef:
                 name: tle-dev-internal-ops-gateway-config
           env:
+            # v0.0.2 accepts only staging or production; tle-dev is staging.
             - name: OPS_GATEWAY_ENV
-              value: dev
+              value: staging
             - name: OPS_GATEWAY_LISTEN_ADDR
               value: ":8110"
             - name: OPS_GATEWAY_TOOL_ID
@@ -372,9 +395,10 @@ spec:
             - name: MATCHMAKING_CONTROL_URL
               value: >-
                 http://tle-dev-matchmaking-service.tle-dev.svc.cluster.local:8080/healthz
+            # auth-service serves /health/live, not /healthz like the others.
             - name: AUTH_CONTROL_URL
               value: >-
-                http://tle-dev-auth-service.tle-dev.svc.cluster.local:8080/healthz
+                http://tle-dev-auth-service.tle-dev.svc.cluster.local:8080/health/live
             - name: AUDIT_WRITER_URL
               value: >-
                 http://tle-dev-admin-audit-writer.tle-admin-dev.svc.cluster.local:8095
@@ -409,6 +433,10 @@ kind: HorizontalPodAutoscaler
 metadata:
   name: tle-dev-internal-ops-gateway
   namespace: tle-admin-dev
+  annotations:
+    # After every tle-dev wave: nothing there depends on admin, so admin
+    # health (pending #45) must not gate player-facing rollouts.
+    argocd.argoproj.io/sync-wave: "4"
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
@@ -451,11 +479,20 @@ kind: Deployment
 metadata:
   name: tle-dev-projection-writer
   namespace: tle-admin-dev
+  annotations:
+    # After every tle-dev wave: nothing there depends on admin, so admin
+    # health (pending #45) must not gate player-facing rollouts.
+    argocd.argoproj.io/sync-wave: "4"
   labels:
     app: tle-dev-projection-writer
     app-group: tle-dev-admin-service
 spec:
-  replicas: 2
+  # v0.0.2 holds a durable push consumer with no queue group, and NATS allows
+  # it one subscriber: a second pod exits with "consumer is already bound to
+  # a subscription". Recreate releases it before the new pod subscribes.
+  replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: tle-dev-projection-writer
@@ -546,13 +583,17 @@ kind: HorizontalPodAutoscaler
 metadata:
   name: tle-dev-projection-writer
   namespace: tle-admin-dev
+  annotations:
+    # After every tle-dev wave: nothing there depends on admin, so admin
+    # health (pending #45) must not gate player-facing rollouts.
+    argocd.argoproj.io/sync-wave: "4"
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
     name: tle-dev-projection-writer
-  minReplicas: 2
-  maxReplicas: 5
+  minReplicas: 1
+  maxReplicas: 1
   metrics:
     - type: Resource
       resource:

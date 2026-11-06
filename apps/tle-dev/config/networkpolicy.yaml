@@ -212,6 +212,33 @@ spec:
         - protocol: TCP
           port: 8080
 ---
+# Same ownership as tle-dev-keycloak-from-auth: a TLE client's grant ships with
+# TLE, not in the Keycloak platform fence. The admin gateway's
+# KEYCLOAK_INTERNAL_BASE_URL only; the ops gateway runs the memory session
+# adapter (#45).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-admin-dev-keycloak-from-admin-gateway
+  namespace: keycloak
+spec:
+  podSelector:
+    matchLabels:
+      app: keycloak
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tle-admin-dev
+          podSelector:
+            matchLabels:
+              app: tle-dev-internal-admin-gateway
+      ports:
+        - protocol: TCP
+          port: 8080
+---
 # Services -> shared Postgres 5432, local Valkey 6379, local NATS 4222.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -253,6 +280,29 @@ spec:
 # Quest roles -> the two state backends they use. Only quest-api carries the
 # generic service-group label because it is the sole player-facing role; this
 # separate selector keeps the four worker roles unreachable from the edge.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-metadata-bootstrap-to-postgres
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchLabels:
+      app: tle-dev-metadata-seed-baseline
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: databases
+          podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -309,6 +359,19 @@ spec:
         - podSelector:
             matchLabels:
               role: game-pod
+        # Operator-session store for the tle-admin-dev gateways (#45).
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tle-admin-dev
+          podSelector:
+            matchLabels:
+              app: tle-dev-internal-admin-gateway
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tle-admin-dev
+          podSelector:
+            matchLabels:
+              app: tle-dev-internal-ops-gateway
       ports:
         - protocol: TCP
           port: 6379
@@ -344,6 +407,13 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/part-of: tle-dev-quest
+        # ADMIN_ACTIONS consumer in tle-admin-dev (#45).
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tle-admin-dev
+          podSelector:
+            matchLabels:
+              app: tle-dev-projection-writer
       ports:
         - protocol: TCP
           port: 4222
@@ -494,9 +564,45 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/component: ops-job
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tle-admin-dev
+          podSelector:
+            matchLabels:
+              app: tle-dev-internal-ops-gateway
       ports:
         - protocol: TCP
           port: 8082
+---
+# Ops gateway control calls (#45, HTTP only per #51): AUTH_CONTROL_URL and
+# MATCHMAKING_CONTROL_URL. tle-dev-edge-to-services already admits the edge
+# on 8080; this adds only the ops gateway, only on these two services.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-ops-gateway-control
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - tle-dev-auth-service
+          - tle-dev-matchmaking-service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tle-admin-dev
+          podSelector:
+            matchLabels:
+              app: tle-dev-internal-ops-gateway
+      ports:
+        - protocol: TCP
+          port: 8080
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

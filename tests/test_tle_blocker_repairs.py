@@ -54,6 +54,31 @@ class TleBlockerRepairTests(unittest.TestCase):
             r"-d tle_dev -c \\\s+\"CREATE SCHEMA IF NOT EXISTS player AUTHORIZATION tle_dev\"",
         )
 
+    def test_matchmaking_waits_for_valkey_before_its_one_shot_dial(self):
+        # v0.0.2 caches its first Valkey dial error forever; a new pod's
+        # first packets can precede NetworkPolicy admission of its IP.
+        deployment = next(
+            item
+            for item in documents("workloads.yaml")
+            if item["kind"] == "Deployment"
+            and item["metadata"]["name"] == "tle-dev-matchmaking-service"
+        )
+        spec = deployment["spec"]["template"]["spec"]
+        init, = spec["initContainers"]
+        valkey = next(
+            item
+            for item in documents("datastores.yaml")
+            if item["kind"] == "StatefulSet"
+            and item["metadata"]["name"] == "tle-dev-valkey"
+        )
+        self.assertEqual(
+            valkey["spec"]["template"]["spec"]["containers"][0]["image"],
+            init["image"],
+        )
+        self.assertIn("tle-dev-valkey.tle-dev.svc.cluster.local", init["command"][-1])
+        self.assertIn("PING", init["command"][-1])
+        self.assertEqual(["ALL"], init["securityContext"]["capabilities"]["drop"])
+
     def test_only_game_master_can_reach_the_k3s_api_endpoint(self):
         policies = {
             item["metadata"]["name"]: item
@@ -86,6 +111,7 @@ class TleBlockerRepairTests(unittest.TestCase):
             streams[name] = subjects
         self.assertEqual(
             {
+                "ADMIN_ACTIONS": "admin.actions.>",
                 "AUTH": "auth.>",
                 "GAME_PLAYER": "game.>",
                 "LOBBY": "lobby.player.>",
