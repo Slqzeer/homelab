@@ -144,6 +144,14 @@ class TleAdminWorkloadTests(unittest.TestCase):
         others = [wave(resource) for resource in resources if resource is not metadata]
         self.assertGreater(wave(metadata), max(others))
 
+    def test_ops_gateway_probes_auth_on_a_route_it_serves(self):
+        gateway = self.resources_by_kind("Deployment")["tle-dev-internal-ops-gateway"]
+        environment = {
+            variable["name"]: variable.get("value")
+            for variable in gateway["spec"]["template"]["spec"]["containers"][0]["env"]
+        }
+        self.assertTrue(environment["AUTH_CONTROL_URL"].strip().endswith(":8080/health/live"))
+
     def test_gateways_run_in_an_environment_v0_0_2_accepts(self):
         deployments = self.resources_by_kind("Deployment")
         for name, variable in (

@@ -710,6 +710,11 @@ tle_generate_base64() {
   # 32-byte XChaCha20-Poly1305 key, never composed into a postgres:// URL.
   head -c "$1" /dev/urandom | base64 | tr -d '\n' >"$TLE_VAL"
 }
+tle_generate_hex() {
+  # $1 = raw byte length. internal-admin-gateway hex-decodes CSRF_SECRET and
+  # exits at startup on anything else.
+  head -c "$1" /dev/urandom | od -An -tx1 | tr -d ' \n' >"$TLE_VAL"
+}
 tle_assert_distinct_game_master_credentials() {
   vault_optional_get homelab/tle-dev/misc \
     GAME_MASTER_POD_REGISTRY_CREDENTIAL "$TLE_POD_CREDENTIAL" || exit 1
@@ -733,7 +738,9 @@ for f in password metadata_password quest_password; do
   tle_generate 32
   tle_ensure_field homelab/tle-dev/data "$f" "generated"
 done
-for spec in "CSRF_SECRET 48" "METADATA_GRPC_INTERNAL_TOKEN 32" \
+tle_generate_hex 32
+tle_ensure_field homelab/tle-dev/misc CSRF_SECRET "generated"
+for spec in "METADATA_GRPC_INTERNAL_TOKEN 32" \
   "NOTIFICATION_WEBHOOK_SIGNING_SECRET 32" \
   "GAME_MASTER_POD_REGISTRY_CREDENTIAL 48" \
   "GAME_MASTER_MATCHMAKING_CREDENTIAL 48"; do
