@@ -1,0 +1,159 @@
+# WebSocket terminator for the player lobby and assigned game pods.
+# The image digest comes from the v0.0.2 publish-images run 40263029044.
+apiVersion: v1
+kind: Service
+metadata:
+  name: tle-dev-wsterminator
+  namespace: tle-dev
+  labels:
+    app: tle-dev-wsterminator
+spec:
+  selector:
+    app: tle-dev-wsterminator
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tle-dev-wsterminator
+  namespace: tle-dev
+  labels:
+    app: tle-dev-wsterminator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tle-dev-wsterminator
+  template:
+    metadata:
+      labels:
+        app: tle-dev-wsterminator
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: wsterminator
+          image: >-
+            ghcr.io/the-last-exam/wsterminator:v0.0.2@sha256:6aa61781d89a621a312333479dbe3a7511046b0b4d863432e44eff29795eec19
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: tle-dev-wsterminator-config
+          env:
+            - name: PORT
+              value: "8080"
+            - name: JWKS_ENDPOINT
+              value: >-
+                http://tle-dev-auth-service.tle-dev.svc.cluster.local:8080/.well-known/jwks.json
+            - name: LOBBY_SERVICE_ADDR
+              value: "ws://tle-dev-lobby-service.tle-dev.svc.cluster.local:8080"
+            - name: GAME_MASTER_URL
+              value: "http://tle-dev-game-master.tle-dev.svc.cluster.local:8082"
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-wsterminator-ingress
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchLabels:
+      app: tle-dev-wsterminator
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-edge
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-wsterminator-egress
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchLabels:
+      app: tle-dev-wsterminator
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-auth-service
+        - podSelector:
+            matchLabels:
+              app: tle-dev-lobby-service
+        - podSelector:
+            matchLabels:
+              role: game-pod
+      ports:
+        - protocol: TCP
+          port: 8080
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-game-master
+      ports:
+        - protocol: TCP
+          port: 8082
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-nats
+      ports:
+        - protocol: TCP
+          port: 4222
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-valkey
+      ports:
+        - protocol: TCP
+          port: 6379

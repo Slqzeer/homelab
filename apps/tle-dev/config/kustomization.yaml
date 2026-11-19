@@ -15,6 +15,7 @@ resources:
   - registry-credentials.yaml
   - networkpolicy.yaml
   - edge-config.yaml
+  - wsterminator.yaml
   - service-config.yaml
   - datastores.yaml
   - jetstream-bootstrap.yaml

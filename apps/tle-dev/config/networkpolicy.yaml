@@ -139,6 +139,13 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-wsterminator
+      ports:
+        - protocol: TCP
+          port: 8080
     # The game WebSocket route resolves an assigned role=game-pod endpoint.
     - to:
         - podSelector:
@@ -155,6 +162,31 @@ spec:
           podSelector:
             matchLabels:
               app: keycloak
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# WebSocket terminator -> auth JWKS and Lobby WebSocket upstream.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-wsterminator-to-services
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - tle-dev-auth-service
+          - tle-dev-lobby-service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-wsterminator
       ports:
         - protocol: TCP
           port: 8080
@@ -355,6 +387,9 @@ spec:
               app: tle-dev-edge
         - podSelector:
             matchLabels:
+              app: tle-dev-wsterminator
+        - podSelector:
+            matchLabels:
               app: tle-dev-game-master
         - podSelector:
             matchLabels:
@@ -395,6 +430,9 @@ spec:
         - podSelector:
             matchLabels:
               app: tle-dev-edge
+        - podSelector:
+            matchLabels:
+              app: tle-dev-wsterminator
         - podSelector:
             matchLabels:
               app: tle-dev-game-master
@@ -531,8 +569,8 @@ spec:
         - protocol: TCP
           port: 9000
 ---
-# Game Master is cluster-internal. Exactly three caller classes are admitted:
-# matchmaking and game pods on gRPC, and labelled operations Jobs on HTTP.
+# Game Master is cluster-internal. Matchmaking and game pods use gRPC;
+# operations Jobs and the WebSocket terminator use HTTP.
 # The player edge and tailnet proxy match none of these selectors.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -564,6 +602,9 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/component: ops-job
+        - podSelector:
+            matchLabels:
+              app: tle-dev-wsterminator
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: tle-admin-dev
@@ -702,6 +743,9 @@ spec:
         - podSelector:
             matchLabels:
               app: tle-dev-edge
+        - podSelector:
+            matchLabels:
+              app: tle-dev-wsterminator
       ports:
         - protocol: TCP
           port: 8080

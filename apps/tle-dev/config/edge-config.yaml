@@ -17,15 +17,6 @@
 #   config-keys.json -> non-secret service endpoints below; secret keys are
 #     in Vault (vault-secrets.yaml).
 # Image: pinned per release as tag@digest (images.json is not in git).
-#   Placeholder digest below is all-`a`: it satisfies NEITHER the pull
-#   (no such digest exists) NOR the onboarding validator's immutable-image
-#   rule (`:dev` is not a semver tag). The runbook promotion gate must
-#   replace it with the real release tag@digest before Argo syncs this.
-#   Until then replicas is 0: no api-gateway image has been published to
-#   ghcr.io (checked 2026-10-05), and at 1 replica the pod sat in
-#   ImagePullBackOff for six days (38k pull attempts) and every sync failed
-#   on the Deployment's progress deadline, keeping tle-dev Degraded.
-#   Promotion = real tag@digest here AND replicas back to 1.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -78,6 +69,14 @@ data:
     http://keycloak.keycloak.svc.cluster.local:8080/realms/homelab/protocol/openid-connect/certs
   # In-cluster service endpoints (non-secret; ports from config-keys.json).
   auth-service-url: "http://tle-dev-auth-service.tle-dev.svc.cluster.local:8080"
+  lobby-service-url: "http://tle-dev-lobby-service.tle-dev.svc.cluster.local:8080"
+  matchmaking-service-url: "http://tle-dev-matchmaking-service.tle-dev.svc.cluster.local:8080"
+  metadata-service-url: "http://tle-dev-metadata-service.tle-dev.svc.cluster.local:8080"
+  notification-service-url: "http://tle-dev-notification-service.tle-dev.svc.cluster.local:8080"
+  player-service-url: "http://tle-dev-player-service.tle-dev.svc.cluster.local:8080"
+  quest-service-url: "http://tle-dev-quest-service.tle-dev.svc.cluster.local:8080"
+  social-service-url: "http://tle-dev-social-service.tle-dev.svc.cluster.local:8080"
+  wsterminator-url: "http://tle-dev-wsterminator.tle-dev.svc.cluster.local:8080"
   nats-url: "nats://tle-dev-nats.tle-dev.svc.cluster.local:4222"
   valkey-addr: "tle-dev-valkey.tle-dev.svc.cluster.local:6379"
   postgres-host: "postgres.databases.svc.cluster.local"
@@ -91,10 +90,7 @@ data:
     MCowBQYDK2VwAyEA5J2fZ545EorGhDOkzivGwszmqyzhP65nArvVWuQdoHo=
     -----END PUBLIC KEY-----
 ---
-# Edge Deployment placeholder. The product repository publishes the gateway
-# image per release; the runbook pins the real tag@digest before promotion.
-# This object proves the wiring (ConfigMap mount, service, probes,
-# resources); rollout uses the pinned image, never `latest`.
+# Edge Deployment pinned to the published release image.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -104,8 +100,7 @@ metadata:
     app: tle-dev-edge
     metrics: tle-dev
 spec:
-  # 0 until a real image is promoted -- see the header.
-  replicas: 0
+  replicas: 1
   selector:
     matchLabels:
       app: tle-dev-edge
@@ -124,7 +119,7 @@ spec:
       containers:
         - name: edge
           image: >-
-            ghcr.io/the-last-exam/api-gateway:dev@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            ghcr.io/the-last-exam/api-gateway:v0.0.2@sha256:8051d730f9642660b3d52a4aa3df97086a11b1d02116e7c58dd8237f4bc4594a
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
