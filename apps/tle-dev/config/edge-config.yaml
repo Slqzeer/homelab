@@ -66,7 +66,7 @@ data:
   keycloak-issuer: "https://keycloak.taildf6cd4.ts.net/realms/homelab"
   keycloak-operator-client-id: "tle-admin-dev"
   keycloak-jwks-uri: >-
-    http://keycloak.keycloak.svc.cluster.local:8080/realms/homelab/protocol/openid-connect/certs
+    http://tle-dev-auth-service.tle-dev.svc.cluster.local:8080/.well-known/jwks.json
   # In-cluster service endpoints (non-secret; ports from config-keys.json).
   auth-service-url: "http://tle-dev-auth-service.tle-dev.svc.cluster.local:8080"
   lobby-service-url: "http://tle-dev-lobby-service.tle-dev.svc.cluster.local:8080"
@@ -106,6 +106,8 @@ spec:
       app: tle-dev-edge
   template:
     metadata:
+      annotations:
+        homelab.io/jwks-config-revision: auth-service-jwks-v1
       labels:
         app: tle-dev-edge
         metrics: tle-dev

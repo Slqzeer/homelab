@@ -54,8 +54,8 @@ class TleRotationAuthorizationTests(unittest.TestCase):
         )
         self.assertEqual("tle-admin-dev", edge_config["keycloak-operator-client-id"])
         self.assertEqual(
-            "http://keycloak.keycloak.svc.cluster.local:8080/realms/"
-            "homelab/protocol/openid-connect/certs",
+            "http://tle-dev-auth-service.tle-dev.svc.cluster.local:8080/"
+            ".well-known/jwks.json",
             edge_config["keycloak-jwks-uri"],
         )
         for env_name, config_key in expected.items():
@@ -68,6 +68,17 @@ class TleRotationAuthorizationTests(unittest.TestCase):
                         }
                     },
                     env[env_name]["valueFrom"],
+                )
+
+        edge = resource("edge-config.yaml", "Deployment", "tle-dev-edge")
+        revision = "auth-service-jwks-v1"
+        for workload in (deployment, edge):
+            with self.subTest(workload=workload["metadata"]["name"]):
+                self.assertEqual(
+                    revision,
+                    workload["spec"]["template"]["metadata"]["annotations"][
+                        "homelab.io/jwks-config-revision"
+                    ],
                 )
 
     def test_auth_service_keycloak_network_flow_remains_narrow(self):

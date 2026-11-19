@@ -78,6 +78,8 @@ spec:
       app: tle-dev-auth-service
   template:
     metadata:
+      annotations:
+        homelab.io/jwks-config-revision: auth-service-jwks-v1
       labels:
         app: tle-dev-auth-service
         app-group: tle-dev-service
