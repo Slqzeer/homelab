@@ -109,15 +109,37 @@ workloads can run; sync alone is not enough.
      platform/keycloak/config/tle-admin-role-reconciliation.yaml
    ```
 
-2. Pin new `tag@digest`s in this table; update workload images.
-3. Sync Keycloak as well as `tle-dev`, then verify the Keycloak PostSync Job
+2. Pin new `tag@digest`s in this table; update workload images. Before a release
+   containing The-Last-Exam/server#288, take and inspect a `tle_dev_metadata`
+   backup using the PostgreSQL runbook. Confirm that the pinned metadata image
+   packages `0012_drop_metadata_bundles.up.sql`. The wave-1
+   `tle-dev-metadata-seed-baseline` Sync hook runs the packaged migrations
+   before seeding, and its success gates the wave-2 metadata Deployment. Do
+   not bypass a failed hook.
+3. Sync Keycloak and `tle-dev`. After the metadata hook completes, confirm
+   that the forward migration was recorded and the old table is absent,
+   without reading application data:
+
+   ```bash
+   sg k3s-admin -c 'kubectl -n tle-dev get job tle-dev-metadata-seed-baseline'
+   sg k3s-admin -c 'kubectl -n databases exec postgres-0 -- \
+     psql -U postgres -d tle_dev_metadata -v ON_ERROR_STOP=1 \
+     -c "SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE filename = '\''0012_drop_metadata_bundles.up.sql'\'') AS migration_applied, to_regclass('\''public.metadata_bundles'\'') IS NULL AS bundles_absent;"'
+   ```
+
+   Both results must be `t`. The migration and its filename marker commit in
+   one transaction; a failed hook prevents the Deployments from advancing.
+   A Git revert does not recreate `metadata_bundles`. Restore the inspected
+   pre-upgrade backup only through the PostgreSQL recovery ceremony if the
+   previous release requires the old schema.
+4. Verify the Keycloak PostSync Job
    completed: `kubectl -n keycloak get job keycloak-client-registration` and
    `kubectl -n keycloak logs job/keycloak-client-registration`. The Job
    registers `tle-admin-dev` and `tle-admin-prod` and reconciles their roles
    from the pinned manifest. Group-to-composite assignment remains a manual
    Keycloak-console operation.
-4. `kubectl -n argocd get app tle-dev`; validate + live-check below.
-5. Rollback target: previous row of this table (immutable revision).
+5. `kubectl -n argocd get app tle-dev`; validate + live-check below.
+6. Rollback target: previous row of this table (immutable revision).
    Stateful rollback: Postgres restores may be required on schema change;
    Valkey/NATS roll back by recreation (reconstructible).
 
