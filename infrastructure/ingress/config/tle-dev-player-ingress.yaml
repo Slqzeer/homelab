@@ -6,6 +6,12 @@
 # and NO /auth/admin/* entry: a Kubernetes Ingress cannot exclude a sub-path
 # (#4), so the player surface is an allow-list of prefixes. /auth/admin/*,
 # metrics, health and admin ports stay in-cluster only.
+#
+# Exposed ahead of the vendored deploy-info (still v0.0.2): /auth/me
+# (player self-service identity, The-Last-Exam/server#228) and the game
+# WebSocket /game/v1/ws, which the wsterminator relays to the assigned game
+# pod. Both are in the server main contract; until the next release the edge
+# answers 404 on them. /game/v1/ws is its only /game/v1 route, so it is Exact.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -40,6 +46,13 @@ spec:
                 port:
                   name: http
           - path: /auth/login
+            pathType: Prefix
+            backend:
+              service:
+                name: tle-dev-edge
+                port:
+                  name: http
+          - path: /auth/me
             pathType: Prefix
             backend:
               service:
@@ -90,6 +103,13 @@ spec:
                   name: http
           - path: /auth/verify-email
             pathType: Prefix
+            backend:
+              service:
+                name: tle-dev-edge
+                port:
+                  name: http
+          - path: /game/v1/ws
+            pathType: Exact
             backend:
               service:
                 name: tle-dev-edge

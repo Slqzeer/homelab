@@ -63,9 +63,17 @@ data:
       ]
     }
   # #4 rotation authorization (non-secret half; secrets via VSO).
+  # auth-service verifies operator (Keycloak, RS256) tokens against
+  # keycloak-jwks-uri. The gateway never sees operator tokens (TLE ADR-0001).
   keycloak-issuer: "https://keycloak.taildf6cd4.ts.net/realms/homelab"
   keycloak-operator-client-id: "tle-admin-dev"
   keycloak-jwks-uri: >-
+    http://keycloak.keycloak.svc.cluster.local:8080/realms/homelab/protocol/openid-connect/certs
+  # Gateway player-token JWKS (#99): auth-service publishes the Ed25519 keys
+  # that sign player access tokens. Kept apart from keycloak-jwks-uri so
+  # neither consumer can repoint the other. The v0.0.2 gateway still reads it
+  # as KEYCLOAK_JWKS_URI; The-Last-Exam/server#261 renames that setting.
+  auth-jwks-uri: >-
     http://tle-dev-auth-service.tle-dev.svc.cluster.local:8080/.well-known/jwks.json
   # In-cluster service endpoints (non-secret; ports from config-keys.json).
   auth-service-url: "http://tle-dev-auth-service.tle-dev.svc.cluster.local:8080"
@@ -107,7 +115,7 @@ spec:
   template:
     metadata:
       annotations:
-        homelab.io/jwks-config-revision: auth-service-jwks-v1
+        homelab.io/jwks-config-revision: split-jwks-v1
       labels:
         app: tle-dev-edge
         metrics: tle-dev
@@ -148,7 +156,7 @@ spec:
               valueFrom:
                 configMapKeyRef:
                   name: tle-dev-edge-config
-                  key: keycloak-jwks-uri
+                  key: auth-jwks-uri
           volumeMounts:
             - name: edge-config
               mountPath: /etc/tle-edge

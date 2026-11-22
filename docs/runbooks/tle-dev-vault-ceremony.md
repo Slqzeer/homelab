@@ -64,8 +64,11 @@ script):
   `METADATA_GRPC_INTERNAL_TOKEN`, `NOTIFICATION_WEBHOOK_SIGNING_SECRET`
   and the distinct 48-character `GAME_MASTER_POD_REGISTRY_CREDENTIAL`
   and `GAME_MASTER_MATCHMAKING_CREDENTIAL` in `homelab/tle-dev/misc`;
-  `AUTH_SIGNING_STORE_KEY` (base64, 32 raw bytes, not
-  alphanumeric-restricted) in `homelab/tle-dev/auth`. The script refuses
+  `AUTH_SIGNING_STORE_KEY` and `AUTH_TOTP_ENCRYPTION_KEY` (each base64,
+  32 raw bytes, not alphanumeric-restricted) in `homelab/tle-dev/auth`.
+  `AUTH_TOTP_ENCRYPTION_KEY` encrypts player TOTP secrets at rest; never
+  regenerate it once players have enrolled, because rotation needs a
+  coordinated re-encryption of stored enrollments. The script refuses
   to continue if either Game Master caller credential is empty or the two
   values are equal; it never prints either value.
 - `disabled` placeholders for every product-issued key: `MINIO_*`,

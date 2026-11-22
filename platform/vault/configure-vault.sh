@@ -755,6 +755,12 @@ tle_assert_distinct_game_master_credentials
 # rather than in the AUTH_JWT_ED25519_* placeholder loop below.
 tle_generate_base64 32
 tle_ensure_field homelab/tle-dev/auth AUTH_SIGNING_STORE_KEY "generated"
+# AUTH_TOTP_ENCRYPTION_KEY (issue #63): XChaCha20-Poly1305 key encrypting
+# player TOTP secrets at rest (The-Last-Exam/server#230). Same shape as
+# AUTH_SIGNING_STORE_KEY. Seeded once and never regenerated: rotating it
+# orphans every stored TOTP enrollment unless the data is re-encrypted.
+tle_generate_base64 32
+tle_ensure_field homelab/tle-dev/auth AUTH_TOTP_ENCRYPTION_KEY "generated"
 for f in MINIO_ACCESS_KEY MINIO_SECRET_KEY NOTIFICATION_APNS_PRIVATE_KEY \
   NOTIFICATION_FCM_CREDENTIALS_JSON AUTH_JWT_ED25519_PRIVATE_KEY_PEM \
   AUTH_JWT_ED25519_STAGED_PRIVATE_KEY_PEM APPLE_PRIVATE_KEY \
