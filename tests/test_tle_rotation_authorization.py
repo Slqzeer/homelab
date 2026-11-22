@@ -53,9 +53,11 @@ class TleRotationAuthorizationTests(unittest.TestCase):
             edge_config["keycloak-issuer"],
         )
         self.assertEqual("tle-admin-dev", edge_config["keycloak-operator-client-id"])
+        # #4: auth-service verifies operator tokens against Keycloak's RS256
+        # JWKS, never against its own Ed25519 JWKS (#99).
         self.assertEqual(
-            "http://tle-dev-auth-service.tle-dev.svc.cluster.local:8080/"
-            ".well-known/jwks.json",
+            "http://keycloak.keycloak.svc.cluster.local:8080/realms/homelab/"
+            "protocol/openid-connect/certs",
             edge_config["keycloak-jwks-uri"],
         )
         for env_name, config_key in expected.items():
@@ -71,7 +73,7 @@ class TleRotationAuthorizationTests(unittest.TestCase):
                 )
 
         edge = resource("edge-config.yaml", "Deployment", "tle-dev-edge")
-        revision = "auth-service-jwks-v1"
+        revision = "split-jwks-v1"
         for workload in (deployment, edge):
             with self.subTest(workload=workload["metadata"]["name"]):
                 self.assertEqual(
@@ -79,6 +81,36 @@ class TleRotationAuthorizationTests(unittest.TestCase):
                     workload["spec"]["template"]["metadata"]["annotations"][
                         "homelab.io/jwks-config-revision"
                     ],
+                )
+
+    def test_gateway_player_jwks_is_auth_service_through_its_own_key(self):
+        # #99 phase 1: the gateway verifies player tokens minted by
+        # auth-service, through a ConfigMap key it shares with no one.
+        edge_config = resource(
+            "edge-config.yaml", "ConfigMap", "tle-dev-edge-config"
+        )["data"]
+        self.assertEqual(
+            "http://tle-dev-auth-service.tle-dev.svc.cluster.local:8080/"
+            ".well-known/jwks.json",
+            edge_config["auth-jwks-uri"],
+        )
+        edge = resource("edge-config.yaml", "Deployment", "tle-dev-edge")
+        env = {
+            entry["name"]: entry
+            for entry in edge["spec"]["template"]["spec"]["containers"][0]["env"]
+        }
+        self.assertEqual(
+            {"configMapKeyRef": {"name": "tle-dev-edge-config", "key": "auth-jwks-uri"}},
+            env["KEYCLOAK_JWKS_URI"]["valueFrom"],
+        )
+
+        auth = resource("workloads.yaml", "Deployment", "tle-dev-auth-service")
+        auth_env = auth["spec"]["template"]["spec"]["containers"][0]["env"]
+        for entry in auth_env:
+            with self.subTest(env_name=entry["name"]):
+                self.assertNotEqual(
+                    "auth-jwks-uri",
+                    entry.get("valueFrom", {}).get("configMapKeyRef", {}).get("key"),
                 )
 
     def test_auth_service_keycloak_network_flow_remains_narrow(self):

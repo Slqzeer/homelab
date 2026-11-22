@@ -115,7 +115,23 @@ workloads can run; sync alone is not enough.
    packages `0012_drop_metadata_bundles.up.sql`. The wave-1
    `tle-dev-metadata-seed-baseline` Sync hook runs the packaged migrations
    before seeding, and its success gates the wave-2 metadata Deployment. Do
-   not bypass a failed hook.
+   not bypass a failed hook. Before a release containing
+   The-Last-Exam/server#230, confirm that `homelab/tle-dev/auth` holds
+   `AUTH_TOTP_ENCRYPTION_KEY` (seeded by `configure-vault.sh`, see the
+   [Vault ceremony](tle-dev-vault-ceremony.md)) and that
+   `tle-dev-auth-secrets` projects a non-empty value; that auth-service fails
+   startup without it:
+
+   ```bash
+   sg k3s-admin -c 'kubectl -n tle-dev get secret tle-dev-auth-secrets \
+     -o go-template="{{with index .data \"AUTH_TOTP_ENCRYPTION_KEY\"}}{{len .}}{{else}}0{{end}}"'
+   ```
+
+   The printed length must be `60`: the 32-byte key is a 44-character base64
+   string, which Kubernetes base64-encodes again in `.data`. `0` means the
+   ceremony has not seeded the key yet. Keep the `with`/`else` guard: a plain
+   `len (index ...)` on a missing key makes kubectl print the whole Secret,
+   signing keys included, in its error output.
 3. Sync Keycloak and `tle-dev`. After the metadata hook completes, confirm
    that the forward migration was recorded and the old table is absent,
    without reading application data:
