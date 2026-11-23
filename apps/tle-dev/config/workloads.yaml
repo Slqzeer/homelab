@@ -34,11 +34,6 @@
 # Database user/password pairs come from tle-dev-data-secrets
 # (vault-secrets.yaml), mapped per service onto the plain DATABASE_USER /
 # DATABASE_PASSWORD names each service's code reads.
-#
-# Known gap (tracked as a Risk in PR #52, not blocking static validation):
-#   - metadata-service's MINIO_ENDPOINT points at a MinIO Service that
-#     does not exist yet -- this is the pre-existing "open" object
-#     storage item already flagged in docs/runbooks/tle-dev-recovery.md.
 ---
 # ------------------------------- auth-service -------------------------------
 apiVersion: v1
@@ -134,6 +129,19 @@ spec:
                 configMapKeyRef:
                   name: tle-dev-edge-config
                   key: auth-jwt-ed25519-public-key-pem
+            # Player access-token iss/aud (The-Last-Exam/server#261); the
+            # gateway and quest-service require the same pair. v0.0.2
+            # ignores both.
+            - name: AUTH_TOKEN_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: tle-dev-edge-config
+                  key: auth-token-issuer
+            - name: AUTH_TOKEN_AUDIENCE
+              valueFrom:
+                configMapKeyRef:
+                  name: tle-dev-edge-config
+                  key: auth-token-audience
             - name: DATABASE_USER
               valueFrom:
                 secretKeyRef:
@@ -540,8 +548,8 @@ metadata:
   annotations:
     # Last wave: v0.0.2 exits without MinIO, which tle-dev does not deploy, and
     # a failed wave stops every later one. Nothing here waits for this service.
-    # Back to wave 2 once the MinIO removal ships
-    # (game-development-knowledge#57).
+    # Back to wave 2 in the same change that pins the v0.0.3 image, which no
+    # longer uses MinIO (The-Last-Exam/server#305).
     argocd.argoproj.io/sync-wave: "5"
   labels:
     app: tle-dev-metadata-service
@@ -604,15 +612,8 @@ spec:
                 configMapKeyRef:
                   name: tle-dev-edge-config
                   key: auth-jwt-ed25519-public-key-pem
-            # MinIO is not deployed in this cluster yet (pre-existing open
-            # item, docs/runbooks/tle-dev-recovery.md); this address will
-            # not resolve until that follow-up lands. See Risks.
-            - name: MINIO_ENDPOINT
-              value: "tle-dev-minio.tle-dev.svc.cluster.local:9000"
-            - name: MINIO_BUCKET
-              value: "metadata-bundles"
-            - name: MINIO_USE_SSL
-              value: "false"
+            # No MinIO: from v0.0.3 metadata is served from PostgreSQL only
+            # (The-Last-Exam/server#305, ADR #245; issue #96).
             - name: DATABASE_USER
               valueFrom:
                 secretKeyRef:
@@ -623,16 +624,6 @@ spec:
                 secretKeyRef:
                   name: tle-dev-data-secrets
                   key: METADATA_DATABASE_PASSWORD
-            - name: MINIO_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: tle-dev-misc-secrets
-                  key: MINIO_ACCESS_KEY
-            - name: MINIO_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: tle-dev-misc-secrets
-                  key: MINIO_SECRET_KEY
             - name: METADATA_GRPC_INTERNAL_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -852,6 +843,18 @@ spec:
               value: "9090"
             - name: SOCIAL_GRPC_ADDR
               value: "tle-dev-social-service.tle-dev.svc.cluster.local:9080"
+            # Starter loadout provisioning (The-Last-Exam/server#263):
+            # required from v0.0.3, ignored by v0.0.2. The token is the one
+            # metadata-service enforces (METADATA_GRPC_INTERNAL_TOKEN).
+            - name: PLAYER_METADATA_SERVICE_BASE_URL
+              value: "http://tle-dev-metadata-service.tle-dev.svc.cluster.local:8080"
+            - name: PLAYER_METADATA_GRPC_ADDR
+              value: "tle-dev-metadata-service.tle-dev.svc.cluster.local:9091"
+            - name: PLAYER_METADATA_GRPC_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: tle-dev-misc-secrets
+                  key: METADATA_GRPC_INTERNAL_TOKEN
             - name: DATABASE_USER
               valueFrom:
                 secretKeyRef:

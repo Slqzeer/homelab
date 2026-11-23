@@ -71,10 +71,16 @@ data:
     http://keycloak.keycloak.svc.cluster.local:8080/realms/homelab/protocol/openid-connect/certs
   # Gateway player-token JWKS (#99): auth-service publishes the Ed25519 keys
   # that sign player access tokens. Kept apart from keycloak-jwks-uri so
-  # neither consumer can repoint the other. The v0.0.2 gateway still reads it
-  # as KEYCLOAK_JWKS_URI; The-Last-Exam/server#261 renames that setting.
+  # neither consumer can repoint the other. The v0.0.2 gateway reads it as
+  # KEYCLOAK_JWKS_URI; from The-Last-Exam/server#261 (v0.0.3) it reads
+  # AUTH_JWKS_URI. The edge sets both until the v0.0.3 image is pinned.
   auth-jwks-uri: >-
     http://tle-dev-auth-service.tle-dev.svc.cluster.local:8080/.well-known/jwks.json
+  # Player access-token iss/aud (The-Last-Exam/server#261). auth-service mints
+  # them (AUTH_TOKEN_ISSUER/AUDIENCE); the gateway and quest-service require
+  # them. These are the server defaults, pinned so the three never drift.
+  auth-token-issuer: "tle-auth-service"
+  auth-token-audience: "tle-player-api"
   # In-cluster service endpoints (non-secret; ports from config-keys.json).
   auth-service-url: "http://tle-dev-auth-service.tle-dev.svc.cluster.local:8080"
   lobby-service-url: "http://tle-dev-lobby-service.tle-dev.svc.cluster.local:8080"
@@ -157,6 +163,24 @@ spec:
                 configMapKeyRef:
                   name: tle-dev-edge-config
                   key: auth-jwks-uri
+            # v0.0.3 entrypoint requires these three and ignores the
+            # KEYCLOAK_* trio above, which only v0.0.2 requires. Drop the
+            # trio when the v0.0.3 image is pinned.
+            - name: AUTH_JWKS_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: tle-dev-edge-config
+                  key: auth-jwks-uri
+            - name: AUTH_TOKEN_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: tle-dev-edge-config
+                  key: auth-token-issuer
+            - name: AUTH_TOKEN_AUDIENCE
+              valueFrom:
+                configMapKeyRef:
+                  name: tle-dev-edge-config
+                  key: auth-token-audience
           volumeMounts:
             - name: edge-config
               mountPath: /etc/tle-edge

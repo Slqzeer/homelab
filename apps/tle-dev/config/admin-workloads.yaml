@@ -96,6 +96,13 @@ spec:
                 secretKeyRef:
                   name: tle-admin-dev-data-secrets
                   key: DATABASE_PASSWORD
+            # Required from v0.0.3 (The-Last-Exam/server#172); v0.0.2
+            # ignores it. Same value as the admin gateway's copy.
+            - name: AUDIT_SERVICE_CREDENTIAL
+              valueFrom:
+                secretKeyRef:
+                  name: tle-admin-dev-misc-secrets
+                  key: AUDIT_SERVICE_CREDENTIAL
             - name: LOG_LEVEL
               value: info
           startupProbe:
@@ -259,6 +266,13 @@ spec:
                 secretKeyRef:
                   name: tle-admin-dev-misc-secrets
                   key: CSRF_SECRET
+            # Required from v0.0.3 (The-Last-Exam/server#172); v0.0.2
+            # ignores it. Same value as admin-audit-writer's copy.
+            - name: AUDIT_SERVICE_CREDENTIAL
+              valueFrom:
+                secretKeyRef:
+                  name: tle-admin-dev-misc-secrets
+                  key: AUDIT_SERVICE_CREDENTIAL
             - name: LOG_LEVEL
               value: info
           livenessProbe:
