@@ -9,18 +9,18 @@ re-vendor on each TLE release with `gh api repos/The-Last-Exam/server/...`).
 
 | Item | Value |
 | --- | --- |
-| TLE release | `v0.0.2` (images); deploy-info still vendored from `v0.0.1` (`704c53a`, config-keys.json unchanged through `v0.0.2` -- confirmed no diff in `deploy-info/`) |
-| deploy-info vendored | `config-keys.json`: 2026-10-23 from `v0.0.1`; other artifacts unchanged |
-| Edge image `tag@digest` | api-gateway `v0.0.2@sha256:8051d730f9642660b3d52a4aa3df97086a11b1d02116e7c58dd8237f4bc4594a` (source: The-Last-Exam/server publish-images run 40263029044) |
-| WebSocket image `tag@digest` | wsterminator `v0.0.2@sha256:6aa61781d89a621a312333479dbe3a7511046b0b4d863432e44eff29795eec19` (source: the same publish-images run) |
-| Service images `tag@digest` | auth-service `v0.0.2@sha256:189309e7eba8f3683c20324f77f5920ceab8ac330b527eaea2d261fea2d6c463`; lobby-service `v0.0.2@sha256:cb5654799f03aea85a60cde4539632a5b6f69dc6e01dec84784701412fa78bed`; matchmaking-service `v0.0.2@sha256:a22b7967000ba061e9fd0a2b1e74bf96926c38bda0f6f7cd11b78698cd8be155`; metadata-service `v0.0.2@sha256:b62fb8e977e4c7a491583456f11d857ad4f9a6d62ec1e85eb3ad38fbfcab788f`; notification-service `v0.0.2@sha256:bda618ae2533dfe3c54853a2a23a7c9ada5a1e50da622d1ec64914773a6fe78e`; player-service `v0.0.2@sha256:e8085c1ac3da888b97d6b34e7dcf9b04eb99014cf90450b3d5cb1e35d4fa0bf8`; social-service `v0.0.2@sha256:9342d0e713b708938282a76fd9886bac249ddb309c2628a23e9fe3ab51a01e7f` (source: The-Last-Exam/server publish-images run 40263029044) |
-| Game control images `tag@digest` | game-master `v0.0.2@sha256:966baf4811fcc71a60069dffa8bef03d1ecc2a10e16f1c48047c479b54662936`; game-service `v0.0.2@sha256:b96d88334ddfb682c32845f251a26a7e6c017b62d9b95076fedc2e809bb7e7ef` (source: the same publish-images run) |
-| Admin images `tag@digest` | admin-audit-writer `v0.0.2@sha256:7c0da00a399b089cf4387cc8474395a6c27729397a292792eb09b479b3f48078`; internal-admin-gateway `v0.0.2@sha256:1048cd10d5c7859169231876e20e76329f56a23b6e05ef0cec61db1a41ac4736`; internal-ops-gateway `v0.0.2@sha256:903ce62cef35744b98878678cd0b0807cc6bf684d73e22a028135fa13a40f46e`; projection-writer `v0.0.2@sha256:8287bdcb383c388b7bba1010c5cdfa20082c87e154a3c25460e016231a2a65b1` (source: the same publish-images run) |
-| Quest image `tag@digest` | quest-service `v0.0.2@sha256:3dc4bf8f9226efb06695c292c67031073ad7b4f13872bc2748547145b7b1ac26` (source: the same publish-images run) |
+| TLE release | `v0.0.3` (tag `f5138fdb`; images and deploy-info) |
+| deploy-info vendored | 2026-11-23 from `v0.0.3`: `config-keys.json`, `public-routes.json`, `identity-headers.json`, `role-manifest.json` (the last two unchanged since `v0.0.2`) |
+| Edge image `tag@digest` | api-gateway `v0.0.3@sha256:04dccc98e599954bf979e41f8329cecfefeed885743abcc5bce8cc219787fe46` (source: The-Last-Exam/server publish-images run 45238784021, artifact `image-record-v0.0.3/images.json`) |
+| WebSocket image `tag@digest` | wsterminator `v0.0.3@sha256:63ccf2fd82a47a928d5843891b69f95be34bdcb678df82fe9466bc650445b5ad` (source: the same publish-images run) |
+| Service images `tag@digest` | auth-service `v0.0.3@sha256:70009df8456783245ac1aaa4eb8e0c75bd983408563bfaf897ffbab5c12c2385`; lobby-service `v0.0.3@sha256:c8360e0b09a31f3b210b237bfda7a901d59f6a6eaf1772ba5e4d64c0dcdddf78`; matchmaking-service `v0.0.3@sha256:9ded3f302461afe7444c8642921109fea8356f4096be45d8028243554b5c212b`; metadata-service `v0.0.3@sha256:b59d44a41d168cc82dd9d0976de9235566f4787eaf00909533edb38f1f9f922e`; notification-service `v0.0.3@sha256:4d16c565643f0a9e533466bddec885780bee9b89c4be6ebd7951a7f85b3d1211`; player-service `v0.0.3@sha256:bba5307a11f63bb01301854a4065f9e02620e8cb21d1cf8d683a162161b23a03`; social-service `v0.0.3@sha256:04dc4e4f02d0bbabc9a30e9a6cd62a24428aac1146dd7d5cfd9d19395d2ccdb8` (source: the same publish-images run) |
+| Game control images `tag@digest` | game-master `v0.0.3@sha256:377947da45355f30b9db2d654d761b40c1b535405cae4eae2dd41d825ac5b68c`; game-service `v0.0.3@sha256:1a839f3b6074be0e73ba1d35909139c85fba0aed2cccb5db890c44f1e3e847cd` (source: the same publish-images run) |
+| Admin images `tag@digest` | admin-audit-writer `v0.0.3@sha256:1afd46a2ea160c613c0a514855f85892c548fa99c7654e1c8860c41b24ab336a`; internal-admin-gateway `v0.0.3@sha256:2545b3f1f3c9142901b885aa36c46a061e37e9279f0cd3707cc760e407aa25b7`; internal-ops-gateway `v0.0.3@sha256:7a80049fdcf265fc4d84eafe308388f67d9daf83a01bc5b6304121b6219f47ea`; projection-writer `v0.0.3@sha256:66f79b33cbe6b5a7a81b3fb1de717c4558ed411738053f0c08f90febe4572463` (source: the same publish-images run) |
+| Quest image `tag@digest` | quest-service `v0.0.3@sha256:963b384cedfef0635268612c71a9fae45d8adf9e6939ba8de106eecc889943f8` (source: the same publish-images run) |
 | Role manifest version | `1` (registry schema `1.3`) |
 | Identity headers | 26 headers + 5 prefixes (see `edge-config.yaml`) |
-| Public routes | 62 routes across 9 services (see `public-routes.json`) |
-| Object storage | None. From `v0.0.3` metadata-service serves metadata from PostgreSQL only (The-Last-Exam/server#305); tle-dev carries no MinIO wiring (issue #96). Stale `MINIO_*` fields in `homelab/tle-dev/misc` are inert. `v0.0.2` metadata-service still exits without MinIO, which is why it stays in sync wave 5 until the `v0.0.3` image is pinned. |
+| Public routes | 74 routes across 8 services (see `public-routes.json`) |
+| Object storage | None. From `v0.0.3` metadata-service serves metadata from PostgreSQL only (The-Last-Exam/server#305); tle-dev carries no MinIO wiring (issue #96). Stale `MINIO_*` fields in `homelab/tle-dev/misc` are inert. Metadata-service runs in sync wave 2, after its wave-1 baseline hook. |
 | Non-secret service config | Per-service ConfigMaps in `service-config.yaml` carry only datastore addresses (test-enforced, `tests/test_tle_datastore_config.py`); every other required non-secret key (ports, `*_ENV`, tunables) is a literal container env value in `workloads.yaml` (issue #52). |
 | Datastore credential split | Complete in desired state: per-service ConfigMap addresses, credential-only VSO templates, and the `v0.0.1` configuration contract. |
 | Core service workloads | `auth-service`, `lobby-service`, `matchmaking-service`, `metadata-service`, `notification-service`, `player-service`, `social-service` declared in `workloads.yaml` (issue #52), each listening on 8080 for HTTP (see that file's header) regardless of its `.env.example` default port. `matchmaking-service` reaches the Game Master Service on gRPC `9100` and presents the dedicated matchmaking credential from VSO. |
@@ -137,14 +137,7 @@ workloads can run; sync alone is not enough.
    `configure-vault.sh` so `homelab/tle-dev/misc` holds
    `AUDIT_SERVICE_CREDENTIAL`, and check `tle-admin-dev-misc-secrets` the same
    way (printed length `64` for the 48-character value). admin-audit-writer
-   and internal-admin-gateway fail startup without it. The `v0.0.3` pin
-   change itself also:
-
-   - moves `tle-dev-metadata-service` from sync wave `5` back to `2`;
-   - drops the edge's `KEYCLOAK_ISSUER`, `KEYCLOAK_OPERATOR_CLIENT_ID` and
-     `KEYCLOAK_JWKS_URI` env (only the `v0.0.2` gateway requires them; the
-     `AUTH_*` trio replaces them, The-Last-Exam/server#261);
-   - re-vendors `deploy-info/` from the tag, as in step 1.
+   and internal-admin-gateway fail startup without it.
 3. Sync Keycloak and `tle-dev`. After the metadata hook completes, confirm
    that the forward migration was recorded and the old table is absent,
    without reading application data:
@@ -236,7 +229,7 @@ no database mutation.
       `auth-service`, `lobby-service`, `matchmaking-service`,
       `metadata-service`, `notification-service`, `player-service`, and
       `social-service`; live rollout evidence is still outstanding --
-      `metadata-service` needs the `v0.0.3` image (see Object storage above). Game Master
+      `metadata-service` first runs without MinIO on `v0.0.3`. Game Master
       is now declared by issue #44; its live registry and mutation acceptance
       remains pending the issue #48 game-pod environment described below.
 - [ ] On the first fresh-environment reconciliation, the metadata baseline hook
@@ -362,7 +355,7 @@ sg k3s-admin -c \
 
 Expected before merge: the dump header is present and `tle-dev-data` reports a
 ready projection. Also confirm PostgreSQL, NATS, and the GHCR pull projection
-are healthy and the pinned `v0.0.2` quest image is pullable.
+are healthy and the pinned quest image is pullable.
 
 After merge and reconciliation, collect the rollout evidence without changing
 desired state:

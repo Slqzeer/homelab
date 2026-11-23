@@ -116,7 +116,7 @@ class TleBlockerRepairTests(unittest.TestCase):
                 "GAME_PLAYER": "game.>",
                 "LOBBY": "lobby.player.>",
                 "MATCHMAKING_MATCH_READY": "notification.match_ready",
-                "METADATA": "metadata.version.published",
+                "METADATA": "metadata.>",
                 "PARTY": "party.>",
                 "PLAYER": "player.>",
                 "QUEST_EVENTS": "quest.events.>",

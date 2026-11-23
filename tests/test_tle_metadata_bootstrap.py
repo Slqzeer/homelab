@@ -9,8 +9,8 @@ import yaml
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 BOOTSTRAP_MANIFEST = "apps/tle-dev/config/metadata-bootstrap.yaml"
 METADATA_IMAGE = (
-    "ghcr.io/the-last-exam/metadata-service:v0.0.2@sha256:"
-    "b62fb8e977e4c7a491583456f11d857ad4f9a6d62ec1e85eb3ad38fbfcab788f"
+    "ghcr.io/the-last-exam/metadata-service:v0.0.3@sha256:"
+    "b59d44a41d168cc82dd9d0976de9235566f4787eaf00909533edb38f1f9f922e"
 )
 
 

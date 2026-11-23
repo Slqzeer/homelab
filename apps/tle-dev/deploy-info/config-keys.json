@@ -8,6 +8,14 @@
       "example": "services/admin-audit-writer/.env.example",
       "keys": [
         {
+          "name": "AUDIT_SERVICE_CREDENTIAL",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": "Shared bearer credential the gateway must present to reach /audit routes."
+        },
+        {
           "name": "AUDIT_WRITER_ENV",
           "required": false,
           "required_when": null,
@@ -149,12 +157,76 @@
           "description": null
         },
         {
+          "name": "AUTH_2FA_CHALLENGE_TTL_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Lifetime in seconds for an unresolved second-factor login challenge; default 300, bounded to 1-3600."
+        },
+        {
+          "name": "AUTH_2FA_LOCK_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Shared player verification-lock duration after repeated invalid second-factor proofs; default 300, bounded to 1-3600."
+        },
+        {
+          "name": "AUTH_2FA_MAX_ATTEMPTS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Invalid second-factor proofs allowed before the shared player lock; default 5, bounded to 1-20."
+        },
+        {
           "name": "AUTH_DEV_MODE",
           "required": false,
           "required_when": null,
           "secret": false,
           "points_to": null,
           "description": "Set to true only in local development to expose the passkey test console; default false."
+        },
+        {
+          "name": "AUTH_EMAIL_OTP_ENABLED",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Advertises and accepts the e-mail OTP second factor only once notification e-mail delivery is configured; default false."
+        },
+        {
+          "name": "AUTH_EMAIL_OTP_MAX_SENDS_PER_WINDOW",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Sends allowed per player inside the rolling e-mail OTP window; default 5, bounded to 1-50."
+        },
+        {
+          "name": "AUTH_EMAIL_OTP_RESEND_COOLDOWN_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Minimum seconds between two e-mail OTP sends for the same player; default 60, bounded to 10-600."
+        },
+        {
+          "name": "AUTH_EMAIL_OTP_TTL_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Lifetime in seconds of a sent e-mail OTP code; default 180, bounded to 60-900."
+        },
+        {
+          "name": "AUTH_EMAIL_OTP_WINDOW_SECONDS",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "Width in seconds of the rolling e-mail OTP send-quota window; default 900, bounded to 60-86400."
         },
         {
           "name": "AUTH_JWT_ED25519_PRIVATE_KEY_PEM",
@@ -251,6 +323,30 @@
           "secret": false,
           "points_to": null,
           "description": "Seconds between signing-key convergence polls against shared state; default 5, clamped to 1-60. Lowered automatically by NATS rotation hints."
+        },
+        {
+          "name": "AUTH_TOKEN_AUDIENCE",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "aud claim minted on, and required of, player access tokens; default tle-player-api. The API Gateway's AUTH_TOKEN_AUDIENCE and quest-service's QUEST_PLAYER_JWT_AUDIENCE must match it."
+        },
+        {
+          "name": "AUTH_TOKEN_ISSUER",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": "iss claim minted on, and required of, player access tokens; default tle-auth-service. The API Gateway's AUTH_TOKEN_ISSUER and quest-service's QUEST_PLAYER_JWT_ISSUER must match it."
+        },
+        {
+          "name": "AUTH_TOTP_ENCRYPTION_KEY",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": "Base64-encoded 32-byte XChaCha20-Poly1305 key delivered only through Vault/VSO; encrypts player TOTP secrets stored in Postgres."
         },
         {
           "name": "AUTH_TRUSTED_PROXIES",
@@ -522,10 +618,26 @@
           "description": null
         },
         {
+          "name": "GAME_MASTER_MATCHMAKING_CREDENTIAL",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "GAME_MASTER_NAMESPACE",
           "required": true,
           "required_when": null,
           "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "GAME_MASTER_POD_REGISTRY_CREDENTIAL",
+          "required": true,
+          "required_when": null,
+          "secret": true,
           "points_to": null,
           "description": null
         },
@@ -668,6 +780,14 @@
             "service": "game-master",
             "key": "GAME_MASTER_GRPC_PORT"
           },
+          "description": null
+        },
+        {
+          "name": "GAME_MASTER_POD_REGISTRY_CREDENTIAL",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
           "description": null
         },
         {
@@ -873,6 +993,14 @@
           "description": null
         },
         {
+          "name": "AUDIT_SERVICE_CREDENTIAL",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": "Shared bearer credential presented to admin-audit-writer's /audit routes."
+        },
+        {
           "name": "AUDIT_WRITER_URL",
           "required": true,
           "required_when": null,
@@ -1028,17 +1156,6 @@
           "description": null
         },
         {
-          "name": "AUTH_SERVICE_GRPC_ADDR",
-          "required": true,
-          "required_when": null,
-          "secret": false,
-          "points_to": {
-            "service": "auth-service",
-            "key": "AUTH_SERVICE_GRPC_PORT"
-          },
-          "description": null
-        },
-        {
           "name": "GAME_MASTER_CONTROL_URL",
           "required": true,
           "required_when": null,
@@ -1047,6 +1164,46 @@
             "service": "game-master",
             "key": "GAME_MASTER_HTTP_PORT"
           },
+          "description": null
+        },
+        {
+          "name": "KEYCLOAK_CLIENT_ID",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "KEYCLOAK_CLIENT_SECRET",
+          "required": false,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "KEYCLOAK_INTERNAL_BASE_URL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "KEYCLOAK_ISSUER_URL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "KEYCLOAK_REDIRECT_URL",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
           "description": null
         },
         {
@@ -1066,6 +1223,14 @@
             "service": "matchmaking-service",
             "key": "MATCHMAKING_PORT"
           },
+          "description": null
+        },
+        {
+          "name": "OPERATOR_SESSION_ADAPTER",
+          "required": false,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
           "description": null
         },
         {
@@ -1310,6 +1475,14 @@
           "description": null
         },
         {
+          "name": "GAME_MASTER_MATCHMAKING_CREDENTIAL",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": null
+        },
+        {
           "name": "LOG_LEVEL",
           "required": false,
           "required_when": null,
@@ -1536,14 +1709,6 @@
           "description": null
         },
         {
-          "name": "METADATA_CDN_ALIAS_TTL_SECONDS",
-          "required": false,
-          "required_when": null,
-          "secret": false,
-          "points_to": null,
-          "description": null
-        },
-        {
           "name": "METADATA_ENV",
           "required": true,
           "required_when": null,
@@ -1554,22 +1719,16 @@
         {
           "name": "METADATA_GRPC_INTERNAL_TOKEN",
           "required": false,
-          "required_when": null,
+          "required_when": {
+            "METADATA_ENV": "prod"
+          },
           "secret": true,
           "points_to": null,
-          "description": null
+          "description": "Required outside local development; METADATA_ENV=prod is the deployed non-local environment."
         },
         {
           "name": "METADATA_GRPC_PORT",
           "required": true,
-          "required_when": null,
-          "secret": false,
-          "points_to": null,
-          "description": null
-        },
-        {
-          "name": "METADATA_INTEGRITY_INTERVAL_SECONDS",
-          "required": false,
           "required_when": null,
           "secret": false,
           "points_to": null,
@@ -1641,46 +1800,6 @@
         },
         {
           "name": "METADATA_VALIDATION_WORKER_COUNT",
-          "required": false,
-          "required_when": null,
-          "secret": false,
-          "points_to": null,
-          "description": null
-        },
-        {
-          "name": "MINIO_ACCESS_KEY",
-          "required": true,
-          "required_when": null,
-          "secret": true,
-          "points_to": null,
-          "description": null
-        },
-        {
-          "name": "MINIO_BUCKET",
-          "required": true,
-          "required_when": null,
-          "secret": false,
-          "points_to": null,
-          "description": null
-        },
-        {
-          "name": "MINIO_ENDPOINT",
-          "required": true,
-          "required_when": null,
-          "secret": false,
-          "points_to": null,
-          "description": null
-        },
-        {
-          "name": "MINIO_SECRET_KEY",
-          "required": true,
-          "required_when": null,
-          "secret": true,
-          "points_to": null,
-          "description": null
-        },
-        {
-          "name": "MINIO_USE_SSL",
           "required": false,
           "required_when": null,
           "secret": false,
@@ -2080,6 +2199,46 @@
         {
           "name": "PLAYER_GRPC_PORT",
           "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": null,
+          "description": null
+        },
+        {
+          "name": "PLAYER_METADATA_GRPC_ADDR",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": {
+            "service": "metadata-service",
+            "key": "METADATA_GRPC_PORT"
+          },
+          "description": null
+        },
+        {
+          "name": "PLAYER_METADATA_GRPC_INTERNAL_TOKEN",
+          "required": false,
+          "required_when": {
+            "PLAYER_ENV": "prod"
+          },
+          "secret": true,
+          "points_to": null,
+          "description": "Must equal METADATA_GRPC_INTERNAL_TOKEN; required outside local development."
+        },
+        {
+          "name": "PLAYER_METADATA_SERVICE_BASE_URL",
+          "required": true,
+          "required_when": null,
+          "secret": false,
+          "points_to": {
+            "service": "metadata-service",
+            "key": "METADATA_PORT"
+          },
+          "description": null
+        },
+        {
+          "name": "PLAYER_METADATA_SERVICE_TIMEOUT_MS",
+          "required": false,
           "required_when": null,
           "secret": false,
           "points_to": null,
