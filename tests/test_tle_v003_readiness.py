@@ -143,11 +143,25 @@ class PlayerMetadataTests(unittest.TestCase):
         )
 
 
-class PlayerServiceRolloutTests(unittest.TestCase):
-    def test_player_service_recreates_so_its_durable_consumer_is_released(self):
-        spec = find("workloads.yaml", "Deployment", "tle-dev-player-service")["spec"]
-        self.assertEqual(1, spec["replicas"])
-        self.assertEqual({"type": "Recreate"}, spec["strategy"])
+class DurablePushConsumerRolloutTests(unittest.TestCase):
+    # Services binding JetStream durable push consumers without a queue group
+    # (js.Subscribe + nats.Durable in v0.0.3). A surged pod cannot bind while
+    # the old one holds them, so each must run one pod and use Recreate.
+    SERVICES = {
+        "tle-dev-lobby-service": "workloads.yaml",
+        "tle-dev-player-service": "workloads.yaml",
+        "tle-dev-projection-writer": "admin-workloads.yaml",
+    }
+
+    def test_each_recreates_a_single_pod(self):
+        for name, manifest in self.SERVICES.items():
+            with self.subTest(name=name):
+                spec = find(manifest, "Deployment", name)["spec"]
+                self.assertEqual(1, spec["replicas"])
+                self.assertEqual({"type": "Recreate"}, spec["strategy"])
+                for hpa in documents(manifest):
+                    if hpa["kind"] == "HorizontalPodAutoscaler" and hpa["spec"]["scaleTargetRef"]["name"] == name:
+                        self.assertEqual(1, hpa["spec"]["maxReplicas"])
 
 class MinioRemovalTests(unittest.TestCase):
     def test_no_tle_dev_manifest_or_ceremony_mentions_minio_keys(self):
