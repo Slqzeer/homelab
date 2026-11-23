@@ -1,6 +1,6 @@
 # Reconcile the JetStream streams required by the pinned TLE release. The
-# product deploy-info supplies the release set; PARTY and METADATA cover the
-# rollout-discovered party.* and metadata.version.published contracts. SOCIAL
+# product deploy-info supplies the release set (v0.0.3 declares METADATA as
+# metadata.>); PARTY covers the rollout-discovered party.* contract. SOCIAL
 # includes social.block.created and social.block.removed. ADMIN_ACTIONS is what
 # projection-writer subscribes to; v0.0.2 has no publisher for it yet.
 # MATCHMAKING_MATCH_READY carries notification.match_ready: matchmaking-service
@@ -28,7 +28,7 @@ data:
     GAME_PLAYER	game.>
     LOBBY	lobby.player.>
     MATCHMAKING_MATCH_READY	notification.match_ready
-    METADATA	metadata.version.published
+    METADATA	metadata.>
     PARTY	party.>
     PLAYER	player.>
     QUEST_EVENTS	quest.events.>

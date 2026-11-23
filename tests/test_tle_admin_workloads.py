@@ -14,8 +14,8 @@ ADMIN_NAMESPACE = "tle-admin-dev"
 EXPECTED = {
     "tle-dev-admin-audit-writer": {
         "image": (
-            "ghcr.io/the-last-exam/admin-audit-writer:v0.0.2@sha256:"
-            "7c0da00a399b089cf4387cc8474395a6c27729397a292792eb09b479b3f48078"
+            "ghcr.io/the-last-exam/admin-audit-writer:v0.0.3@sha256:"
+            "1afd46a2ea160c613c0a514855f85892c548fa99c7654e1c8860c41b24ab336a"
         ),
         "replicas": 2,
         "probes": ("/healthz", "/healthz", "/readyz"),
@@ -25,8 +25,8 @@ EXPECTED = {
     },
     "tle-dev-internal-admin-gateway": {
         "image": (
-            "ghcr.io/the-last-exam/internal-admin-gateway:v0.0.2@sha256:"
-            "1048cd10d5c7859169231876e20e76329f56a23b6e05ef0cec61db1a41ac4736"
+            "ghcr.io/the-last-exam/internal-admin-gateway:v0.0.3@sha256:"
+            "2545b3f1f3c9142901b885aa36c46a061e37e9279f0cd3707cc760e407aa25b7"
         ),
         "replicas": 2,
         "probes": (None, "/healthz", "/readyz"),
@@ -36,8 +36,8 @@ EXPECTED = {
     },
     "tle-dev-internal-ops-gateway": {
         "image": (
-            "ghcr.io/the-last-exam/internal-ops-gateway:v0.0.2@sha256:"
-            "903ce62cef35744b98878678cd0b0807cc6bf684d73e22a028135fa13a40f46e"
+            "ghcr.io/the-last-exam/internal-ops-gateway:v0.0.3@sha256:"
+            "7a80049fdcf265fc4d84eafe308388f67d9daf83a01bc5b6304121b6219f47ea"
         ),
         "replicas": 2,
         "probes": (None, "/healthz", "/readyz"),
@@ -47,8 +47,8 @@ EXPECTED = {
     },
     "tle-dev-projection-writer": {
         "image": (
-            "ghcr.io/the-last-exam/projection-writer:v0.0.2@sha256:"
-            "8287bdcb383c388b7bba1010c5cdfa20082c87e154a3c25460e016231a2a65b1"
+            "ghcr.io/the-last-exam/projection-writer:v0.0.3@sha256:"
+            "66f79b33cbe6b5a7a81b3fb1de717c4558ed411738053f0c08f90febe4572463"
         ),
         "replicas": 1,
         "probes": (None, "/healthz", "/readyz"),
@@ -123,7 +123,7 @@ class TleAdminWorkloadTests(unittest.TestCase):
                 with self.subTest(kind=kind, name=name):
                     self.assertGreater(wave(resource), max(tle_dev_waves))
 
-    def test_metadata_without_minio_cannot_gate_any_other_wave(self):
+    def test_metadata_runs_after_its_baseline_hook_and_before_admin(self):
         wave = lambda resource: int(
             (resource["metadata"].get("annotations") or {}).get(
                 "argocd.argoproj.io/sync-wave", "0"
@@ -141,8 +141,16 @@ class TleAdminWorkloadTests(unittest.TestCase):
             if resource["kind"] == "Deployment"
             and resource["metadata"]["name"] == "tle-dev-metadata-service"
         )
-        others = [wave(resource) for resource in resources if resource is not metadata]
-        self.assertGreater(wave(metadata), max(others))
+        hook = next(
+            resource
+            for resource in resources
+            if resource["kind"] == "Job"
+            and resource["metadata"]["name"] == "tle-dev-metadata-seed-baseline"
+        )
+        # v0.0.3 no longer needs MinIO (The-Last-Exam/server#305), so metadata
+        # returns to wave 2: after the baseline hook that migrates its schema.
+        self.assertEqual(2, wave(metadata))
+        self.assertLess(wave(hook), wave(metadata))
 
     def test_ops_gateway_probes_auth_on_a_route_it_serves(self):
         gateway = self.resources_by_kind("Deployment")["tle-dev-internal-ops-gateway"]

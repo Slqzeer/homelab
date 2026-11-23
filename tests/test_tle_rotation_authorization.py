@@ -101,8 +101,10 @@ class TleRotationAuthorizationTests(unittest.TestCase):
         }
         self.assertEqual(
             {"configMapKeyRef": {"name": "tle-dev-edge-config", "key": "auth-jwks-uri"}},
-            env["KEYCLOAK_JWKS_URI"]["valueFrom"],
+            env["AUTH_JWKS_URI"]["valueFrom"],
         )
+        # server#261 (v0.0.3): the gateway no longer reads Keycloak settings.
+        self.assertFalse([name for name in env if name.startswith("KEYCLOAK_")])
 
         auth = resource("workloads.yaml", "Deployment", "tle-dev-auth-service")
         auth_env = auth["spec"]["template"]["spec"]["containers"][0]["env"]

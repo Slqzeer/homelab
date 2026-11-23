@@ -35,8 +35,8 @@ class TleGameMasterTests(unittest.TestCase):
         self.assertNotEqual(False, pod_spec.get("automountServiceAccountToken"))
         container = pod_spec["containers"][0]
         self.assertEqual(
-            "ghcr.io/the-last-exam/game-master:v0.0.2@sha256:"
-            "966baf4811fcc71a60069dffa8bef03d1ecc2a10e16f1c48047c479b54662936",
+            "ghcr.io/the-last-exam/game-master:v0.0.3@sha256:"
+            "377947da45355f30b9db2d654d761b40c1b535405cae4eae2dd41d825ac5b68c",
             container["image"],
         )
         ports = {port["name"]: port["containerPort"] for port in container["ports"]}

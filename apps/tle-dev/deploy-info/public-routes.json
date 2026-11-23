@@ -73,6 +73,106 @@
           "service_path": "/auth/login"
         },
         {
+          "path": "/auth/login/challenge/backup-code",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": false,
+          "websocket": false,
+          "service_path": "/auth/login/challenge/backup-code"
+        },
+        {
+          "path": "/auth/login/challenge/email-otp",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": false,
+          "websocket": false,
+          "service_path": "/auth/login/challenge/email-otp"
+        },
+        {
+          "path": "/auth/login/challenge/email-otp/send",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": false,
+          "websocket": false,
+          "service_path": "/auth/login/challenge/email-otp/send"
+        },
+        {
+          "path": "/auth/login/challenge/totp",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": false,
+          "websocket": false,
+          "service_path": "/auth/login/challenge/totp"
+        },
+        {
+          "path": "/auth/me",
+          "methods": [
+            "GET"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/auth/me"
+        },
+        {
+          "path": "/auth/me/email",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/auth/me/email"
+        },
+        {
+          "path": "/auth/me/password",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/auth/me/password"
+        },
+        {
+          "path": "/auth/me/totp",
+          "methods": [
+            "DELETE",
+            "GET"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/auth/me/totp"
+        },
+        {
+          "path": "/auth/me/totp/backup-codes",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/auth/me/totp/backup-codes"
+        },
+        {
+          "path": "/auth/me/totp/enrollment",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/auth/me/totp/enrollment"
+        },
+        {
+          "path": "/auth/me/totp/enrollment/confirm",
+          "methods": [
+            "POST"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/auth/me/totp/enrollment/confirm"
+        },
+        {
           "path": "/auth/oauth/callback/{provider}",
           "methods": [
             "GET"
@@ -245,32 +345,6 @@
       ]
     },
     {
-      "service": "metadata-service",
-      "source": "services/metadata-service/public-routes.json",
-      "public_prefix": "/metadata/v1/bundle",
-      "service_prefix": "/metadata",
-      "routes": [
-        {
-          "path": "/metadata/v1/bundle/latest.json",
-          "methods": [
-            "GET"
-          ],
-          "bearer_required": true,
-          "websocket": false,
-          "service_path": "/metadata/latest.json"
-        },
-        {
-          "path": "/metadata/v1/bundle/{versionID}/{bundleName}",
-          "methods": [
-            "GET"
-          ],
-          "bearer_required": true,
-          "websocket": false,
-          "service_path": "/metadata/{versionID}/{bundleName}"
-        }
-      ]
-    },
-    {
       "service": "notification-service",
       "source": "services/notification-service/public-routes.json",
       "public_prefix": "/notification/v1/inbox",
@@ -293,6 +367,16 @@
           "bearer_required": true,
           "websocket": false,
           "service_path": "/internal/notification/inbox/{user_id}"
+        },
+        {
+          "path": "/notification/v1/preferences/{user_id}",
+          "methods": [
+            "GET",
+            "PUT"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/internal/notification/preferences/{user_id}"
         }
       ]
     },
@@ -329,6 +413,15 @@
           "bearer_required": true,
           "websocket": false,
           "service_path": "/players/{player_id}/inventory/summary"
+        },
+        {
+          "path": "/player/v1/players/{player_id}/metadata",
+          "methods": [
+            "GET"
+          ],
+          "bearer_required": true,
+          "websocket": false,
+          "service_path": "/players/{player_id}/metadata"
         },
         {
           "path": "/player/v1/players/{player_id}/wall",
@@ -627,6 +720,15 @@
       "public_prefix": "/lobby/v1",
       "service_prefix": "",
       "routes": [
+        {
+          "path": "/game/v1/ws",
+          "methods": [
+            "GET"
+          ],
+          "bearer_required": true,
+          "websocket": true,
+          "service_path": "/game/v1/ws"
+        },
         {
           "path": "/lobby/v1/ws",
           "methods": [

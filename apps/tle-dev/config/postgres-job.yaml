@@ -168,7 +168,7 @@ spec:
               # selects it with search_path (service-config.yaml).
               psql -v ON_ERROR_STOP=1 -d tle_dev -c \
                 "CREATE SCHEMA IF NOT EXISTS player AUTHORIZATION tle_dev"
-              # projection-writer v0.0.2 packages no migration runner, so its
+              # projection-writer v0.0.3 (as v0.0.2) packages no migration runner, so its
               # migrations/001_create_projection_tables.up.sql is applied here.
               # SET ROLE keeps tle_dev, its database user, as the table owner.
               psql -v ON_ERROR_STOP=1 -d tle_dev --single-transaction <<'SQL'

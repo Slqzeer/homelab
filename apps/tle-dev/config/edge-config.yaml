@@ -71,9 +71,8 @@ data:
     http://keycloak.keycloak.svc.cluster.local:8080/realms/homelab/protocol/openid-connect/certs
   # Gateway player-token JWKS (#99): auth-service publishes the Ed25519 keys
   # that sign player access tokens. Kept apart from keycloak-jwks-uri so
-  # neither consumer can repoint the other. The v0.0.2 gateway reads it as
-  # KEYCLOAK_JWKS_URI; from The-Last-Exam/server#261 (v0.0.3) it reads
-  # AUTH_JWKS_URI. The edge sets both until the v0.0.3 image is pinned.
+  # neither consumer can repoint the other. The gateway reads it as
+  # AUTH_JWKS_URI (The-Last-Exam/server#261).
   auth-jwks-uri: >-
     http://tle-dev-auth-service.tle-dev.svc.cluster.local:8080/.well-known/jwks.json
   # Player access-token iss/aud (The-Last-Exam/server#261). auth-service mints
@@ -135,7 +134,7 @@ spec:
       containers:
         - name: edge
           image: >-
-            ghcr.io/the-last-exam/api-gateway:v0.0.2@sha256:8051d730f9642660b3d52a4aa3df97086a11b1d02116e7c58dd8237f4bc4594a
+            ghcr.io/the-last-exam/api-gateway:v0.0.3@sha256:04dccc98e599954bf979e41f8329cecfefeed885743abcc5bce8cc219787fe46
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -148,24 +147,9 @@ spec:
             - name: metrics
               containerPort: 9000
           env:
-            - name: KEYCLOAK_ISSUER
-              valueFrom:
-                configMapKeyRef:
-                  name: tle-dev-edge-config
-                  key: keycloak-issuer
-            - name: KEYCLOAK_OPERATOR_CLIENT_ID
-              valueFrom:
-                configMapKeyRef:
-                  name: tle-dev-edge-config
-                  key: keycloak-operator-client-id
-            - name: KEYCLOAK_JWKS_URI
-              valueFrom:
-                configMapKeyRef:
-                  name: tle-dev-edge-config
-                  key: auth-jwks-uri
-            # v0.0.3 entrypoint requires these three and ignores the
-            # KEYCLOAK_* trio above, which only v0.0.2 requires. Drop the
-            # trio when the v0.0.3 image is pinned.
+            # Player access tokens are verified against auth-service
+            # (The-Last-Exam/server#261); the gateway never sees operator
+            # (Keycloak) tokens.
             - name: AUTH_JWKS_URI
               valueFrom:
                 configMapKeyRef:
