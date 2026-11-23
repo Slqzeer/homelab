@@ -21,7 +21,7 @@ field, and `seed-tle-dev-vault.sh` patches only the keys you filled in
   `platform/registry/README.md` to create or rotate it; never copy it into a
   TLE-specific Vault path.
 - The TLE release's product-issued values at hand for the providers you
-  enable: Ed25519 JWT private key, MinIO pair, OAuth client secrets, push
+  enable: Ed25519 JWT private key, OAuth client secrets, push
   credentials. Per-key sources are documented in the
   `apps/tle-dev/vault-seed/.env.tle-dev-*.example` templates.
 - Know which step you are on: **step 1 first, always**. Running step 2
@@ -63,7 +63,10 @@ script):
   bytes, which `internal-admin-gateway` decodes at startup),
   `METADATA_GRPC_INTERNAL_TOKEN`, `NOTIFICATION_WEBHOOK_SIGNING_SECRET`
   and the distinct 48-character `GAME_MASTER_POD_REGISTRY_CREDENTIAL`
-  and `GAME_MASTER_MATCHMAKING_CREDENTIAL` in `homelab/tle-dev/misc`;
+  and `GAME_MASTER_MATCHMAKING_CREDENTIAL`, and the 48-character
+  `AUDIT_SERVICE_CREDENTIAL` shared by `internal-admin-gateway` and
+  `admin-audit-writer` (projected into `tle-admin-dev`), in
+  `homelab/tle-dev/misc`;
   `AUTH_SIGNING_STORE_KEY` and `AUTH_TOTP_ENCRYPTION_KEY` (each base64,
   32 raw bytes, not alphanumeric-restricted) in `homelab/tle-dev/auth`.
   `AUTH_TOTP_ENCRYPTION_KEY` encrypts player TOTP secrets at rest; never
@@ -71,7 +74,7 @@ script):
   coordinated re-encryption of stored enrollments. The script refuses
   to continue if either Game Master caller credential is empty or the two
   values are equal; it never prints either value.
-- `disabled` placeholders for every product-issued key: `MINIO_*`,
+- `disabled` placeholders for every product-issued key:
   `NOTIFICATION_APNS_*`, `NOTIFICATION_FCM_*`,
   `AUTH_JWT_ED25519_*_PRIVATE_KEY_PEM`, `APPLE_*`, `DISCORD_*`,
   `GOOGLE_*`. Placeholders let every `VaultStaticSecret` sync; real
@@ -105,7 +108,6 @@ printing them if either is empty or they are equal.
 - `AUTH_JWT_ED25519_PRIVATE_KEY_PEM` (JWT signing key; pin its public
   half as `auth-jwt-ed25519-public-key-pem` in
   `apps/tle-dev/config/edge-config.yaml`)
-- `MINIO_ACCESS_KEY` + `MINIO_SECRET_KEY` (object storage)
 
 Everything else stays `disabled` until you enable its provider (OAuth,
 APNs, FCM) — that is expected, not an error.

@@ -20,7 +20,7 @@ re-vendor on each TLE release with `gh api repos/The-Last-Exam/server/...`).
 | Role manifest version | `1` (registry schema `1.3`) |
 | Identity headers | 26 headers + 5 prefixes (see `edge-config.yaml`) |
 | Public routes | 62 routes across 9 services (see `public-routes.json`) |
-| Object storage (S3 endpoint) | _open_: deploy MinIO in-cluster (`tle-dev` + PVC + Service + bucket job) or point `MINIO_ENDPOINT` at an external MinIO; then create the access pair in its console and seed `MINIO_*`. Blocks metadata-service's object-storage path (issue #52 pins `MINIO_ENDPOINT`/`MINIO_BUCKET` to the not-yet-deployed `tle-dev-minio` name so no further wiring change is needed once it exists). |
+| Object storage | None. From `v0.0.3` metadata-service serves metadata from PostgreSQL only (The-Last-Exam/server#305); tle-dev carries no MinIO wiring (issue #96). Stale `MINIO_*` fields in `homelab/tle-dev/misc` are inert. `v0.0.2` metadata-service still exits without MinIO, which is why it stays in sync wave 5 until the `v0.0.3` image is pinned. |
 | Non-secret service config | Per-service ConfigMaps in `service-config.yaml` carry only datastore addresses (test-enforced, `tests/test_tle_datastore_config.py`); every other required non-secret key (ports, `*_ENV`, tunables) is a literal container env value in `workloads.yaml` (issue #52). |
 | Datastore credential split | Complete in desired state: per-service ConfigMap addresses, credential-only VSO templates, and the `v0.0.1` configuration contract. |
 | Core service workloads | `auth-service`, `lobby-service`, `matchmaking-service`, `metadata-service`, `notification-service`, `player-service`, `social-service` declared in `workloads.yaml` (issue #52), each listening on 8080 for HTTP (see that file's header) regardless of its `.env.example` default port. `matchmaking-service` reaches the Game Master Service on gRPC `9100` and presents the dedicated matchmaking credential from VSO. |
@@ -63,7 +63,7 @@ recreates the legacy URL keys before pinning any pre-`v0.0.1` server release.
 - Durable state: `tle_dev`, `tle_dev_metadata`, `tle_dev_quest` databases
   in shared Postgres (`databases`); Valkey PVC `tle-dev-valkey-data` (AOF,
   reconstructible cache); NATS JetStream PVC (reconstructible bus).
-- Secret-derived: database users/passwords, signing keys, MinIO/push/CSRF
+- Secret-derived: database users/passwords, signing keys, push/CSRF/audit
   credentials via Vault (`tle-dev/{auth,data,misc}`) + VSO. Datastore
   addresses come from per-service ConfigMaps.
 - Reconstructible: NATS streams, Valkey cache contents.
@@ -82,19 +82,19 @@ Canonical ordered checklist: `docs/runbooks/tle-dev-vault-ceremony.md`
 `databases`, plus namespace-bound `tle-admin-dev` data, misc, OIDC and GHCR
 roles. They reuse only the required Vault paths without sharing Kubernetes
 identities across namespaces. The script also creates generated database
-passwords + CSRF/internal/webhook secrets,
+passwords + CSRF/internal/webhook/audit secrets,
 distinct generated Game Master pod-registry and matchmaking credentials,
 and `disabled` placeholders for product-issued keys. Run it first (inside
 vault-0); it never overwrites. It also creates the independent Keycloak
 client secrets for `tle-admin-dev` and `tle-admin-prod`; Keycloak's VSO role
 can read only those two paths for TLE administration.
 
-Product-issued values (JWT private key, MinIO pair, enabled OAuth/push
+Product-issued values (JWT private key, enabled OAuth/push
 providers) are then patched over the placeholders, never typed on a
 command line — see the ceremony page for the exact commands.
 
 Per-key sources are documented in the `.env.example` templates. The
-`*- REQUIRED` placeholders (JWT key, MinIO pair) must be replaced before
+`*- REQUIRED` placeholder (JWT key) must be replaced before
 workloads can run; sync alone is not enough.
 
 ## Upgrade / rollback
@@ -132,6 +132,19 @@ workloads can run; sync alone is not enough.
    ceremony has not seeded the key yet. Keep the `with`/`else` guard: a plain
    `len (index ...)` on a missing key makes kubectl print the whole Secret,
    signing keys included, in its error output.
+
+   Before a release containing The-Last-Exam/server#172 (`v0.0.3`), re-run
+   `configure-vault.sh` so `homelab/tle-dev/misc` holds
+   `AUDIT_SERVICE_CREDENTIAL`, and check `tle-admin-dev-misc-secrets` the same
+   way (printed length `64` for the 48-character value). admin-audit-writer
+   and internal-admin-gateway fail startup without it. The `v0.0.3` pin
+   change itself also:
+
+   - moves `tle-dev-metadata-service` from sync wave `5` back to `2`;
+   - drops the edge's `KEYCLOAK_ISSUER`, `KEYCLOAK_OPERATOR_CLIENT_ID` and
+     `KEYCLOAK_JWKS_URI` env (only the `v0.0.2` gateway requires them; the
+     `AUTH_*` trio replaces them, The-Last-Exam/server#261);
+   - re-vendors `deploy-info/` from the tag, as in step 1.
 3. Sync Keycloak and `tle-dev`. After the metadata hook completes, confirm
    that the forward migration was recorded and the old table is absent,
    without reading application data:
@@ -223,7 +236,7 @@ no database mutation.
       `auth-service`, `lobby-service`, `matchmaking-service`,
       `metadata-service`, `notification-service`, `player-service`, and
       `social-service`; live rollout evidence is still outstanding --
-      `metadata-service` needs MinIO (see Object storage above). Game Master
+      `metadata-service` needs the `v0.0.3` image (see Object storage above). Game Master
       is now declared by issue #44; its live registry and mutation acceptance
       remains pending the issue #48 game-pod environment described below.
 - [ ] On the first fresh-environment reconciliation, the metadata baseline hook

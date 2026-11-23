@@ -543,6 +543,52 @@ spec:
         - protocol: TCP
           port: 9080
 ---
+# player-service provisions starter loadouts from metadata-service
+# (The-Last-Exam/server#263, from v0.0.3): HTTP 8080 and gRPC 9091.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-player-metadata-egress
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchLabels:
+      app: tle-dev-player-service
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-metadata-service
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 9091
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tle-dev-metadata-from-player
+  namespace: tle-dev
+spec:
+  podSelector:
+    matchLabels:
+      app: tle-dev-metadata-service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-player-service
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 9091
+---
 # Prometheus scrapes edge + service metrics (port 9000, in-cluster only).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

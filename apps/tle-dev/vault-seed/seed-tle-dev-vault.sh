@@ -4,7 +4,7 @@
 # configure-vault.sh (run first, inside vault-0) owns policies, roles, the
 # generated passwords and the `disabled` placeholders, so after it every
 # VaultStaticSecret syncs. This script only OVERWRITES placeholders with
-# real product values: JWT keys, OAuth secrets, MinIO, push credentials.
+# real product values: JWT keys, OAuth secrets, push credentials.
 # Empty or absent keys are skipped, so generated values are never clobbered.
 #
 # Usage:

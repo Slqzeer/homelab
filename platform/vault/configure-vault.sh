@@ -743,7 +743,8 @@ tle_ensure_field homelab/tle-dev/misc CSRF_SECRET "generated"
 for spec in "METADATA_GRPC_INTERNAL_TOKEN 32" \
   "NOTIFICATION_WEBHOOK_SIGNING_SECRET 32" \
   "GAME_MASTER_POD_REGISTRY_CREDENTIAL 48" \
-  "GAME_MASTER_MATCHMAKING_CREDENTIAL 48"; do
+  "GAME_MASTER_MATCHMAKING_CREDENTIAL 48" \
+  "AUDIT_SERVICE_CREDENTIAL 48"; do
   set -- $spec
   tle_generate "$2"
   tle_ensure_field homelab/tle-dev/misc "$1" "generated"
@@ -761,22 +762,24 @@ tle_ensure_field homelab/tle-dev/auth AUTH_SIGNING_STORE_KEY "generated"
 # orphans every stored TOTP enrollment unless the data is re-encrypted.
 tle_generate_base64 32
 tle_ensure_field homelab/tle-dev/auth AUTH_TOTP_ENCRYPTION_KEY "generated"
-for f in MINIO_ACCESS_KEY MINIO_SECRET_KEY NOTIFICATION_APNS_PRIVATE_KEY \
+# No MinIO placeholders: from v0.0.3 metadata-service has no object storage
+# (The-Last-Exam/server#305, issue #96). Existing MINIO_* fields are inert.
+for f in NOTIFICATION_APNS_PRIVATE_KEY \
   NOTIFICATION_FCM_CREDENTIALS_JSON AUTH_JWT_ED25519_PRIVATE_KEY_PEM \
   AUTH_JWT_ED25519_STAGED_PRIVATE_KEY_PEM APPLE_PRIVATE_KEY \
   APPLE_CLIENT_SECRET_OVERRIDE DISCORD_CLIENT_SECRET GOOGLE_CLIENT_SECRET; do
   case "$f" in
-    MINIO_*|AUTH_JWT_ED25519_PRIVATE_KEY_PEM) kind="placeholder REQUIRED" ;;
+    AUTH_JWT_ED25519_PRIVATE_KEY_PEM) kind="placeholder REQUIRED" ;;
     *) kind="placeholder optional" ;;
   esac
   tle_placeholder
   case "$f" in
-    MINIO_*|NOTIFICATION_APNS*|NOTIFICATION_FCM*) tle_ensure_field homelab/tle-dev/misc "$f" "$kind" ;;
+    NOTIFICATION_APNS*|NOTIFICATION_FCM*) tle_ensure_field homelab/tle-dev/misc "$f" "$kind" ;;
     *) tle_ensure_field homelab/tle-dev/auth "$f" "$kind" ;;
   esac
 done
 rm -f "$TLE_READ" "$TLE_VAL" "$TLE_POD_CREDENTIAL" "$TLE_MATCHMAKING_CREDENTIAL"
-echo "    NOTE: placeholders marked REQUIRED (JWT private key, MinIO pair)"
+echo "    NOTE: the placeholder marked REQUIRED (JWT private key)"
 echo "    must be replaced via apps/tle-dev/vault-seed/seed-tle-dev-vault.sh"
 echo "    before the workloads can actually run; sync alone is not enough"
 
