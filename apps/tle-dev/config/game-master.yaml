@@ -119,7 +119,7 @@ spec:
       containers:
         - name: game-master
           image: >-
-            ghcr.io/the-last-exam/game-master:v0.0.3@sha256:377947da45355f30b9db2d654d761b40c1b535405cae4eae2dd41d825ac5b68c
+            ghcr.io/the-last-exam/game-master:v0.0.4@sha256:0bb142b11657bb6ee370ec28e16e915126bfcd7cedbf6f0b1b0bf2c72428eec2
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -154,7 +154,7 @@ spec:
               value: "1"
             - name: GAME_POD_IMAGE
               value: >-
-                ghcr.io/the-last-exam/game-service:v0.0.3@sha256:1a839f3b6074be0e73ba1d35909139c85fba0aed2cccb5db890c44f1e3e847cd
+                ghcr.io/the-last-exam/game-service:v0.0.4@sha256:b2dd8eae8f95d50467df73ee8c4e582f3957c82e806cc5553b88b4500edcbadd
             - name: GAME_POD_PUBLIC_WS_URL
               value: ws://tle-dev-edge.tle-dev.svc.cluster.local:8080/game/v1/ws
             # Issue #48 supplies this object before live game-pod acceptance.

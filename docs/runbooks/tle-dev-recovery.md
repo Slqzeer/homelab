@@ -9,14 +9,14 @@ re-vendor on each TLE release with `gh api repos/The-Last-Exam/server/...`).
 
 | Item | Value |
 | --- | --- |
-| TLE release | `v0.0.3` (tag `f5138fdb`; images and deploy-info) |
-| deploy-info vendored | 2026-11-23 from `v0.0.3`: `config-keys.json`, `public-routes.json`, `identity-headers.json`, `role-manifest.json` (the last two unchanged since `v0.0.2`) |
-| Edge image `tag@digest` | api-gateway `v0.0.3@sha256:04dccc98e599954bf979e41f8329cecfefeed885743abcc5bce8cc219787fe46` (source: The-Last-Exam/server publish-images run 45238784021, artifact `image-record-v0.0.3/images.json`) |
-| WebSocket image `tag@digest` | wsterminator `v0.0.3@sha256:63ccf2fd82a47a928d5843891b69f95be34bdcb678df82fe9466bc650445b5ad` (source: the same publish-images run) |
-| Service images `tag@digest` | auth-service `v0.0.3@sha256:70009df8456783245ac1aaa4eb8e0c75bd983408563bfaf897ffbab5c12c2385`; lobby-service `v0.0.3@sha256:c8360e0b09a31f3b210b237bfda7a901d59f6a6eaf1772ba5e4d64c0dcdddf78`; matchmaking-service `v0.0.3@sha256:9ded3f302461afe7444c8642921109fea8356f4096be45d8028243554b5c212b`; metadata-service `v0.0.3@sha256:b59d44a41d168cc82dd9d0976de9235566f4787eaf00909533edb38f1f9f922e`; notification-service `v0.0.3@sha256:4d16c565643f0a9e533466bddec885780bee9b89c4be6ebd7951a7f85b3d1211`; player-service `v0.0.3@sha256:bba5307a11f63bb01301854a4065f9e02620e8cb21d1cf8d683a162161b23a03`; social-service `v0.0.3@sha256:04dc4e4f02d0bbabc9a30e9a6cd62a24428aac1146dd7d5cfd9d19395d2ccdb8` (source: the same publish-images run) |
-| Game control images `tag@digest` | game-master `v0.0.3@sha256:377947da45355f30b9db2d654d761b40c1b535405cae4eae2dd41d825ac5b68c`; game-service `v0.0.3@sha256:1a839f3b6074be0e73ba1d35909139c85fba0aed2cccb5db890c44f1e3e847cd` (source: the same publish-images run) |
-| Admin images `tag@digest` | admin-audit-writer `v0.0.3@sha256:1afd46a2ea160c613c0a514855f85892c548fa99c7654e1c8860c41b24ab336a`; internal-admin-gateway `v0.0.3@sha256:2545b3f1f3c9142901b885aa36c46a061e37e9279f0cd3707cc760e407aa25b7`; internal-ops-gateway `v0.0.3@sha256:7a80049fdcf265fc4d84eafe308388f67d9daf83a01bc5b6304121b6219f47ea`; projection-writer `v0.0.3@sha256:66f79b33cbe6b5a7a81b3fb1de717c4558ed411738053f0c08f90febe4572463` (source: the same publish-images run) |
-| Quest image `tag@digest` | quest-service `v0.0.3@sha256:963b384cedfef0635268612c71a9fae45d8adf9e6939ba8de106eecc889943f8` (source: the same publish-images run) |
+| TLE release | `v0.0.4` (tag `b5808df8`; images and deploy-info) |
+| deploy-info vendored | 2026-11-24 from `v0.0.4`: `config-keys.json` (only change since `v0.0.3`: internal-ops-gateway `AUDIT_SERVICE_CREDENTIAL`); `public-routes.json` from `v0.0.3`; `identity-headers.json`, `role-manifest.json` unchanged since `v0.0.2` |
+| Edge image `tag@digest` | api-gateway `v0.0.4@sha256:ff0851f7f0b253d4ae1dea156a41566a4210baa525fac3071b61caf0f5df4844` (source: The-Last-Exam/server publish-images run 45291449093, artifact `image-record-v0.0.4/images.json`) |
+| WebSocket image `tag@digest` | wsterminator `v0.0.4@sha256:09b6ab683aa6d89fcf3a261270b35878ccf512e55b01ea4f2bba4a7ab7bfaab4` (source: the same publish-images run) |
+| Service images `tag@digest` | auth-service `v0.0.4@sha256:2a084f6eed53ee7d623fcb03a15174e40b5d899261a290f0e5f854da4f71ead9`; lobby-service `v0.0.4@sha256:91f48677b55c5362a7b1ede5eecbc5dcf41eb1802bfb36ce2012a60451ad7cd8`; matchmaking-service `v0.0.4@sha256:53efa09c39b6154652d771a0e7136d129b7c90c35ac7ed754fbc74eb72dfeac6`; metadata-service `v0.0.4@sha256:e96fc291b4049826cd4b2e3be74b32dc7fcb0379737ea636643a9b49d432dbde`; notification-service `v0.0.4@sha256:fbed514f4c7e07f31a9ce8f7d00872b6d301b47ab596cfa8decbd5eed2e3e247`; player-service `v0.0.4@sha256:541d36747a450b4c38983e5574827fea56f24bd9a6cd516377b0744687390d25`; social-service `v0.0.4@sha256:d26d53dbd2ee899ea0184e603a1405ca5fafa57649faf25e1d1d285fde4bd98a` (source: the same publish-images run) |
+| Game control images `tag@digest` | game-master `v0.0.4@sha256:0bb142b11657bb6ee370ec28e16e915126bfcd7cedbf6f0b1b0bf2c72428eec2`; game-service `v0.0.4@sha256:b2dd8eae8f95d50467df73ee8c4e582f3957c82e806cc5553b88b4500edcbadd` (source: the same publish-images run) |
+| Admin images `tag@digest` | admin-audit-writer `v0.0.4@sha256:50440fe8ea0c9d23d2b373a1926ad3d2b4a1fec0a361fc14ea0c8e3ad2100d3e`; internal-admin-gateway `v0.0.4@sha256:4b02b74c05819f52563e7a1851c068f14228b4e41eda1e06308b31f990d0acc7`; internal-ops-gateway `v0.0.4@sha256:3c4c9d387921bfcc229eaeb8a0a8085ffcbe5710b00e169fea4914ef459d70f9`; projection-writer `v0.0.4@sha256:7bb6d336f54a22bac2937973e395bef4de21d79b419c8d36e646d138d5b67d8f` (source: the same publish-images run) |
+| Quest image `tag@digest` | quest-service `v0.0.4@sha256:3bb6b6b07effc8d19b7a3e2748f34addf630150d77a21f63684c1dd2375a4c2f` (source: the same publish-images run) |
 | Role manifest version | `1` (registry schema `1.3`) |
 | Identity headers | 26 headers + 5 prefixes (see `edge-config.yaml`) |
 | Public routes | 74 routes across 8 services (see `public-routes.json`) |
@@ -137,7 +137,8 @@ workloads can run; sync alone is not enough.
    `configure-vault.sh` so `homelab/tle-dev/misc` holds
    `AUDIT_SERVICE_CREDENTIAL`, and check `tle-admin-dev-misc-secrets` the same
    way (printed length `64` for the 48-character value). admin-audit-writer
-   and internal-admin-gateway fail startup without it.
+   and internal-admin-gateway fail startup without it, and from `v0.0.4`
+   (The-Last-Exam/server#327) so does internal-ops-gateway.
 3. Sync Keycloak and `tle-dev`. After the metadata hook completes, confirm
    that the forward migration was recorded and the old table is absent,
    without reading application data:
