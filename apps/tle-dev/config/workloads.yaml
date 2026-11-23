@@ -246,7 +246,13 @@ metadata:
     app: tle-dev-lobby-service
     app-group: tle-dev-service
 spec:
+  # Four durable push consumers with no queue group (lobby-notification,
+  # -party, -social, -game-match): NATS allows each one subscriber, so a
+  # surged pod exits with "consumer is already bound to a subscription".
+  # Recreate releases them first (as player-service and projection-writer).
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: tle-dev-lobby-service
