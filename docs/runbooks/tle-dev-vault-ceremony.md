@@ -64,8 +64,9 @@ script):
   `METADATA_GRPC_INTERNAL_TOKEN`, `NOTIFICATION_WEBHOOK_SIGNING_SECRET`
   and the distinct 48-character `GAME_MASTER_POD_REGISTRY_CREDENTIAL`
   and `GAME_MASTER_MATCHMAKING_CREDENTIAL`, and the 48-character
-  `AUDIT_SERVICE_CREDENTIAL` shared by `internal-admin-gateway` and
-  `admin-audit-writer` (projected into `tle-admin-dev`), in
+  `AUDIT_SERVICE_CREDENTIAL` shared by `admin-audit-writer`,
+  `internal-admin-gateway` and `internal-ops-gateway` (projected into
+  `tle-admin-dev`), in
   `homelab/tle-dev/misc`;
   `AUTH_SIGNING_STORE_KEY` and `AUTH_TOTP_ENCRYPTION_KEY` (each base64,
   32 raw bytes, not alphanumeric-restricted) in `homelab/tle-dev/auth`.

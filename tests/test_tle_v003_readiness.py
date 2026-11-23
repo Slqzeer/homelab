@@ -81,6 +81,12 @@ class PlayerTokenClaimsTests(unittest.TestCase):
 
 class AuditServiceCredentialTests(unittest.TestCase):
     KEY = "AUDIT_SERVICE_CREDENTIAL"
+    # admin-audit-writer checks it; both gateways present it (server#172, #327).
+    CONSUMERS = (
+        "tle-dev-admin-audit-writer",
+        "tle-dev-internal-admin-gateway",
+        "tle-dev-internal-ops-gateway",
+    )
 
     def test_vault_projection_carries_the_credential_and_restarts_both(self):
         spec = find("admin-secrets.yaml", "VaultStaticSecret", "tle-admin-dev-misc")["spec"]
@@ -89,11 +95,11 @@ class AuditServiceCredentialTests(unittest.TestCase):
             {"text": '{{ get .Secrets "AUDIT_SERVICE_CREDENTIAL" }}'},
             spec["destination"]["transformation"]["templates"][self.KEY],
         )
-        for name in ("tle-dev-internal-admin-gateway", "tle-dev-admin-audit-writer"):
+        for name in self.CONSUMERS:
             self.assertIn({"kind": "Deployment", "name": name}, spec["rolloutRestartTargets"])
 
     def test_gateway_and_writer_read_the_same_secret_key(self):
-        for deployment in ("tle-dev-internal-admin-gateway", "tle-dev-admin-audit-writer"):
+        for deployment in self.CONSUMERS:
             item = container_env("admin-workloads.yaml", deployment)[self.KEY]
             self.assertNotIn("value", item)
             self.assertEqual(

@@ -1134,6 +1134,14 @@
       "example": "services/internal-ops-gateway/.env.example",
       "keys": [
         {
+          "name": "AUDIT_SERVICE_CREDENTIAL",
+          "required": true,
+          "required_when": null,
+          "secret": true,
+          "points_to": null,
+          "description": "Shared bearer credential presented to admin-audit-writer's /audit routes."
+        },
+        {
           "name": "AUDIT_WRITER_URL",
           "required": true,
           "required_when": null,

@@ -14,8 +14,8 @@ ADMIN_NAMESPACE = "tle-admin-dev"
 EXPECTED = {
     "tle-dev-admin-audit-writer": {
         "image": (
-            "ghcr.io/the-last-exam/admin-audit-writer:v0.0.3@sha256:"
-            "1afd46a2ea160c613c0a514855f85892c548fa99c7654e1c8860c41b24ab336a"
+            "ghcr.io/the-last-exam/admin-audit-writer:v0.0.4@sha256:"
+            "50440fe8ea0c9d23d2b373a1926ad3d2b4a1fec0a361fc14ea0c8e3ad2100d3e"
         ),
         "replicas": 2,
         "probes": ("/healthz", "/healthz", "/readyz"),
@@ -25,8 +25,8 @@ EXPECTED = {
     },
     "tle-dev-internal-admin-gateway": {
         "image": (
-            "ghcr.io/the-last-exam/internal-admin-gateway:v0.0.3@sha256:"
-            "2545b3f1f3c9142901b885aa36c46a061e37e9279f0cd3707cc760e407aa25b7"
+            "ghcr.io/the-last-exam/internal-admin-gateway:v0.0.4@sha256:"
+            "4b02b74c05819f52563e7a1851c068f14228b4e41eda1e06308b31f990d0acc7"
         ),
         "replicas": 2,
         "probes": (None, "/healthz", "/readyz"),
@@ -36,8 +36,8 @@ EXPECTED = {
     },
     "tle-dev-internal-ops-gateway": {
         "image": (
-            "ghcr.io/the-last-exam/internal-ops-gateway:v0.0.3@sha256:"
-            "7a80049fdcf265fc4d84eafe308388f67d9daf83a01bc5b6304121b6219f47ea"
+            "ghcr.io/the-last-exam/internal-ops-gateway:v0.0.4@sha256:"
+            "3c4c9d387921bfcc229eaeb8a0a8085ffcbe5710b00e169fea4914ef459d70f9"
         ),
         "replicas": 2,
         "probes": (None, "/healthz", "/readyz"),
@@ -47,8 +47,8 @@ EXPECTED = {
     },
     "tle-dev-projection-writer": {
         "image": (
-            "ghcr.io/the-last-exam/projection-writer:v0.0.3@sha256:"
-            "66f79b33cbe6b5a7a81b3fb1de717c4558ed411738053f0c08f90febe4572463"
+            "ghcr.io/the-last-exam/projection-writer:v0.0.4@sha256:"
+            "7bb6d336f54a22bac2937973e395bef4de21d79b419c8d36e646d138d5b67d8f"
         ),
         "replicas": 1,
         "probes": (None, "/healthz", "/readyz"),
