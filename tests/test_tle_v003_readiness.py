@@ -143,6 +143,12 @@ class PlayerMetadataTests(unittest.TestCase):
         )
 
 
+class PlayerServiceRolloutTests(unittest.TestCase):
+    def test_player_service_recreates_so_its_durable_consumer_is_released(self):
+        spec = find("workloads.yaml", "Deployment", "tle-dev-player-service")["spec"]
+        self.assertEqual(1, spec["replicas"])
+        self.assertEqual({"type": "Recreate"}, spec["strategy"])
+
 class MinioRemovalTests(unittest.TestCase):
     def test_no_tle_dev_manifest_or_ceremony_mentions_minio_keys(self):
         paths = [CONFIG / name for name in documents("kustomization.yaml")[0]["resources"]]

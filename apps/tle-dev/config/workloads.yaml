@@ -799,7 +799,13 @@ metadata:
     app: tle-dev-player-service
     app-group: tle-dev-service
 spec:
+  # v0.0.2 holds a durable push consumer with no queue group, and NATS allows
+  # it one subscriber: a surged pod exits with "consumer is already bound to
+  # a subscription" while the old one keeps it, stalling every rollout.
+  # Recreate releases it before the new pod subscribes (as projection-writer).
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: tle-dev-player-service
