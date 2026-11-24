@@ -169,6 +169,20 @@ class DurablePushConsumerRolloutTests(unittest.TestCase):
                     if hpa["kind"] == "HorizontalPodAutoscaler" and hpa["spec"]["scaleTargetRef"]["name"] == name:
                         self.assertEqual(1, hpa["spec"]["maxReplicas"])
 
+class EdgeRateLimitStorageTests(unittest.TestCase):
+    def test_edge_reaches_valkey_both_ways(self):
+        # The JWT plugin rate-limits through Valkey and fails closed (503
+        # rate_limit_unavailable) when it cannot reach it.
+        valkey = {"podSelector": {"matchLabels": {"app": "tle-dev-valkey"}}}
+        port = [{"protocol": "TCP", "port": 6379}]
+        egress = find("networkpolicy.yaml", "NetworkPolicy", "tle-dev-edge-egress-services")
+        self.assertIn({"to": [valkey], "ports": port}, egress["spec"]["egress"])
+        ingress = find("networkpolicy.yaml", "NetworkPolicy", "tle-dev-valkey-clients")
+        self.assertIn(
+            {"podSelector": {"matchLabels": {"app": "tle-dev-edge"}}},
+            ingress["spec"]["ingress"][0]["from"],
+        )
+
 class MinioRemovalTests(unittest.TestCase):
     def test_no_tle_dev_manifest_or_ceremony_mentions_minio_keys(self):
         paths = [CONFIG / name for name in documents("kustomization.yaml")[0]["resources"]]

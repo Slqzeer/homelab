@@ -165,6 +165,17 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
+    # The JWT plugin's rate limiter stores its counters in Valkey
+    # (VALKEY_ADDR). Without this flow every protected route fails closed
+    # with 503 rate_limit_unavailable. tle-dev-valkey-clients already admits
+    # the edge on the ingress side.
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tle-dev-valkey
+      ports:
+        - protocol: TCP
+          port: 6379
 ---
 # WebSocket terminator -> auth JWKS and Lobby WebSocket upstream.
 apiVersion: networking.k8s.io/v1
