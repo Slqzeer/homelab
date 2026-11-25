@@ -131,6 +131,41 @@ spec:
         runAsUser: 10001
         seccompProfile:
           type: RuntimeDefault
+      # api-gateway v0.0.4 can stay in 503 auth_unavailable until restarted
+      # when its first JWKS fetch fails, and its /readyz does not reflect it
+      # (The-Last-Exam/server#328). Wait for auth-service to publish at least
+      # one key before starting the gateway, so a whole-namespace restart
+      # cannot reproduce it. Reuses the gateway image (it ships sh and wget).
+      # Covers cold starts only; drop this once server#328 ships.
+      initContainers:
+        - name: wait-for-auth-jwks
+          image: >-
+            ghcr.io/the-last-exam/api-gateway:v0.0.4@sha256:ff0851f7f0b253d4ae1dea156a41566a4210baa525fac3071b61caf0f5df4844
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              until wget -q -T 5 -O - "$AUTH_JWKS_URI" 2>/dev/null | grep -q '"kty"'; do
+                echo "waiting for auth-service JWKS at $AUTH_JWKS_URI"; sleep 2
+              done
+          env:
+            - name: AUTH_JWKS_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: tle-dev-edge-config
+                  key: auth-jwks-uri
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
       containers:
         - name: edge
           image: >-
