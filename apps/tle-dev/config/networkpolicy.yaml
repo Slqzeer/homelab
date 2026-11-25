@@ -723,8 +723,9 @@ spec:
           port: 9100
 ---
 # Game Master needs state backends for reconciliation and player-service gRPC
-# when it allocates a game pod. DNS and Kubernetes API access are supplied by
-# tle-dev-dns-api above.
+# when it allocates a game pod. It also calls each game pod's HTTP port: the
+# warm-pool readiness check and POST /match/assign. DNS and Kubernetes API
+# access are supplied by tle-dev-dns-api and tle-dev-game-master-kubernetes-api.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -758,6 +759,13 @@ spec:
       ports:
         - protocol: TCP
           port: 9090
+    - to:
+        - podSelector:
+            matchLabels:
+              role: game-pod
+      ports:
+        - protocol: TCP
+          port: 8080
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -781,7 +789,8 @@ spec:
 ---
 # Dynamically created game pods have no stable app label or Service. Select
 # only Game Master's role label and permit the four runtime dependencies plus
-# the edge's game route. DNS is isolated in the following policy so these pods
+# 8080 from the edge's game route, the WebSocket terminator, and Game Master
+# (readiness check and match assignment). DNS is isolated in the following policy so these pods
 # do not inherit the managed-workload Kubernetes API allowance above.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -803,6 +812,9 @@ spec:
         - podSelector:
             matchLabels:
               app: tle-dev-wsterminator
+        - podSelector:
+            matchLabels:
+              app: tle-dev-game-master
       ports:
         - protocol: TCP
           port: 8080
