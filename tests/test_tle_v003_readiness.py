@@ -183,6 +183,29 @@ class EdgeRateLimitStorageTests(unittest.TestCase):
             ingress["spec"]["ingress"][0]["from"],
         )
 
+class EdgeWaitsForAuthJwksTests(unittest.TestCase):
+    # api-gateway v0.0.4 can stay in 503 auth_unavailable when its first
+    # JWKS fetch fails (The-Last-Exam/server#328), so the pod waits for
+    # auth-service's JWKS before starting the gateway.
+    def setUp(self):
+        self.spec = find("edge-config.yaml", "Deployment", "tle-dev-edge")["spec"]["template"]["spec"]
+        self.init = next(c for c in self.spec["initContainers"] if c["name"] == "wait-for-auth-jwks")
+
+    def test_init_container_polls_the_gateway_jwks_uri(self):
+        env = {item["name"]: item for item in self.init["env"]}
+        self.assertEqual({"name": "AUTH_JWKS_URI", "valueFrom": config_ref("auth-jwks-uri")}, env["AUTH_JWKS_URI"])
+        self.assertIn('"$AUTH_JWKS_URI"', self.init["command"][-1])
+
+    def test_init_container_reuses_the_pinned_gateway_image(self):
+        # Bump both together: a pin update must not leave the wait on an old image.
+        self.assertEqual(self.spec["containers"][0]["image"], self.init["image"])
+
+    def test_init_container_is_unprivileged(self):
+        context = self.init["securityContext"]
+        self.assertFalse(context["allowPrivilegeEscalation"])
+        self.assertEqual(["ALL"], context["capabilities"]["drop"])
+
+
 class MinioRemovalTests(unittest.TestCase):
     def test_no_tle_dev_manifest_or_ceremony_mentions_minio_keys(self):
         paths = [CONFIG / name for name in documents("kustomization.yaml")[0]["resources"]]
