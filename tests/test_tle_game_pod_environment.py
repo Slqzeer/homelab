@@ -124,9 +124,22 @@ class TleGamePodEnvironmentTests(unittest.TestCase):
         )
         self.assertEqual(["Ingress", "Egress"], game_pod["spec"]["policyTypes"])
         self.assertEqual(
-            [({"app": "tle-dev-edge"}, 8080)],
             [
-                (rule["from"][0]["podSelector"]["matchLabels"], rule["ports"][0]["port"])
+                (
+                    [
+                        {"app": "tle-dev-edge"},
+                        {"app": "tle-dev-wsterminator"},
+                        # Game Master probes readiness and assigns matches here.
+                        {"app": "tle-dev-game-master"},
+                    ],
+                    8080,
+                )
+            ],
+            [
+                (
+                    [peer["podSelector"]["matchLabels"] for peer in rule["from"]],
+                    rule["ports"][0]["port"],
+                )
                 for rule in game_pod["spec"]["ingress"]
             ],
         )

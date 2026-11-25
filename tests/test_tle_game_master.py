@@ -156,16 +156,18 @@ class TleGameMasterTests(unittest.TestCase):
         self.assertEqual({"app": GAME_MASTER_APP}, game_master["spec"]["podSelector"]["matchLabels"])
         actual = {
             (
-                rule["to"][0]["podSelector"]["matchLabels"]["app"],
+                tuple(rule["to"][0]["podSelector"]["matchLabels"].items()),
                 rule["ports"][0]["port"],
             )
             for rule in game_master["spec"]["egress"]
         }
         self.assertEqual(
             {
-                ("tle-dev-nats", 4222),
-                ("tle-dev-valkey", 6379),
-                ("tle-dev-player-service", 9090),
+                ((("app", "tle-dev-nats"),), 4222),
+                ((("app", "tle-dev-valkey"),), 6379),
+                ((("app", "tle-dev-player-service"),), 9090),
+                # Readiness probe and POST /match/assign on the game pod HTTP port.
+                ((("role", "game-pod"),), 8080),
             },
             actual,
         )
