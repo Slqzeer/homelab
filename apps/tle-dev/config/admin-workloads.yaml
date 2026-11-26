@@ -6,8 +6,8 @@
 # lands here; issue #45 adds the explicit cross-namespace NetworkPolicies.
 # Deployments and HPAs sync in wave 4, after every tle-dev wave.
 #
-# Images are pinned from The-Last-Exam/server release v0.0.4, publish-images
-# run 45291449093 (artifact image-record-v0.0.4/images.json).
+# Images are pinned from The-Last-Exam/server release v0.0.5, publish-images
+# run 45806100273 (artifact image-record-v0.0.5/images.json).
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -67,7 +67,7 @@ spec:
       containers:
         - name: admin-audit-writer
           image: >-
-            ghcr.io/the-last-exam/admin-audit-writer:v0.0.4@sha256:50440fe8ea0c9d23d2b373a1926ad3d2b4a1fec0a361fc14ea0c8e3ad2100d3e
+            ghcr.io/the-last-exam/admin-audit-writer:v0.0.5@sha256:be95d5102e3b8f72465436eb0504b2952920ebd8399ee86498e06dc30a3965ac
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -218,7 +218,7 @@ spec:
       containers:
         - name: internal-admin-gateway
           image: >-
-            ghcr.io/the-last-exam/internal-admin-gateway:v0.0.4@sha256:4b02b74c05819f52563e7a1851c068f14228b4e41eda1e06308b31f990d0acc7
+            ghcr.io/the-last-exam/internal-admin-gateway:v0.0.5@sha256:b92d59efde2eb8534b2073acb1f10b12bb6cbd4eaf4324d55ad24145a5095310
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -381,7 +381,7 @@ spec:
       containers:
         - name: internal-ops-gateway
           image: >-
-            ghcr.io/the-last-exam/internal-ops-gateway:v0.0.4@sha256:3c4c9d387921bfcc229eaeb8a0a8085ffcbe5710b00e169fea4914ef459d70f9
+            ghcr.io/the-last-exam/internal-ops-gateway:v0.0.5@sha256:b654975d264160f771d7f7b2069995c56879ccbc40639ad52ce4c2d8967e7b2f
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -537,7 +537,7 @@ spec:
       containers:
         - name: projection-writer
           image: >-
-            ghcr.io/the-last-exam/projection-writer:v0.0.4@sha256:7bb6d336f54a22bac2937973e395bef4de21d79b419c8d36e646d138d5b67d8f
+            ghcr.io/the-last-exam/projection-writer:v0.0.5@sha256:5f5b8931acd742b517f8c93523476a6a25e12fb4ceeb542edd86cbb67ca0d8eb
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false

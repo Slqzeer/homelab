@@ -1,6 +1,6 @@
 # TLE quest-service roles and ordered rollout hooks (issue #54).
 #
-# Image: The-Last-Exam/server v0.0.4, publish-images run 45291449093.
+# Image: The-Last-Exam/server v0.0.5, publish-images run 45806100273.
 # The two Sync hooks use waves 1 and 2 so wave-0 ConfigMaps, VSO projections,
 # and policies exist first. The five Deployments use wave 3, so migration
 # succeeds before the baseline seed and both succeed before rollout.
@@ -127,7 +127,7 @@ spec:
       containers:
         - name: quest-migrate
           image: >-
-            ghcr.io/the-last-exam/quest-service:v0.0.4@sha256:3bb6b6b07effc8d19b7a3e2748f34addf630150d77a21f63684c1dd2375a4c2f
+            ghcr.io/the-last-exam/quest-service:v0.0.5@sha256:d34afe8e45412ecb62f626172069021eb600fe598ede2a4c4ba100ab57294927
           imagePullPolicy: IfNotPresent
           command:
             - /usr/local/bin/quest-migrate
@@ -198,7 +198,7 @@ spec:
       containers:
         - name: quest-seed-baseline
           image: >-
-            ghcr.io/the-last-exam/quest-service:v0.0.4@sha256:3bb6b6b07effc8d19b7a3e2748f34addf630150d77a21f63684c1dd2375a4c2f
+            ghcr.io/the-last-exam/quest-service:v0.0.5@sha256:d34afe8e45412ecb62f626172069021eb600fe598ede2a4c4ba100ab57294927
           imagePullPolicy: IfNotPresent
           command:
             - /usr/local/bin/quest-seed-baseline
@@ -273,7 +273,7 @@ spec:
       containers:
         - name: quest-service
           image: >-
-            ghcr.io/the-last-exam/quest-service:v0.0.4@sha256:3bb6b6b07effc8d19b7a3e2748f34addf630150d77a21f63684c1dd2375a4c2f
+            ghcr.io/the-last-exam/quest-service:v0.0.5@sha256:d34afe8e45412ecb62f626172069021eb600fe598ede2a4c4ba100ab57294927
           imagePullPolicy: IfNotPresent
           args:
             - -env
@@ -386,7 +386,7 @@ spec:
       containers:
         - name: quest-service
           image: >-
-            ghcr.io/the-last-exam/quest-service:v0.0.4@sha256:3bb6b6b07effc8d19b7a3e2748f34addf630150d77a21f63684c1dd2375a4c2f
+            ghcr.io/the-last-exam/quest-service:v0.0.5@sha256:d34afe8e45412ecb62f626172069021eb600fe598ede2a4c4ba100ab57294927
           imagePullPolicy: IfNotPresent
           args:
             - -env
@@ -477,7 +477,7 @@ spec:
       containers:
         - name: quest-service
           image: >-
-            ghcr.io/the-last-exam/quest-service:v0.0.4@sha256:3bb6b6b07effc8d19b7a3e2748f34addf630150d77a21f63684c1dd2375a4c2f
+            ghcr.io/the-last-exam/quest-service:v0.0.5@sha256:d34afe8e45412ecb62f626172069021eb600fe598ede2a4c4ba100ab57294927
           imagePullPolicy: IfNotPresent
           args:
             - -env
@@ -590,7 +590,7 @@ spec:
       containers:
         - name: quest-service
           image: >-
-            ghcr.io/the-last-exam/quest-service:v0.0.4@sha256:3bb6b6b07effc8d19b7a3e2748f34addf630150d77a21f63684c1dd2375a4c2f
+            ghcr.io/the-last-exam/quest-service:v0.0.5@sha256:d34afe8e45412ecb62f626172069021eb600fe598ede2a4c4ba100ab57294927
           imagePullPolicy: IfNotPresent
           args:
             - -env
@@ -693,7 +693,7 @@ spec:
       containers:
         - name: quest-service
           image: >-
-            ghcr.io/the-last-exam/quest-service:v0.0.4@sha256:3bb6b6b07effc8d19b7a3e2748f34addf630150d77a21f63684c1dd2375a4c2f
+            ghcr.io/the-last-exam/quest-service:v0.0.5@sha256:d34afe8e45412ecb62f626172069021eb600fe598ede2a4c4ba100ab57294927
           imagePullPolicy: IfNotPresent
           args:
             - -env
