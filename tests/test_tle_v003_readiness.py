@@ -183,27 +183,23 @@ class EdgeRateLimitStorageTests(unittest.TestCase):
             ingress["spec"]["ingress"][0]["from"],
         )
 
-class EdgeWaitsForAuthJwksTests(unittest.TestCase):
-    # api-gateway v0.0.4 can stay in 503 auth_unavailable when its first
-    # JWKS fetch fails (The-Last-Exam/server#328), so the pod waits for
-    # auth-service's JWKS before starting the gateway.
+class EdgeReadinessGatesOnAuthJwksTests(unittest.TestCase):
+    # api-gateway v0.0.5 answers /readyz with 503 until its first JWKS load
+    # (The-Last-Exam/server#328), so the readiness probe alone holds the edge
+    # back while auth-service is down; the v0.0.4 init wait is gone.
     def setUp(self):
         self.spec = find("edge-config.yaml", "Deployment", "tle-dev-edge")["spec"]["template"]["spec"]
-        self.init = next(c for c in self.spec["initContainers"] if c["name"] == "wait-for-auth-jwks")
 
-    def test_init_container_polls_the_gateway_jwks_uri(self):
-        env = {item["name"]: item for item in self.init["env"]}
-        self.assertEqual({"name": "AUTH_JWKS_URI", "valueFrom": config_ref("auth-jwks-uri")}, env["AUTH_JWKS_URI"])
-        self.assertIn('"$AUTH_JWKS_URI"', self.init["command"][-1])
+    def test_edge_has_no_init_wait(self):
+        self.assertNotIn("initContainers", self.spec)
 
-    def test_init_container_reuses_the_pinned_gateway_image(self):
-        # Bump both together: a pin update must not leave the wait on an old image.
-        self.assertEqual(self.spec["containers"][0]["image"], self.init["image"])
+    def test_readiness_probe_hits_the_jwks_gated_readyz(self):
+        probe = self.spec["containers"][0]["readinessProbe"]["httpGet"]
+        self.assertEqual({"path": "/readyz", "port": "http"}, probe)
 
-    def test_init_container_is_unprivileged(self):
-        context = self.init["securityContext"]
-        self.assertFalse(context["allowPrivilegeEscalation"])
-        self.assertEqual(["ALL"], context["capabilities"]["drop"])
+    def test_gateway_is_at_least_v0_0_5(self):
+        image = self.spec["containers"][0]["image"]
+        self.assertNotRegex(image, r":v0\.0\.[0-4]@")
 
 
 class MinioRemovalTests(unittest.TestCase):

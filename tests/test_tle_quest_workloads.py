@@ -9,8 +9,8 @@ import yaml
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = "apps/tle-dev/config/quest-workloads.yaml"
 IMAGE = (
-    "ghcr.io/the-last-exam/quest-service:v0.0.4@sha256:"
-    "3bb6b6b07effc8d19b7a3e2748f34addf630150d77a21f63684c1dd2375a4c2f"
+    "ghcr.io/the-last-exam/quest-service:v0.0.5@sha256:"
+    "d34afe8e45412ecb62f626172069021eb600fe598ede2a4c4ba100ab57294927"
 )
 ROLES = {
     "tle-dev-quest-api": "quest-api",
