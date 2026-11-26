@@ -156,7 +156,9 @@ spec:
               value: >-
                 ghcr.io/the-last-exam/game-service:v0.0.4@sha256:b2dd8eae8f95d50467df73ee8c4e582f3957c82e806cc5553b88b4500edcbadd
             - name: GAME_POD_PUBLIC_WS_URL
-              value: ws://tle-dev-edge.tle-dev.svc.cluster.local:8080/game/v1/ws
+              # Sent to clients as pod_ws_url, so it must be the player ingress,
+              # not the in-cluster edge Service.
+              value: wss://tle-dev.taildf6cd4.ts.net/game/v1/ws
             # Issue #48 supplies this object before live game-pod acceptance.
             - name: GAME_POD_ENV_CONFIGMAP
               value: tle-dev-game-pod-env
