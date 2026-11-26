@@ -1,5 +1,5 @@
 # WebSocket terminator for the player lobby and assigned game pods.
-# The image digest comes from the v0.0.5 publish-images run 45806100273.
+# The image digest comes from the v0.0.6 publish-images run 45821177224.
 apiVersion: v1
 kind: Service
 metadata:
@@ -43,7 +43,7 @@ spec:
       containers:
         - name: wsterminator
           image: >-
-            ghcr.io/the-last-exam/wsterminator:v0.0.5@sha256:40b30c1033db99fd2105b5c6a3d5dea8532067f485b5f4945e0f7e3588f041c4
+            ghcr.io/the-last-exam/wsterminator:v0.0.6@sha256:511232006dfa671ebf19a2316693e9c076a3b26565a1136c8897c7627d6df7ab
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false

@@ -12,8 +12,8 @@
 # single-writer, RBAC, PDB and network contract differ from this file's
 # scalable service workload pattern.
 #
-# Images: pinned tag@digest from The-Last-Exam/server release v0.0.5
-# (gh run 45806100273's images.json). Every Deployment uses the same
+# Images: pinned tag@digest from The-Last-Exam/server release v0.0.6
+# (gh run 45821177224's images.json). Every Deployment uses the same
 # release so the pinned auth-service and metadata-service JWT public key
 # below (edge-config.yaml's auth-jwt-ed25519-public-key-pem) matches the
 # auth-service private half seeded for that release.
@@ -91,7 +91,7 @@ spec:
       containers:
         - name: auth-service
           image: >-
-            ghcr.io/the-last-exam/auth-service:v0.0.5@sha256:74257a7ce0b2ed7a3e8d33e9103f490612f4b2e959371c2cd6e31d24e30ccbdc
+            ghcr.io/the-last-exam/auth-service:v0.0.6@sha256:f7ad32c2c56d2ff870c48386f6720633bca7964434c91d2fd4c7f003c086e214
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -276,7 +276,7 @@ spec:
       containers:
         - name: lobby-service
           image: >-
-            ghcr.io/the-last-exam/lobby-service:v0.0.5@sha256:d977e8a307946c301974b7375b8a58a05108111b8449d64a57045d6e196eafb9
+            ghcr.io/the-last-exam/lobby-service:v0.0.6@sha256:1f6ecab5314e02cd39d2f9d1865347eb69bf7d161b7e5b4e7a7ea11a651dbbbe
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -424,7 +424,7 @@ spec:
       containers:
         - name: matchmaking-service
           image: >-
-            ghcr.io/the-last-exam/matchmaking-service:v0.0.5@sha256:c4439eae1a37d447d6a77e92eae2ca99dd30251fba120884d6947d5af8cae7a7
+            ghcr.io/the-last-exam/matchmaking-service:v0.0.6@sha256:8c7830fa234257ede7929fb72d14fd31764801a9eec02f42b74712deb48c7806
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -581,7 +581,7 @@ spec:
       containers:
         - name: metadata-service
           image: >-
-            ghcr.io/the-last-exam/metadata-service:v0.0.5@sha256:d0633669e923ca99afa8cd36105dec55a1b113df4881d4a90cc5ccdb111f3b0b
+            ghcr.io/the-last-exam/metadata-service:v0.0.6@sha256:7971666fe62dc497e3184f938f6631dd30e35ae994921a3e4e273815cf12fab4
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -711,7 +711,7 @@ spec:
       containers:
         - name: notification-service
           image: >-
-            ghcr.io/the-last-exam/notification-service:v0.0.5@sha256:2f2e1fc67507e91f629cd275fbb99b5c66c9c14e25f3679bb8ff1fd4dfe8f849
+            ghcr.io/the-last-exam/notification-service:v0.0.6@sha256:c1b4ba86ce28df0ecc7e1e133ac35429e5914deae9ee07b71ac3bf2c28b72deb
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -829,7 +829,7 @@ spec:
       containers:
         - name: player-service
           image: >-
-            ghcr.io/the-last-exam/player-service:v0.0.5@sha256:99fb7c25241261ad7e2c87047e46933a58c8a088a6bb103cb1eaacdf316a0cdb
+            ghcr.io/the-last-exam/player-service:v0.0.6@sha256:4192249dd75159c2effbbb7b8f13422b2a37b689cf05f946fde0e898d3bac075
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -976,7 +976,7 @@ spec:
       containers:
         - name: social-service
           image: >-
-            ghcr.io/the-last-exam/social-service:v0.0.5@sha256:4513792bfb2ad90dfffa5616383202de744a1ec1ad8436c1469e252a64e8610b
+            ghcr.io/the-last-exam/social-service:v0.0.6@sha256:6ba379e473fbc89892dc36423d63cf4f8f727c3c23108c09650bea9e84f16aa8
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false

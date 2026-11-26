@@ -138,7 +138,7 @@ spec:
       containers:
         - name: edge
           image: >-
-            ghcr.io/the-last-exam/api-gateway:v0.0.5@sha256:670b5441c8c082c3cf5e9d3d1af538bfffeb3b5a0deb5c83aa526722eb99e900
+            ghcr.io/the-last-exam/api-gateway:v0.0.6@sha256:f55a1ed67c5ce015cc078e8e25a3b909870d076fc25c790658ea16fc2a01629e
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false

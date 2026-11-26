@@ -119,7 +119,7 @@ spec:
       containers:
         - name: game-master
           image: >-
-            ghcr.io/the-last-exam/game-master:v0.0.5@sha256:f3b4522189a5c0de0b6dac450f6f781912120a4f1d53c4a35be98c3542d3c792
+            ghcr.io/the-last-exam/game-master:v0.0.6@sha256:3f644bf72c65652b8d66eaa6f2dcf807eaf8c4d96b4dc1598499fd889f8c5340
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -154,7 +154,7 @@ spec:
               value: "1"
             - name: GAME_POD_IMAGE
               value: >-
-                ghcr.io/the-last-exam/game-service:v0.0.5@sha256:5fdfa8bdffa258a5f82dd9dcaed0e0db15d344d4fd00f4f6d3026d61b9dea677
+                ghcr.io/the-last-exam/game-service:v0.0.6@sha256:82f92f56560a73e063a203eda48fe0ba19659eaf94f7c9f33f52481b5abccbdd
             - name: GAME_POD_PUBLIC_WS_URL
               # Sent to clients as pod_ws_url, so it must be the player ingress,
               # not the in-cluster edge Service.
