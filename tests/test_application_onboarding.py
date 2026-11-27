@@ -693,7 +693,7 @@ class PenpotRegistrationTests(unittest.TestCase):
         "cert-manager", "vault", "tailscale", "vault-secrets-operator-system",
         "databases", "apps", "monitoring", "logging", "keycloak", "portal",
         "tle-dev", "tle-admin-dev", "egress", "agents", "penpot",
-        "hermes-dashboard",
+        "hermes-dashboard", "arc-systems", "arc-runners", "arc-publish",
     ]
 
     # Each digest bound to the image it belongs to. Bare 64-hex substrings

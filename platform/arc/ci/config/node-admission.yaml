@@ -1,0 +1,34 @@
+# Rejects any pod in arc-runners that is not pinned to the dedicated runner node.
+# The hook template and the scale-set template both set the nodeSelector;
+# this makes a missing one a hard failure instead of a silent placement on
+# the control-plane node.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: arc-runners-dedicated-node
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+  validations:
+    - expression: >-
+        has(object.spec.nodeSelector) &&
+        'homelab.io/runner' in object.spec.nodeSelector &&
+        object.spec.nodeSelector['homelab.io/runner'] == 'true'
+      message: "pods in arc-runners must set nodeSelector homelab.io/runner=true"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: arc-runners-dedicated-node
+spec:
+  policyName: arc-runners-dedicated-node
+  validationActions: ["Deny"]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: arc-runners

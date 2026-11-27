@@ -1,0 +1,61 @@
+# Identities in arc-publish.
+#
+# `arc-runner` belongs to the runner pod ONLY. The ARC kubernetes container
+# hooks need it to create, exec into and delete the job pod, so it holds a
+# Role -- but that Role is deliberately NOT the one the chart would generate
+# (containerMode.type=kubernetes): that one grants get/list on Secrets, which
+# would let the runner container read the GitHub App key delivered to this
+# namespace for the controller. Here Secrets are create/delete only.
+#
+# Job pods run as the namespace `default` ServiceAccount, which has no
+# Role and no mounted token (hook template: automountServiceAccountToken
+# false, belt and braces).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: arc-runner
+  namespace: arc-publish
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: arc-publish
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: arc-runner
+  namespace: arc-publish
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["get", "create"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: arc-runner
+  namespace: arc-publish
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: arc-runner
+subjects:
+  - kind: ServiceAccount
+    name: arc-runner
+    namespace: arc-publish

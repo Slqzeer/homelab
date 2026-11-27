@@ -1,0 +1,28 @@
+# gha-runner-scale-set-controller 0.15.1. One controller serves both scale sets.
+#
+# fullnameOverride pins the ServiceAccount name, which the scale sets' manager
+# RoleBindings reference (controllerServiceAccount in each scale set's values).
+fullnameOverride: arc-gha-rs-controller
+
+# Controller and listeners reach GitHub only through the egress proxy.
+env:
+  - name: HTTPS_PROXY
+    value: http://egress-proxy.egress.svc.cluster.local:3128
+  - name: NO_PROXY
+    value: .svc,.cluster.local,10.43.0.1,192.168.1.201
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi

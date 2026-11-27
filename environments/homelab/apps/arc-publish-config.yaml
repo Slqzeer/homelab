@@ -1,0 +1,29 @@
+# Fence, identities, GitHub App credential and node pinning for the `publish`
+# runner scale set (platform/arc/publish/config).
+#
+# Wave 25: after the controller (24) and the VSO config (22). The credential
+# is only readable once a human has run the Vault ceremony (see
+# docs/runbooks/arc-runners.md); until then the VaultStaticSecret is not
+# healthy and the scale set (26) does not start.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: arc-publish-config
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "25"
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:Slqzeer/homelab.git
+    targetRevision: main
+    path: platform/arc/publish/config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: arc-publish
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
