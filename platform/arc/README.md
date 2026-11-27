@@ -1,7 +1,7 @@
 # Actions Runner Controller (CI runners)
 
 Ephemeral GitHub Actions runners for the `The-Last-Exam` organization, run as
-pods on a **dedicated node**. Replaces the host-installed organization
+pods on a runner-labelled node (single node for now). Replaces the host-installed organization
 runners. Tracks issue #113 (homelab side of The-Last-Exam/server#248).
 
 | Piece | Where |
@@ -22,11 +22,15 @@ repo sets `vars.CI_RUNNER`).
   workflow's `container:`, enforced by `ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER`)
   with service containers (Postgres, Valkey, NATS) in the same pod. No Docker
   daemon, no host socket. Both pods are deleted after the job.
-- **Dedicated node.** Every pod in the runner namespaces carries
-  `nodeSelector homelab.io/runner=true` and tolerates the taint
-  `homelab.io/runner=true:NoSchedule`. A `ValidatingAdmissionPolicy`
-  (`config/node-admission.yaml`) rejects any pod there without the selector.
-  Nothing else tolerates the taint, so only runner pods land on the node.
+- **Node placement (single node for now).** Every pod in the runner
+  namespaces carries `nodeSelector homelab.io/runner=true`, and a
+  `ValidatingAdmissionPolicy` (`config/node-admission.yaml`) rejects any pod
+  there without it. The cluster has one node, which carries that label, so
+  runners share it with the platform: **there is no node-level isolation yet**.
+  Mitigations: `maxRunners: 1` per set and memory limits on job pods. When a
+  second machine exists, join it with the label AND the taint
+  `homelab.io/runner=true:NoSchedule` (pods already tolerate it), then
+  remove the label from the control-plane node; no manifest change needed.
 - **Network.** Default-deny both ways. Every pod may reach DNS and the egress
   proxy only; Squid allowlists GitHub, GHCR and the package registries
   (`platform/egress-proxy`). Only the *runner* pod (`homelab.io/arc-role=runner`)
@@ -55,7 +59,7 @@ repo sets `vars.CI_RUNNER`).
 
 ## Prerequisites outside Git
 
-1. The dedicated node joined and tainted (runbook, "Dedicated node").
+1. The node labelled `homelab.io/runner=true` (runbook, "Dedicated node").
 2. Argo CD knows the OCI registry (`ghcr.io/actions/actions-runner-controller-charts`,
    `type: helm`, `enableOCI: true`) -- a repository entry, like the Git
    credentials, not stored here.
@@ -70,8 +74,9 @@ decommission step.
 
 ## Open points, resolved here
 
-- **Node:** a VM or machine joined as a k3s agent; the cluster is single-node
-  today, so this is a provisioning step, not a manifest.
+- **Node:** the existing single node, labelled. A VM on it was rejected (RAM:
+  15 GiB total, ~4 GiB available). A separate machine remains the target for
+  the "dedicated node" criterion of #113.
 - **Cache:** GitHub Actions cache (`actions/cache`, `Swatinem/rust-cache`)
   through the proxy (`.blob.core.windows.net` is allowlisted). No shared
   volume: it would let one job poison the next.

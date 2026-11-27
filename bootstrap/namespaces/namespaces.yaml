@@ -221,7 +221,7 @@ metadata:
 # warned at restricted: job and service container images (rust, golang,
 # postgres, valkey, nats) start as root, which restricted refuses. Baseline
 # still forbids privileged pods, hostPath, host namespaces and added
-# capabilities. Runner pods only run on the dedicated node (platform/arc).
+# capabilities. Runner pods are pinned by label to the runner node (platform/arc).
 apiVersion: v1
 kind: Namespace
 metadata:

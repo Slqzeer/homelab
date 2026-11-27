@@ -3,30 +3,23 @@
 Design and isolation model: [`platform/arc/README.md`](../../platform/arc/README.md).
 Manifests are reconciled by Argo CD; the steps below are the human ceremonies.
 
-## Dedicated node
+## Node placement
 
-The runner pods only schedule on a node labelled `homelab.io/runner=true` and
-tainted `homelab.io/runner=true:NoSchedule`. Join a machine or VM as a k3s
-agent with both set at join time, so there is no window where it takes other
-workloads:
+The cluster is single-node and has no RAM to spare for a VM, so runner pods
+run on the existing node, selected by label. Label it once:
 
 ```bash
-curl -sfL https://get.k3s.io | K3S_URL=https://192.168.1.201:6443 K3S_TOKEN=<node-token> \
-  sh -s - agent \
-  --node-label homelab.io/runner=true \
-  --node-taint homelab.io/runner=true:NoSchedule
-```
-
-The node-token is read on the server from `/var/lib/rancher/k3s/server/node-token`
-(this cluster's data dir is `/srv/kubernetes/data`). Verify:
-
-```bash
+sg k3s-admin -c 'kubectl label node slqzeer-ms7c56 homelab.io/runner=true'
 kubectl get nodes -L homelab.io/runner
-kubectl describe node <node> | grep -A1 Taints
 ```
 
-Allow 6443 from the node to the server, and keep the node off the tailnet
-ACL groups that reach platform services.
+Runner pods share the node with the platform; `maxRunners: 1` per set and the
+job pod memory limit (6 GiB) bound the impact. **Moving to a dedicated
+machine later:** join it as a k3s agent with
+`--node-label homelab.io/runner=true --node-taint homelab.io/runner=true:NoSchedule`
+(token: `/srv/kubernetes/data/server/node-token` on the server), then
+`kubectl label node slqzeer-ms7c56 homelab.io/runner-`. Pods already tolerate the
+taint, so no manifest changes.
 
 ## GitHub App and Vault
 
@@ -78,7 +71,7 @@ needs a writable `HOME`, set `HOME=/tmp` in the workflow.
 ## Rebuilding the runners
 
 Everything is declarative, so a rebuild is: restore the cluster (see
-`docs/deployment.md`), join the dedicated node, re-run the Vault ceremony
+`docs/deployment.md`), label the runner node, re-run the Vault ceremony
 (the key survives in Vault; only the policy/role need re-applying), and let
 Argo CD sync `arc-*`. Bump the runner image by digest in
 `platform/arc/{ci,publish}/values.yaml`
@@ -92,8 +85,8 @@ kubectl auth can-i get secret/arc-github-app -n arc-runners \
   --as=system:serviceaccount:arc-runners:arc-runner          # no
 kubectl auth can-i --list -n arc-runners \
   --as=system:serviceaccount:arc-runners:default             # no verbs
-# Pods only on the dedicated node
-kubectl get pods -A -o wide --field-selector spec.nodeName=<node>
+# Runner pods carry the nodeSelector (admission policy rejects any without it)
+kubectl -n arc-runners get pods -o wide
 # Ephemeral: no runner/job pods remain after the queue drains
 kubectl -n arc-runners get pods
 ```
