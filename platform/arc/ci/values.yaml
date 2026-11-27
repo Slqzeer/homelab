@@ -1,0 +1,95 @@
+# Runner scale set `ci` (build, lint and test jobs).
+# Workflows select it with `runs-on: ci` (server repo: vars.CI_RUNNER).
+githubConfigUrl: https://github.com/The-Last-Exam
+githubConfigSecret: arc-github-app
+runnerScaleSetName: ci
+runnerGroup: "default"
+minRunners: 0
+maxRunners: 4
+
+# One origin for the proxy: runner, listener and controller of this set.
+proxy:
+  https:
+    url: http://egress-proxy.egress.svc.cluster.local:3128
+  noProxy:
+    - .svc
+    - .cluster.local
+    - 10.43.0.1
+    - 192.168.1.201
+
+# containerMode is left empty on purpose: the chart's kubernetes mode would
+# generate a Role with get/list on Secrets (see config/rbac.yaml). Its
+# settings are reproduced in the template below instead.
+template:
+  metadata:
+    labels:
+      homelab.io/arc-role: runner
+  spec:
+    serviceAccountName: arc-runner
+    automountServiceAccountToken: true
+    enableServiceLinks: false
+    restartPolicy: Never
+    nodeSelector:
+      homelab.io/runner: "true"
+    tolerations:
+      - key: homelab.io/runner
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1001
+      fsGroup: 1001
+      seccompProfile:
+        type: RuntimeDefault
+    containers:
+      - name: runner
+        # Upstream runner image; user code never runs in it (the hooks run
+        # every step in the job pod). Bump by digest, see platform/arc/README.md.
+        image: >-
+          ghcr.io/actions/actions-runner:2.338.2@sha256:6d0b2d80d80f143f77dcb676e50920100bbb547e39e883454d57f45ab8c31300
+        command: ["/home/runner/run.sh"]
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        env:
+          - name: ACTIONS_RUNNER_CONTAINER_HOOKS
+            value: /home/runner/k8s/index.js
+          - name: ACTIONS_RUNNER_POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
+            value: "true"
+          - name: ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE
+            value: /home/runner/pod-template/content
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            memory: 1Gi
+        volumeMounts:
+          - name: work
+            mountPath: /home/runner/_work
+          - name: hook-template
+            mountPath: /home/runner/pod-template
+            readOnly: true
+    volumes:
+      - name: work
+        ephemeral:
+          volumeClaimTemplate:
+            spec:
+              accessModes: ["ReadWriteOnce"]
+              storageClassName: local-path
+              resources:
+                requests:
+                  storage: 10Gi
+      - name: hook-template
+        configMap:
+          name: arc-hook-template
+
+controllerServiceAccount:
+  namespace: arc-systems
+  name: arc-gha-rs-controller

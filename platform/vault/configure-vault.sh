@@ -203,6 +203,26 @@ vault write auth/kubernetes/role/vso-ghcr \
     token_policies=vso-ghcr-read \
     ttl=1h
 
+echo "==> policy vso-arc-github-app-read"
+# The data/ segment is REQUIRED -- see the note on vso-canary-read above.
+vault policy write vso-arc-github-app-read - <<'POLICY'
+path "homelab/data/arc-github-app" {
+  capabilities = ["read"]
+}
+POLICY
+
+echo "==> role vso-arc"
+# bound_service_account_names and namespaces must match
+# platform/arc/{ci,publish}/config/vault-secrets.yaml; audience must match the
+# VaultAuth objects there. The VALUE (GitHub App id, installation id, private
+# key) is not generated here: see docs/runbooks/arc-runners.md.
+vault write auth/kubernetes/role/vso-arc \
+    bound_service_account_names=arc-github-app \
+    bound_service_account_namespaces=arc-runners,arc-publish \
+    audience=vault \
+    token_policies=vso-arc-github-app-read \
+    ttl=1h
+
 echo "==> seeding homelab/grafana-cloud"
 if vault kv get homelab/grafana-cloud >/dev/null 2>&1; then
   echo "    already present, leaving the value alone"

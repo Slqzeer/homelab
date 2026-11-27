@@ -36,6 +36,9 @@ jobs:
       - name: Validate database tailnet services
         run: python3 -m unittest -v tests.test_database_tailnet_services
 
+      - name: Validate CI runner isolation
+        run: python3 -m unittest -v tests.test_arc_runners
+
       - name: Validate metric allowlist on every scrape
         run: python3 -m unittest -v tests.test_metric_allowlist
 

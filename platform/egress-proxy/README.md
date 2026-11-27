@@ -12,7 +12,7 @@ them inside the onboarding contract's "no 0.0.0.0/0" rule.
 | Endpoint | `http://egress-proxy.egress.svc.cluster.local:3128` |
 | Allowed | `CONNECT` to port 443 of hosts in `allowed-domains.txt` (`config/configmap.yaml`); everything else is denied. No caching, no TLS interception |
 | Memory | ~33 MiB steady, ~36 MiB peak at start (limit 128Mi; needs `max_filedescriptors`, see configmap) |
-| Clients | none (OmniRoute, the only client, was retired; default-deny admits nothing) |
+| Clients | the ARC namespaces `arc-systems`, `arc-runners`, `arc-publish` (`egress-proxy-clients`; see `platform/arc`) |
 
 Operations:
 

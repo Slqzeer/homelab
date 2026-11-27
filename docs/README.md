@@ -10,7 +10,7 @@ conventions and project discovery remain in
 - [Deployment and reconciliation](deployment.md)
 - [Application onboarding](application-onboarding.md)
 - [Troubleshooting](troubleshooting.md)
-- [Runbooks](runbooks/)
+- [Runbooks](runbooks/), including [CI runners](runbooks/arc-runners.md)
 
 Component-specific details live beside their manifests under `bootstrap/`,
 `infrastructure/`, `platform/`, `observability/`, and `apps/`.

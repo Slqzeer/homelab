@@ -1,0 +1,46 @@
+# Pod template the container hooks merge into every job pod they create
+# (ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE on the runner container). This is
+# what keeps job pods on the dedicated node, tokenless and proxied.
+#
+# The container named `$job` is the workflow's `container:`; service
+# containers are merged separately and inherit the pod-level settings.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: arc-hook-template
+  namespace: arc-runners
+data:
+  content: |
+    metadata:
+      labels:
+        homelab.io/arc-role: job
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      nodeSelector:
+        homelab.io/runner: "true"
+      tolerations:
+        - key: homelab.io/runner
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: $job
+          env:
+            - name: HTTPS_PROXY
+              value: http://egress-proxy.egress.svc.cluster.local:3128
+            - name: https_proxy
+              value: http://egress-proxy.egress.svc.cluster.local:3128
+            - name: NO_PROXY
+              value: ".svc,.cluster.local,10.43.0.1,192.168.1.201"
+            - name: no_proxy
+              value: ".svc,.cluster.local,10.43.0.1,192.168.1.201"
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              memory: 8Gi

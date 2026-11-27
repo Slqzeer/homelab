@@ -94,3 +94,18 @@ data:
     .opencode.ai
     # OpenRouter
     openrouter.ai
+    # GitHub Actions runners (platform/arc). github.com and api.github.com are
+    # listed under Copilot above.
+    ghcr.io
+    .githubusercontent.com
+    .blob.core.windows.net
+    # Package registries the CI toolchains use
+    crates.io
+    index.crates.io
+    static.crates.io
+    static.rust-lang.org
+    proxy.golang.org
+    sum.golang.org
+    registry.npmjs.org
+    pypi.org
+    files.pythonhosted.org

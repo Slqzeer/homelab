@@ -1,0 +1,74 @@
+# Fence around arc-publish. Default-deny both directions, then:
+#   every pod    -> DNS (kube-system)
+#   every pod    -> egress proxy 3128 (the only route to GitHub, the registry
+#                   and the package registries; Squid allowlists the domains)
+#   RUNNER pod   -> Kubernetes API server (the container hooks need it);
+#                   job pods (homelab.io/arc-role=job) get NO API access
+# Nothing may reach Vault, databases or any other namespace, and nothing may
+# enter. The API rule lists the ClusterIP and the node address because it is
+# not guaranteed which side of the service DNAT the CNI evaluates.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: arc-publish
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-and-proxy
+  namespace: arc-publish
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: egress
+          podSelector:
+            matchLabels:
+              app: egress-proxy
+      ports:
+        - protocol: TCP
+          port: 3128
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: runner-kubernetes-api
+  namespace: arc-publish
+spec:
+  podSelector:
+    matchLabels:
+      homelab.io/arc-role: runner
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 10.43.0.1/32
+      ports:
+        - protocol: TCP
+          port: 443
+    - to:
+        - ipBlock:
+            cidr: 192.168.1.201/32
+      ports:
+        - protocol: TCP
+          port: 6443

@@ -1,0 +1,38 @@
+# Actions Runner Controller (platform/arc): the controller for the `ci` and
+# `publish` runner scale sets.
+#
+# Wave 24: needs the egress proxy (20) for GitHub access. Its listeners are
+# created by the scale sets at wave 26, which also need the GitHub App
+# credential from Vault (ceremony: docs/runbooks/arc-runners.md).
+#
+# The chart is an OCI artifact. Argo CD must have the registry declared as an
+# OCI Helm repository (enableOCI) -- see platform/arc/README.md.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: arc-controller
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "24"
+spec:
+  project: default
+  sources:
+    - repoURL: ghcr.io/actions/actions-runner-controller-charts
+      chart: gha-runner-scale-set-controller
+      targetRevision: 0.15.1
+      helm:
+        releaseName: arc
+        valueFiles:
+          - $values/platform/arc/controller/values.yaml
+    - repoURL: git@github.com:Slqzeer/homelab.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: arc-systems
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
